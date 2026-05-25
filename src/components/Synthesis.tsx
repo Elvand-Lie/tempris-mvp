@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Activity, ShieldAlert, CheckCircle, AlertTriangle, XCircle, TrendingUp, Bell, Target, Shield, FileText, MessageSquare, Database } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 export default function Synthesis() {
   const [data, setData] = useState<any>(null);
   const [kevStats, setKevStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
     Promise.all([
@@ -36,7 +38,10 @@ export default function Synthesis() {
           <h1 className="text-2xl font-bold tracking-tight">SYNTHESIS Dashboard</h1>
           <p className="text-text-muted mt-1">Master view of Tempris CTEM platform status.</p>
         </div>
-        <button className="flex items-center gap-2 bg-primary-500/10 text-primary-400 px-4 py-2 rounded-lg border border-primary-500/20 hover:bg-primary-500/20 transition-colors text-sm font-medium">
+        <button 
+          onClick={() => navigate('/spotlight')}
+          className="flex items-center gap-2 bg-primary-500/10 text-primary-400 px-4 py-2 rounded-lg border border-primary-500/20 hover:bg-primary-500/20 transition-colors text-sm font-medium"
+        >
           <ShieldAlert size={16} />
           Generate Executive Report
         </button>
@@ -141,7 +146,12 @@ export default function Synthesis() {
                   </div>
                   <p className="text-sm font-medium text-text-main group-hover:text-primary-50 transition-colors">{alert.message}</p>
                 </div>
-                <button className="text-xs text-primary-500 font-medium opacity-0 group-hover:opacity-100 transition-opacity mt-5">Investigate →</button>
+                <button 
+                  onClick={() => navigate('/scout')}
+                  className="text-xs text-primary-500 font-medium opacity-0 group-hover:opacity-100 transition-opacity mt-5"
+                >
+                  Investigate →
+                </button>
               </div>
             ))}
           </div>

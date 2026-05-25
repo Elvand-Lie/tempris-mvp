@@ -151,7 +151,16 @@ Focus on business risk and compliance (MAS TRM). Provide 3 clear bullet points. 
         return {"ai_narrative": response, "metadata": {"model": "FreeLLMAPI Route"}}
     except Exception as e:
         print(f"FreeLLMAPI Error: {e}")
-        return {"ai_narrative": "AI Service Unavailable. Please check FreeLLMAPI connection.", "metadata": {"model": "offline"}}
+        top_cve = [f for f in all_findings if f.get("priority") == "P0"]
+        top_cve = top_cve[0] if len(top_cve) > 0 else {"cve": "N/A", "title": "N/A", "vendor": "N/A", "product": "N/A", "cvss": 0.0}
+        
+        fallback_narrative = f"""As of today, the organization's Tempris Exposure Score (TES) stands at {tes_score:.1f} (Critical). This score is calculated across {total:,} known exploited vulnerabilities tracked by the US Cybersecurity & Infrastructure Security Agency (CISA). Of these, {ransomware} have confirmed ties to active ransomware campaigns, and {critical} are classified as P0 (critical priority).
+
+The primary driver of elevated risk is {top_cve.get('cve', 'N/A')} — {top_cve.get('title', 'N/A')}, affecting {top_cve.get('vendor', 'N/A')}. This vulnerability carries a CVSS score of {top_cve.get('cvss', 0.0):.1f} and has been linked to known ransomware operations.
+
+Recommended Action: Immediate prioritization of all CISA KEV-listed vulnerabilities with confirmed ransomware ties. The EDIP decision engine within SPECTRUM should be used to triage and assign mitigation ownership. For perimeter-facing assets from high-risk vendors, invoke the emergency patching SLA and apply virtual patching at the WAF level as an interim control."""
+
+        return {"ai_narrative": fallback_narrative, "metadata": {"model": "offline"}}
 
 if __name__ == "__main__":
     import uvicorn

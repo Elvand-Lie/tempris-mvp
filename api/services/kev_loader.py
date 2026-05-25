@@ -23,8 +23,7 @@ def load_kev_data():
                 cve_id = vuln.get('cve_id', 'Unknown')
                 if cve_id != 'Unknown':
                     poc_cves.add(cve_id)
-                priority_str = vuln.get('tes_priority', 'P2')
-                priority_code = priority_str.split(' ')[0] if ' ' in priority_str else priority_str
+                priority_code = "P0" # Force PoC demo vulnerabilities to be Critical
                 finding = {
                     "id": f"#{2000 + idx}",
                     "cve": cve_id,

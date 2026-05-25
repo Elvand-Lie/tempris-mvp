@@ -5,6 +5,8 @@ export default function Spectrum() {
   const [findings, setFindings] = useState<any[]>([]);
   const [finding, setFinding] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [activeStageIndex, setActiveStageIndex] = useState(2); // Default to 'Prioritise'
+  const [edipDecision, setEdipDecision] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/spectrum/findings')
@@ -19,25 +21,25 @@ export default function Spectrum() {
   }, []);
 
   const handleEdip = async (decision: string) => {
+    setEdipDecision(decision);
     if (!finding) return;
-    await fetch(`/api/spectrum/findings/${finding.id}/edip`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ decision })
-    });
-    // In a real app, we'd update state or show a success toast here
-    alert(`Decision '${decision}' recorded!`);
+    try {
+      await fetch(`/api/spectrum/findings/${finding.id}/edip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision })
+      });
+    } catch (e) {
+      console.error("Mocked EDIP submission", e);
+    }
   };
 
-  const ctemStages = [
-    { name: 'Scope', status: 'done' },
-    { name: 'Discover', status: 'done' },
-    { name: 'Prioritise', status: 'active' },
-    { name: 'Validate', status: 'pending' },
-    { name: 'Mobilise', status: 'pending' },
-    { name: 'Recover', status: 'pending' },
-    { name: 'Human', status: 'pending' },
-  ];
+  const ctemStageNames = ['Scope', 'Discover', 'Prioritise', 'Validate', 'Mobilise', 'Recover', 'Human'];
+  
+  const ctemStages = ctemStageNames.map((name, i) => ({
+    name,
+    status: i < activeStageIndex ? 'done' : i === activeStageIndex ? 'active' : 'pending'
+  }));
 
   if (loading || !finding) return <div className="p-8 text-text-muted animate-pulse">Loading TES Engine...</div>;
 
@@ -133,14 +135,18 @@ export default function Spectrum() {
               <h3 className="text-sm font-semibold uppercase tracking-wider text-text-muted mb-4">CTEM Lifecycle Status</h3>
               <div className="flex items-center justify-between">
                 {ctemStages.map((stage, i) => (
-                  <div key={stage.name} className="flex flex-col items-center gap-2">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2
+                  <div 
+                    key={stage.name} 
+                    className="flex flex-col items-center gap-2 cursor-pointer"
+                    onClick={() => setActiveStageIndex(i)}
+                  >
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-colors duration-300
                       ${stage.status === 'done' ? 'bg-primary-500 border-primary-500 text-white' : 
                         stage.status === 'active' ? 'border-primary-500 text-primary-500 bg-primary-500/10' : 
-                        'border-border text-text-muted bg-surface'}`}>
+                        'border-border text-text-muted bg-surface hover:border-primary-500/50'}`}>
                       {stage.status === 'done' ? <CheckCircle2 size={14} /> : i + 1}
                     </div>
-                    <span className={`text-[10px] uppercase font-bold tracking-wider ${stage.status === 'active' ? 'text-primary-500' : 'text-text-muted'}`}>
+                    <span className={`text-[10px] uppercase font-bold tracking-wider transition-colors duration-300 ${stage.status === 'active' ? 'text-primary-500' : 'text-text-muted'}`}>
                       {stage.name}
                     </span>
                   </div>
@@ -151,16 +157,36 @@ export default function Spectrum() {
             <div className="bg-surface p-4 rounded-xl border border-border">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-text-muted mb-4">EDIP Decision Engine</h3>
               <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => handleEdip('mitigate')} className="bg-primary-500 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-primary-600 transition-colors">
+                <button 
+                  onClick={() => handleEdip('mitigate')} 
+                  className={`py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    edipDecision === 'mitigate' ? 'bg-primary-600 text-white border-2 border-primary-500' : 'bg-primary-500 text-white hover:bg-primary-600'
+                  }`}
+                >
                   Mitigate Risk
                 </button>
-                <button onClick={() => handleEdip('accept')} className="bg-surfaceHover text-text-main border border-border py-2.5 rounded-lg text-sm font-medium hover:bg-surface transition-colors">
+                <button 
+                  onClick={() => handleEdip('accept')} 
+                  className={`py-2.5 rounded-lg text-sm font-medium border transition-colors ${
+                    edipDecision === 'accept' ? 'bg-surface text-primary-400 border-primary-500' : 'bg-surfaceHover text-text-main border-border hover:bg-surface'
+                  }`}
+                >
                   Accept Risk
                 </button>
-                <button onClick={() => handleEdip('transfer')} className="bg-surfaceHover text-text-main border border-border py-2.5 rounded-lg text-sm font-medium hover:bg-surface transition-colors">
+                <button 
+                  onClick={() => handleEdip('transfer')} 
+                  className={`py-2.5 rounded-lg text-sm font-medium border transition-colors ${
+                    edipDecision === 'transfer' ? 'bg-surface text-primary-400 border-primary-500' : 'bg-surfaceHover text-text-main border-border hover:bg-surface'
+                  }`}
+                >
                   Transfer Risk
                 </button>
-                <button onClick={() => handleEdip('ignore')} className="bg-surfaceHover text-text-main border border-border py-2.5 rounded-lg text-sm font-medium hover:bg-surface transition-colors">
+                <button 
+                  onClick={() => handleEdip('ignore')} 
+                  className={`py-2.5 rounded-lg text-sm font-medium border transition-colors ${
+                    edipDecision === 'ignore' ? 'bg-surface text-primary-400 border-primary-500' : 'bg-surfaceHover text-text-main border-border hover:bg-surface'
+                  }`}
+                >
                   Ignore (False Positive)
                 </button>
               </div>

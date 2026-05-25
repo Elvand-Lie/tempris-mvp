@@ -29,7 +29,7 @@ def get_dashboard_data():
         alerts.append({
             "id": idx + 1,
             "module": "SCOUT",
-            "message": f"New CVE {f['cve']} detected on {f['vendor']} {f['product']}.",
+            "message": f"New critical vulnerability {f['cve']} detected on {f['vendor']}.",
             "time": "Just now",
             "type": "danger" if f["ransomware"] else "warning"
         })
