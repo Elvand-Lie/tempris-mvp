@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Activity, ShieldAlert, CheckCircle, AlertTriangle, XCircle, TrendingUp, Bell, Target, Shield, FileText, MessageSquare, Database, AlertOctagon } from 'lucide-react';
+import { Activity, ShieldAlert, CheckCircle, AlertTriangle, XCircle, TrendingUp, Bell, Target, Shield, FileText, MessageSquare, Database } from 'lucide-react';
 
 export default function Synthesis() {
   const [data, setData] = useState<any>(null);

@@ -1,4 +1,4 @@
-import { Target, Search, Filter, AlertOctagon, CheckCircle2, ChevronRight, Loader2, ChevronLeft } from 'lucide-react';
+import { Target, Search, AlertOctagon, CheckCircle2, ChevronRight, Loader2, ChevronLeft } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 export default function Scout() {
