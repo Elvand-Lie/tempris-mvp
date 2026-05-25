@@ -22,7 +22,7 @@ def chat_completion(system_prompt: str, user_message: str, max_tokens: int = 500
             "max_tokens": max_tokens,
             "temperature": 0.7
         },
-        timeout=5
+        timeout=90
     )
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"]
