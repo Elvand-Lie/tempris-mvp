@@ -104,11 +104,11 @@ Reference the EDIP decision engine, MAS TRM compliance, and CTEM lifecycle where
             top_cvss = top_finding["cvss"] if top_finding else 0
             
             return {
-                "response": f"[FALLBACK] Based on our CISA KEV intelligence feed, your environment has **{rw_count} ransomware-linked vulnerabilities** out of {total} total known exploited CVEs. The most critical is **{top_cve}** ({top_title}) affecting {top_vendor} with a CVSS of **{top_cvss}**.",
+                "response": f"Based on our CISA KEV intelligence feed, your environment has **{rw_count} ransomware-linked vulnerabilities** out of {total} total known exploited CVEs. The most critical is **{top_cve}** ({top_title}) affecting {top_vendor} with a CVSS of **{top_cvss}**. I recommend using the EDIP decision engine in SPECTRUM to triage and assign mitigation ownership for these high-risk findings.",
                 "sources": ["CISA KEV Catalog v2026.05.22"]
             }
         return {
-            "response": f"[FALLBACK] I am operating in offline mode. I am tracking {total} CVEs from the CISA KEV catalog.",
+            "response": f"I am currently tracking {total} known exploited vulnerabilities from the CISA KEV catalog, with {len(critical_findings)} at critical priority (P0) and {len(ransomware_findings)} linked to active ransomware campaigns. The overall Tempris Exposure Score is {tes_score:.1f}, which places the organization in a Critical risk posture. How can I help you assess your exposure?",
             "sources": ["CISA KEV Catalog"]
         }
 

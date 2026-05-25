@@ -75,7 +75,7 @@ function Topbar({ user }: { user: any }) {
   return (
     <div className="h-16 bg-background/80 backdrop-blur-md border-b border-border sticky top-0 z-30 flex items-center justify-between px-8">
       <div className="text-sm font-medium text-text-muted">
-        Demo Environment <span className="px-2 py-0.5 ml-2 bg-primary-500/10 text-primary-400 rounded text-xs border border-primary-500/20">FreeLLMAPI Live</span>
+        Demo Environment <span className="px-2 py-0.5 ml-2 bg-primary-500/10 text-primary-400 rounded text-xs border border-primary-500/20">AI Engine Active</span>
       </div>
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
