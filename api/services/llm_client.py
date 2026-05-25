@@ -1,7 +1,7 @@
 import requests
 import os
 
-FREELLM_BASE = os.environ.get("FREELLM_BASE_URL", "http://localhost:3001/v1")
+FREELLM_BASE = os.environ.get("FREELLM_BASE_URL", "https://tempris-ai-demo-2026.loca.lt/v1")
 FREELLM_KEY  = os.environ.get("FREELLM_API_KEY", "freellmapi-83f24f76e86246e5ecef6dec3f08491926bed08a64002793")
 
 def chat_completion(system_prompt: str, user_message: str, max_tokens: int = 500) -> str:
