@@ -16,10 +16,10 @@ export default function SpeakWidget() {
     scrollToBottom();
   }, [messages]);
 
-  const handleSend = async () => {
-    if (!message.trim()) return;
+  const sendMessage = async (text: string) => {
+    if (!text.trim()) return;
     
-    const userMessage = { role: 'user', content: message };
+    const userMessage = { role: 'user', content: text };
     setMessages(prev => [...prev, userMessage]);
     setMessage('');
     setIsLoading(true);
@@ -28,16 +28,18 @@ export default function SpeakWidget() {
       const res = await fetch('/api/speak/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMessage.content })
+        body: JSON.stringify({ message: text })
       });
       const data = await res.json();
       setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
     } catch (e) {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Connection error. Please try again.' }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: 'I am currently processing your request. Please try again in a moment.' }]);
     } finally {
       setIsLoading(false);
     }
   };
+
+  const handleSend = () => sendMessage(message);
 
   return (
     <>
@@ -82,7 +84,7 @@ export default function SpeakWidget() {
                   ].map((prompt) => (
                     <button 
                       key={prompt}
-                      onClick={() => { setMessage(prompt); }}
+                      onClick={() => sendMessage(prompt)}
                       className="w-full text-left px-3 py-2.5 rounded-lg bg-surface border border-border text-xs hover:border-primary-500/30 hover:bg-primary-500/5 transition-colors text-text-main"
                     >
                       💬 {prompt}

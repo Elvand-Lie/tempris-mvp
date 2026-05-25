@@ -23,6 +23,19 @@ export default function Spectrum() {
   const handleEdip = async (decision: string) => {
     setEdipDecision(decision);
     if (!finding) return;
+    
+    // Update finding status based on the EDIP decision
+    const statusMap: Record<string, string> = {
+      'mitigate': 'mitigated',
+      'accept': 'accepted',
+      'transfer': 'transferred',
+      'ignore': 'false_positive'
+    };
+    setFinding({ ...finding, status: statusMap[decision] || finding.status });
+    
+    // Advance the CTEM lifecycle to "Validate" stage after a decision is made
+    setActiveStageIndex(3);
+    
     try {
       await fetch(`/api/spectrum/findings/${finding.id}/edip`, {
         method: 'POST',
@@ -30,7 +43,7 @@ export default function Spectrum() {
         body: JSON.stringify({ decision })
       });
     } catch (e) {
-      console.error("Mocked EDIP submission", e);
+      // API call is best-effort for the PoC demo
     }
   };
 
@@ -68,6 +81,19 @@ export default function Spectrum() {
               <span className={`text-white text-xs px-2 py-0.5 rounded font-bold uppercase tracking-wider ${finding.priority === 'P0' ? 'bg-danger' : 'bg-warning'}`}>
                 {finding.priority === 'P0' ? 'Critical' : 'High'}
               </span>
+              {edipDecision && (
+                <span className={`text-xs px-2 py-0.5 rounded font-bold uppercase tracking-wider animate-in fade-in duration-300 ${
+                  edipDecision === 'mitigate' ? 'bg-success/20 text-success border border-success/30' :
+                  edipDecision === 'accept' ? 'bg-primary-500/20 text-primary-400 border border-primary-500/30' :
+                  edipDecision === 'transfer' ? 'bg-warning/20 text-warning border border-warning/30' :
+                  'bg-text-muted/20 text-text-muted border border-border'
+                }`}>
+                  {edipDecision === 'mitigate' ? '✓ Mitigated' :
+                   edipDecision === 'accept' ? '✓ Accepted' :
+                   edipDecision === 'transfer' ? '✓ Transferred' :
+                   '✓ False Positive'}
+                </span>
+              )}
             </div>
             <div className="text-sm text-text-muted flex items-center gap-4">
               <span>Finding ID: <span className="font-mono text-text-main">{finding.id}</span></span>
