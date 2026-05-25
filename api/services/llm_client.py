@@ -12,7 +12,11 @@ def chat_completion(system_prompt: str, user_message: str, max_tokens: int = 500
     """
     resp = requests.post(
         f"{FREELLM_BASE}/chat/completions",
-        headers={"Authorization": f"Bearer {FREELLM_KEY}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {FREELLM_KEY}", 
+            "Content-Type": "application/json",
+            "Bypass-Tunnel-Reminder": "true"
+        },
         json={
             "model": "auto",
             "messages": [
