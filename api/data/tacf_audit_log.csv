@@ -1,0 +1,76 @@
+sequence_num,timestamp,event_type,actor,source_module,description,cve_id,tes_score,decision,session_id,ip_address,immutable
+1,2026-04-24T22:53:15.932521Z,USER_LOGOUT,analyst@tempris.sg,Auth service,Session ended,,,,70d518a2-fb91-4f72-b46f-e7a78169d850,10.0.1.15,True
+2,2026-04-24T22:57:15.932521Z,SPEAK_QUERY,analyst@tempris.sg,SPEAK chatbot,AI security query processed,,,,1c968676-74ae-489b-b734-1640237c2363,10.0.1.3,True
+3,2026-04-25T01:32:43.932521Z,EDIP_DECISION_MADE,analyst@tempris.sg,SPECTRUM EDIP,Analyst decision recorded: Accept,CVE-2024-1708,8.6,Transfer,4428cec3-5b7b-4cc0-8eea-6cd4b829eda9,10.0.1.4,True
+4,2026-04-25T01:57:41.932521Z,EDIP_DECISION_MADE,ciso@tempris.sg,SPECTRUM EDIP,CISO override: Transfer to insurance,CVE-2024-3400,9.25,Mitigate,5bcdf9a7-1176-42b9-a6f8-1eb698a1d85f,10.0.1.5,True
+5,2026-04-25T02:44:42.932521Z,ASSET_CREATED,admin@tempris.sg,SYNTHESIS,Asset registered in inventory,,,,65565e71-649d-4c2c-ac14-95a1f8b69223,10.0.1.19,True
+6,2026-04-25T02:58:01.932521Z,USER_LOGIN,viewer@tempris.sg,Auth service,Read-only user authenticated,,,,91eecead-f9c3-4f6d-8c53-97a86ae03949,10.0.1.7,True
+7,2026-04-25T03:03:35.932521Z,STRIKE_SIM_COMPLETED,system,STRIKE module,"Simulation completed, results linked to SPECTRUM",,,,fddf8a6b-341f-4255-a1c0-f483ddb4f21f,10.0.1.15,True
+8,2026-04-25T04:16:20.932521Z,EDIP_DECISION_MADE,analyst@tempris.sg,SPECTRUM EDIP,Analyst decision recorded: Mitigate,CVE-2024-53704,9.78,Accept,28cf2df3-ff33-4eb9-b449-1f97e99e8e87,10.0.1.12,True
+9,2026-04-25T05:01:51.932521Z,USER_LOGIN,admin@tempris.sg,Auth service,User authenticated successfully,,,,07118f20-6750-490e-b6ca-4ed5553af2d0,10.0.1.17,True
+10,2026-04-25T06:18:43.932521Z,STRIKE_AUTH_CREATED,ciso@tempris.sg,STRIKE module,Written scope authorisation created,,,,453a76f2-6199-4d2a-8808-608ab13f3afa,10.0.1.18,True
+11,2026-04-25T07:44:42.932521Z,SCOUT_SCAN_COMPLETED,system,SCOUT module,"Scan completed, findings published to SPECTRUM",,,,9407e313-2077-4cd7-8eb1-c2c131917150,10.0.1.2,True
+12,2026-04-25T10:24:49.932521Z,MAS_NOTIFICATION_PREP,ciso@tempris.sg,STANDARD module,MAS 1-hour notification draft prepared,,,,208c5cc2-6543-4202-a6ba-4005dac544cc,10.0.1.5,True
+13,2026-04-25T10:27:45.932521Z,REPORT_EXPORTED,ciso@tempris.sg,SPOTLIGHT module,PDF board report exported and logged,,,,10efdd8b-76ec-44e6-a5c2-4364c8ae6b80,10.0.1.12,True
+14,2026-04-25T15:19:24.932521Z,COMPLIANCE_CTRL_UPDATE,analyst@tempris.sg,STANDARD module,NIST CSF control marked Partial,,,,b66fb5e5-9e36-4862-a0a7-1b9752694a15,10.0.1.12,True
+15,2026-04-25T17:12:21.932521Z,USER_LOGOUT,analyst@tempris.sg,Auth service,Session ended,,,,37762a59-952e-4854-8aa0-00fb08a2fd3a,10.0.1.17,True
+16,2026-04-25T17:25:13.932521Z,USER_LOGIN,admin@tempris.sg,Auth service,User authenticated successfully,,,,b08c44c6-4807-4c85-85b2-1db5396c872a,10.0.1.6,True
+17,2026-04-25T18:45:55.932521Z,USER_LOGIN,viewer@tempris.sg,Auth service,Read-only user authenticated,,,,bbb4cfd1-1e8f-4436-99b9-a72be08fb98e,10.0.1.8,True
+18,2026-04-25T21:53:06.932521Z,EVIDENCE_UPLOADED,analyst@tempris.sg,STANDARD module,Evidence document attached to control,,,,428ce309-c629-46aa-bad0-2451c9b732ce,10.0.1.17,True
+19,2026-04-25T22:30:59.932521Z,EVIDENCE_UPLOADED,analyst@tempris.sg,STANDARD module,Evidence document attached to control,,,,7339ae53-d484-4c51-87af-22c652288560,10.0.1.8,True
+20,2026-04-26T00:59:56.932521Z,STRIKE_AUTH_CREATED,ciso@tempris.sg,STRIKE module,Written scope authorisation created,,,,092b4e9d-f7ea-49c8-abfa-240172484cb5,10.0.1.7,True
+21,2026-04-26T02:58:03.932521Z,COMPLIANCE_CTRL_UPDATE,admin@tempris.sg,STANDARD module,MAS TRM control status updated to Compliant,,,,ebd27e2f-f076-4f95-987b-a53f7b7826d9,10.0.1.2,True
+22,2026-04-26T04:17:58.932521Z,COMPLIANCE_CTRL_UPDATE,analyst@tempris.sg,STANDARD module,NIST CSF control marked Partial,,,,6900fa28-0740-479d-9ab9-7f6fc42071c8,10.0.1.14,True
+23,2026-04-26T06:27:54.932521Z,STRIKE_SIM_STARTED,analyst@tempris.sg,STRIKE module,Red team simulation initiated,,,,8ff5beab-bdaf-4f93-aac1-72226ae40b38,10.0.1.13,True
+24,2026-04-26T07:15:02.932521Z,EVIDENCE_UPLOADED,analyst@tempris.sg,STANDARD module,Evidence document attached to control,,,,4cf1bda6-a465-4f5e-94bd-09e497a99301,10.0.1.3,True
+25,2026-04-26T09:39:06.932521Z,ASSET_CREATED,admin@tempris.sg,SYNTHESIS,Asset registered in inventory,,,,6dad1b89-80b5-4cd8-9ee5-877c567ec6f5,10.0.1.18,True
+26,2026-04-26T11:36:42.932521Z,USER_LOGIN,viewer@tempris.sg,Auth service,Read-only user authenticated,,,,8dc2a7ce-2aff-496c-b27f-9ee18a787fe6,10.0.1.5,True
+27,2026-04-26T16:26:50.932521Z,STRIKE_SIM_STARTED,analyst@tempris.sg,STRIKE module,Red team simulation initiated,,,,dd091c76-d22c-495f-a158-c03d83e5e07e,10.0.1.4,True
+28,2026-04-26T17:29:16.932521Z,COMPLIANCE_CTRL_UPDATE,analyst@tempris.sg,STANDARD module,NIST CSF control marked Partial,,,,eda7194e-8639-456b-863a-d13966e40ec2,10.0.1.16,True
+29,2026-04-26T21:04:36.932521Z,EDIP_DECISION_MADE,ciso@tempris.sg,SPECTRUM EDIP,CISO override: Transfer to insurance,CVE-2024-3400,8.36,Mitigate,838f96e0-4128-4322-8f19-fa8fd528efee,10.0.1.7,True
+30,2026-04-26T21:50:20.932521Z,ASSET_CREATED,admin@tempris.sg,SYNTHESIS,Asset registered in inventory,,,,668e97e5-7659-4015-93c3-cb0662f5029f,10.0.1.2,True
+31,2026-04-26T22:35:55.932521Z,STRIKE_AUTH_CREATED,ciso@tempris.sg,STRIKE module,Written scope authorisation created,,,,bcad598b-bdcb-4c0c-b579-25722544f13f,10.0.1.9,True
+32,2026-04-26T23:39:38.932521Z,STRIKE_SIM_STARTED,analyst@tempris.sg,STRIKE module,Red team simulation initiated,,,,b80ca261-4e00-481b-abfd-e78c3cddf003,10.0.1.11,True
+33,2026-04-27T07:23:33.932521Z,STRIKE_SIM_STARTED,analyst@tempris.sg,STRIKE module,Red team simulation initiated,,,,8b134c87-4b75-43ec-bcea-4c16339735bf,10.0.1.19,True
+34,2026-04-27T11:38:36.932521Z,STRIKE_AUTH_CREATED,ciso@tempris.sg,STRIKE module,Written scope authorisation created,,,,9c44ebc6-1b35-45b2-bad9-55fc9b7dd083,10.0.1.11,True
+35,2026-04-27T13:14:08.932521Z,EDIP_DECISION_MADE,ciso@tempris.sg,SPECTRUM EDIP,CISO override: Transfer to insurance,CVE-2023-46604,8.3,Mitigate,8e5e5cd3-b0fb-4ae3-a063-b324ea97f736,10.0.1.13,True
+36,2026-04-27T20:37:57.932521Z,SCOUT_SCAN_STARTED,analyst@tempris.sg,SCOUT module,Nuclei scan initiated against target,,,,11963c42-c1dc-4ac4-8d3d-67db655fe609,10.0.1.17,True
+37,2026-04-27T22:56:28.932521Z,SCOUT_SCAN_COMPLETED,system,SCOUT module,"Scan completed, findings published to SPECTRUM",,,,3fcbef04-1f1b-42d6-91f5-0588790b3927,10.0.1.15,True
+38,2026-04-27T23:26:47.932521Z,COMPLIANCE_CTRL_UPDATE,analyst@tempris.sg,STANDARD module,NIST CSF control marked Partial,,,,a3615d6d-80da-45e0-b64b-3f06c42d6140,10.0.1.14,True
+39,2026-04-28T05:19:56.932521Z,EDIP_DECISION_MADE,analyst@tempris.sg,SPECTRUM EDIP,Analyst decision recorded: Mitigate,CVE-2024-3400,9.01,Transfer,74a3efac-a2da-4af7-9b53-63ed67e35c55,10.0.1.3,True
+40,2026-04-28T11:25:09.932521Z,EVIDENCE_UPLOADED,analyst@tempris.sg,STANDARD module,Evidence document attached to control,,,,41f83d0e-59a0-4448-b8d4-5421af959d75,10.0.1.10,True
+41,2026-04-28T15:53:41.932521Z,MAS_NOTIFICATION_PREP,ciso@tempris.sg,STANDARD module,MAS 1-hour notification draft prepared,,,,1bfb8833-1f4b-4593-ade2-9091efd9697f,10.0.1.10,True
+42,2026-04-28T18:23:08.932521Z,EDIP_DECISION_MADE,analyst@tempris.sg,SPECTRUM EDIP,Analyst decision recorded: Accept,CVE-2024-47575,6.01,Transfer,03a51121-40b2-43c8-a9c7-cdf12bb494ef,10.0.1.3,True
+43,2026-04-28T18:34:40.932521Z,EDIP_DECISION_MADE,analyst@tempris.sg,SPECTRUM EDIP,Analyst decision recorded: Accept,CVE-2023-46604,7.44,Ignore,bf1ddf54-ba2d-4c5a-91f0-49d4d6891a7d,10.0.1.4,True
+44,2026-04-28T19:09:40.932521Z,STRIKE_SIM_STARTED,analyst@tempris.sg,STRIKE module,Red team simulation initiated,,,,bd078e95-d9b4-4f36-a410-b3eea0c8f0ac,10.0.1.3,True
+45,2026-04-28T21:23:59.932521Z,SCOUT_SCAN_COMPLETED,system,SCOUT module,"Scan completed, findings published to SPECTRUM",,,,fac41f37-a7c4-4195-91ee-64d5c2f90d0a,10.0.1.8,True
+46,2026-04-28T21:34:00.932521Z,SCOUT_SCAN_STARTED,analyst@tempris.sg,SCOUT module,Nuclei scan initiated against target,,,,fc5f445d-dc60-49bd-ad82-0cad0eb9c999,10.0.1.11,True
+47,2026-04-29T00:48:40.932521Z,USER_LOGOUT,analyst@tempris.sg,Auth service,Session ended,,,,d014c0e2-e764-4f95-abdb-962c5274880f,10.0.1.9,True
+48,2026-04-29T08:54:42.932521Z,EDIP_DECISION_MADE,analyst@tempris.sg,SPECTRUM EDIP,Analyst decision recorded: Mitigate,CVE-2021-44228,6.76,Mitigate,90a56e60-3776-4e0d-a09d-fbdcfeb72e4f,10.0.1.12,True
+49,2026-04-29T11:32:30.932521Z,MAS_NOTIFICATION_PREP,ciso@tempris.sg,STANDARD module,MAS 1-hour notification draft prepared,,,,9d4e0321-303a-46c2-bce2-3126e54dc37c,10.0.1.17,True
+50,2026-04-29T12:32:36.932521Z,EDIP_DECISION_MADE,ciso@tempris.sg,SPECTRUM EDIP,CISO override: Transfer to insurance,CVE-2023-46604,9.08,Ignore,7a5443d2-1a20-48cb-bc63-3d33215d4c5c,10.0.1.15,True
+51,2026-04-29T15:56:47.932521Z,COMPLIANCE_CTRL_UPDATE,admin@tempris.sg,STANDARD module,MAS TRM control status updated to Compliant,,,,3b5ad9f8-dd6c-4b75-ba7c-d4450cbd2354,10.0.1.19,True
+52,2026-04-29T16:05:51.932521Z,USER_LOGIN,viewer@tempris.sg,Auth service,Read-only user authenticated,,,,56ff81b9-30c6-4e87-8235-aecb409c57fb,10.0.1.10,True
+53,2026-04-29T16:26:36.932521Z,SCOUT_SCAN_COMPLETED,system,SCOUT module,"Scan completed, findings published to SPECTRUM",,,,3646afea-9156-4bef-aef1-0855b6eeb52c,10.0.1.18,True
+54,2026-04-29T17:35:47.932521Z,REPORT_EXPORTED,ciso@tempris.sg,SPOTLIGHT module,PDF board report exported and logged,,,,895371a4-0fd2-4320-8ba9-87e45d1235f3,10.0.1.2,True
+55,2026-04-29T18:29:08.932521Z,USER_LOGOUT,analyst@tempris.sg,Auth service,Session ended,,,,6582f374-01f5-4500-9e65-c1c158c5c4be,10.0.1.13,True
+56,2026-04-29T18:53:11.932521Z,EVIDENCE_UPLOADED,analyst@tempris.sg,STANDARD module,Evidence document attached to control,,,,77bb309d-f74e-4ac7-a1a8-29fcff196bb2,10.0.1.15,True
+57,2026-04-29T22:56:52.932521Z,COMPLIANCE_CTRL_UPDATE,admin@tempris.sg,STANDARD module,MAS TRM control status updated to Compliant,,,,c5d21382-2ce0-4355-aa98-d0e6cbc88143,10.0.1.8,True
+58,2026-04-29T23:57:16.932521Z,COMPLIANCE_CTRL_UPDATE,admin@tempris.sg,STANDARD module,MAS TRM control status updated to Compliant,,,,87138a89-a5f3-46a5-925f-1dfd2ecc293d,10.0.1.13,True
+59,2026-04-30T00:42:21.932521Z,REPORT_EXPORTED,ciso@tempris.sg,SPOTLIGHT module,PDF board report exported and logged,,,,46d0b790-b110-41fc-ac89-903e39bcde22,10.0.1.14,True
+60,2026-04-30T04:51:47.932521Z,STRIKE_SIM_COMPLETED,system,STRIKE module,"Simulation completed, results linked to SPECTRUM",,,,e1d8b748-9f9e-4470-805e-312510358da8,10.0.1.4,True
+61,2026-04-30T05:11:05.932521Z,CVE_FINDING_CREATED,system,SPECTRUM engine,TES scoring applied to new CVE finding,CVE-2024-53704,5.99,,597f2f45-95d0-4a85-981b-c09620920d25,10.0.1.5,True
+62,2026-04-30T06:16:03.932521Z,CVE_FINDING_CREATED,system,SPECTRUM engine,TES scoring applied to new CVE finding,CVE-2024-47575,8.54,,8f02fb52-4512-4207-9849-afe9728c4189,10.0.1.6,True
+63,2026-04-30T06:32:46.932521Z,STRIKE_AUTH_CREATED,ciso@tempris.sg,STRIKE module,Written scope authorisation created,,,,6bb0131c-a57a-46e3-8af1-8ad9fe8470b3,10.0.1.15,True
+64,2026-04-30T15:15:01.932521Z,USER_LOGOUT,analyst@tempris.sg,Auth service,Session ended,,,,d0ed9050-87f5-4ef0-95ac-f9f4e726ec61,10.0.1.15,True
+65,2026-04-30T15:52:06.932521Z,SCOUT_SCAN_STARTED,analyst@tempris.sg,SCOUT module,Nuclei scan initiated against target,,,,4a77ccb9-9805-4357-aa37-fb5d0bf2b019,10.0.1.8,True
+66,2026-04-30T17:21:56.932521Z,COMPLIANCE_CTRL_UPDATE,analyst@tempris.sg,STANDARD module,NIST CSF control marked Partial,,,,5cba9f06-bd52-4d8c-873e-f8b59d3d0613,10.0.1.19,True
+67,2026-04-30T20:44:06.932521Z,COMPLIANCE_CTRL_UPDATE,admin@tempris.sg,STANDARD module,MAS TRM control status updated to Compliant,,,,6fa8a3de-767b-4c30-a8bd-d682a28892c4,10.0.1.13,True
+68,2026-04-30T21:45:57.932521Z,REPORT_EXPORTED,ciso@tempris.sg,SPOTLIGHT module,PDF board report exported and logged,,,,f9d5bb04-cde7-4e3a-a257-7164e5d939c8,10.0.1.13,True
+69,2026-05-01T00:53:47.932521Z,CVE_FINDING_CREATED,system,SPECTRUM engine,TES scoring applied to new CVE finding,CVE-2024-53704,9.22,,fcfbb2c0-b998-48c2-82b1-bacde570eae4,10.0.1.18,True
+70,2026-05-01T07:02:07.932521Z,CVE_FINDING_CREATED,system,SPECTRUM engine,TES scoring applied to new CVE finding,CVE-2024-47575,8.52,,11526267-8f91-4da4-ba15-495d1b0c531c,10.0.1.2,True
+71,2026-05-01T08:27:52.932521Z,EDIP_DECISION_MADE,analyst@tempris.sg,SPECTRUM EDIP,Analyst decision recorded: Mitigate,CVE-2024-3400,7.11,Transfer,0ece580f-423e-4d18-94b3-1f9c738f7e8d,10.0.1.7,True
+72,2026-05-01T08:49:51.932521Z,EVIDENCE_UPLOADED,analyst@tempris.sg,STANDARD module,Evidence document attached to control,,,,47c3077d-f4af-418f-82f3-bb57290a70cb,10.0.1.13,True
+73,2026-05-01T10:39:52.932521Z,STRIKE_AUTH_CREATED,ciso@tempris.sg,STRIKE module,Written scope authorisation created,,,,1cc321c8-dedc-46a2-8604-36d5a9377a7e,10.0.1.13,True
+74,2026-05-01T15:28:06.932521Z,SPEAK_QUERY,analyst@tempris.sg,SPEAK chatbot,AI security query processed,,,,cf35add7-d360-4b27-9bf4-1085374634d9,10.0.1.7,True
+75,2026-05-01T15:52:46.932521Z,ASSET_CREATED,admin@tempris.sg,SYNTHESIS,Asset registered in inventory,,,,c8d0d997-b76c-4802-9cbb-1e4f83a86273,10.0.1.15,True
