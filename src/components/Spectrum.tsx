@@ -13,8 +13,18 @@ export default function Spectrum() {
       .then(res => res.json())
       .then(data => {
         setFindings(data);
-        if (data.length > 0) {
-          setFinding(data[0]);
+        
+        const params = new URLSearchParams(window.location.search);
+        const targetCve = params.get('cve');
+        
+        let selectedFinding = data.length > 0 ? data[0] : null;
+        if (targetCve && data.length > 0) {
+          const match = data.find((f: any) => f.cve === targetCve);
+          if (match) selectedFinding = match;
+        }
+        
+        if (selectedFinding) {
+          setFinding(selectedFinding);
         }
         setLoading(false);
       });

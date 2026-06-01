@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ../api
+      dockerfile: Dockerfile
+    container_name: tempris_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    network_mode: host
+    environment:
+      - FREELLM_BASE_URL=http://localhost:3001/v1
+      - FREELLM_API_KEY=${FREELLM_API_KEY}
+    volumes:
+      - ../api/data:/app/data:ro
+
+  freellmapi:
+    build:
+      context: ../../freellmapi
+      dockerfile: server/Dockerfile
+    container_name: tempris_llm
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    network_mode: host
+    env_file:
+      - ../../freellmapi/.env
+    volumes:
+      - freellm_data:/app/server/data
+
+volumes:
+  freellm_data:

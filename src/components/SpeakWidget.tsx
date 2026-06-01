@@ -6,6 +6,8 @@ export default function SpeakWidget() {
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [sessionId, setSessionId] = useState<number | null>(null);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -15,6 +17,24 @@ export default function SpeakWidget() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Load chat history from DB on first open
+  useEffect(() => {
+    if (isOpen && !historyLoaded) {
+      fetch('/api/speak/history')
+        .then(r => r.json())
+        .then(data => {
+          if (data.session_id) {
+            setSessionId(data.session_id);
+            if (data.messages && data.messages.length > 0) {
+              setMessages(data.messages);
+            }
+          }
+          setHistoryLoaded(true);
+        })
+        .catch(() => setHistoryLoaded(true));
+    }
+  }, [isOpen, historyLoaded]);
 
   const sendMessage = async (text: string) => {
     if (!text.trim()) return;
@@ -28,9 +48,10 @@ export default function SpeakWidget() {
       const res = await fetch('/api/speak/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text })
+        body: JSON.stringify({ message: text, session_id: sessionId })
       });
       const data = await res.json();
+      if (data.session_id) setSessionId(data.session_id);
       setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
     } catch (e) {
       setMessages(prev => [...prev, { role: 'assistant', content: 'I am currently processing your request. Please try again in a moment.' }]);

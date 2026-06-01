@@ -102,8 +102,17 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             <button onClick={() => { setEmail('sherie@tempris.com'); setPassword('demo'); }} className="w-full text-left text-xs p-2 rounded bg-surfaceHover border border-border hover:border-primary-500/30 transition-colors">
               <span className="font-bold text-primary-400">Superadmin</span> • sherie@tempris.com
             </button>
+            <button onClick={() => { setEmail('admin@tempris.com'); setPassword('demo'); }} className="w-full text-left text-xs p-2 rounded bg-surfaceHover border border-border hover:border-primary-500/30 transition-colors">
+              <span className="font-bold text-text-main">Admin</span> • admin@tempris.com
+            </button>
             <button onClick={() => { setEmail('analyst@tempris.com'); setPassword('demo'); }} className="w-full text-left text-xs p-2 rounded bg-surfaceHover border border-border hover:border-primary-500/30 transition-colors">
               <span className="font-bold text-text-main">Analyst</span> • analyst@tempris.com
+            </button>
+            <button onClick={() => { setEmail('viewer@tempris.com'); setPassword('demo'); }} className="w-full text-left text-xs p-2 rounded bg-surfaceHover border border-border hover:border-primary-500/30 transition-colors">
+              <span className="font-bold text-text-muted">Viewer</span> • viewer@tempris.com
+            </button>
+            <button onClick={() => { setEmail('readonly@tempris.com'); setPassword('demo'); }} className="w-full text-left text-xs p-2 rounded bg-surfaceHover border border-border hover:border-primary-500/30 transition-colors">
+              <span className="font-bold text-text-muted">Read-only</span> • readonly@tempris.com
             </button>
           </div>
         </div>

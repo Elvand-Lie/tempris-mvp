@@ -7,14 +7,29 @@ export default function Spotlight() {
   const [dashData, setDashData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [aiReport, setAiReport] = useState<string | null>(null);
+  const [reportType, setReportType] = useState('executive');
+  const [reportHistory, setReportHistory] = useState<any[]>([]);
   const reportRef = useRef<HTMLDivElement>(null);
+
+  const reportTypes = [
+    { value: 'executive', label: 'Executive Board' },
+    { value: 'ciso', label: 'CISO Technical' },
+    { value: 'compliance', label: 'Compliance Audit' },
+    { value: 'insurance', label: 'Cyber Insurance' },
+  ];
 
   const generateReport = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/spotlight/generate', { method: 'POST' });
+      const res = await fetch('/api/spotlight/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report_type: reportType })
+      });
       const data = await res.json();
       setAiReport(data.ai_narrative);
+      // Refresh history after generating
+      fetch('/api/spotlight/history').then(r => r.json()).then(setReportHistory);
     } catch (e) {
       console.error(e);
       setAiReport("Failed to generate report. Please try again.");
@@ -76,11 +91,13 @@ Recommended Action: Immediate prioritization of all CISA KEV-listed vulnerabilit
     Promise.all([
       fetch('/api/scout/stats').then(r => r.json()),
       fetch('/api/scout/findings?limit=3&ransomware_only=true').then(r => r.json()),
-      fetch('/api/synthesis/dashboard').then(r => r.json())
-    ]).then(([statsData, findingsData, dash]) => {
+      fetch('/api/synthesis/dashboard').then(r => r.json()),
+      fetch('/api/spotlight/history').then(r => r.json())
+    ]).then(([statsData, findingsData, dash, history]) => {
       setStats(statsData);
       setTopFindings(findingsData.data || []);
       setDashData(dash);
+      setReportHistory(history || []);
     });
   }, []);
 
@@ -93,14 +110,25 @@ Recommended Action: Immediate prioritization of all CISA KEV-listed vulnerabilit
           <h1 className="text-2xl font-bold tracking-tight">SPOTLIGHT Board Reports</h1>
           <p className="text-text-muted mt-1">AI-generated executive risk narratives and PDF exports.</p>
         </div>
-        <button 
-          onClick={generateReport}
-          disabled={loading}
-          className="flex items-center gap-2 bg-primary-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-primary-600 disabled:opacity-50 transition-colors shadow-lg shadow-primary-500/20"
-        >
-          {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-          {loading ? 'Generating...' : 'Generate New Report'}
-        </button>
+        <div className="flex items-center gap-3">
+          <select
+            value={reportType}
+            onChange={e => setReportType(e.target.value)}
+            className="bg-surface border border-border rounded-lg px-3 py-2 text-sm outline-none font-medium"
+          >
+            {reportTypes.map(rt => (
+              <option key={rt.value} value={rt.value}>{rt.label}</option>
+            ))}
+          </select>
+          <button 
+            onClick={generateReport}
+            disabled={loading}
+            className="flex items-center gap-2 bg-primary-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-primary-600 disabled:opacity-50 transition-colors shadow-lg shadow-primary-500/20"
+          >
+            {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+            {loading ? 'Generating...' : 'Generate Report'}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -150,36 +178,21 @@ Recommended Action: Immediate prioritization of all CISA KEV-listed vulnerabilit
            <div className="glass-panel p-6">
             <h2 className="text-sm font-semibold text-text-muted uppercase tracking-wider mb-4 border-b border-border pb-3">Report History</h2>
             <div className="space-y-4">
-              <div className="flex items-center justify-between p-3 rounded-lg bg-surfaceHover border border-border">
-                <div className="flex items-center gap-3">
-                  <FileText size={18} className="text-primary-500" />
-                  <div>
-                    <p className="text-sm font-medium">Executive Board Brief</p>
-                    <p className="text-[10px] text-text-muted">May 23, 2026 • CISA KEV Data</p>
+              {reportHistory.length === 0 && (
+                <p className="text-sm text-text-muted text-center py-4">No reports generated yet.</p>
+              )}
+              {reportHistory.map((r: any) => (
+                <div key={r.id} className="flex items-center justify-between p-3 rounded-lg bg-surface border border-border hover:bg-surfaceHover transition-colors cursor-pointer" onClick={() => setAiReport(r.full_narrative)}>
+                  <div className="flex items-center gap-3">
+                    <FileText size={18} className="text-primary-500" />
+                    <div>
+                      <p className="text-sm font-medium capitalize">{r.report_type} Report</p>
+                      <p className="text-[10px] text-text-muted">{new Date(r.generated_at).toLocaleDateString()} • TES {r.tes_score?.toFixed(1)}</p>
+                    </div>
                   </div>
+                  <button onClick={(e) => { e.stopPropagation(); exportPdf(); }} className="text-text-muted hover:text-text-main"><Download size={16} /></button>
                 </div>
-                <button onClick={exportPdf} className="text-text-muted hover:text-text-main"><Download size={16} /></button>
-              </div>
-              <div className="flex items-center justify-between p-3 rounded-lg bg-surface border border-border">
-                <div className="flex items-center gap-3">
-                  <FileText size={18} className="text-text-muted" />
-                  <div>
-                    <p className="text-sm font-medium">Q1 Compliance Report</p>
-                    <p className="text-[10px] text-text-muted">April 1, 2026 • 4.1 MB</p>
-                  </div>
-                </div>
-                <button onClick={exportPdf} className="text-text-muted hover:text-text-main"><Download size={16} /></button>
-              </div>
-              <div className="flex items-center justify-between p-3 rounded-lg bg-surface border border-border">
-                <div className="flex items-center gap-3">
-                  <FileText size={18} className="text-text-muted" />
-                  <div>
-                    <p className="text-sm font-medium">CISO Technical Summary</p>
-                    <p className="text-[10px] text-text-muted">March 15, 2026 • 5.8 MB</p>
-                  </div>
-                </div>
-                <button onClick={exportPdf} className="text-text-muted hover:text-text-main"><Download size={16} /></button>
-              </div>
+              ))}
             </div>
            </div>
         </div>

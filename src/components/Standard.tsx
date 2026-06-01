@@ -1,35 +1,91 @@
 import { useEffect, useState } from 'react';
-import { ShieldAlert, CheckCircle2, TrendingDown, UploadCloud, AlertOctagon, XCircle, Loader2 } from 'lucide-react';
+import { ShieldAlert, CheckCircle2, UploadCloud, AlertOctagon, XCircle, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 
 export default function Standard() {
+  const [frameworks, setFrameworks] = useState<any[]>([]);
+  const [expandedFramework, setExpandedFramework] = useState<string | null>(null);
+  const [controls, setControls] = useState<any[]>([]);
+  const [controlsLoading, setControlsLoading] = useState(false);
   const [topFindings, setTopFindings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Fetch real findings to cross-reference with compliance controls
-    fetch('/api/scout/findings?limit=5&ransomware_only=true')
-      .then(res => res.json())
-      .then(data => {
-        setTopFindings(data.data || []);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+    Promise.all([
+      fetch('/api/standard/frameworks').then(res => res.json()),
+      fetch('/api/scout/findings?limit=5&ransomware_only=true').then(res => res.json())
+    ]).then(([fwData, findingsData]) => {
+      setFrameworks(fwData);
+      setTopFindings(findingsData.data || []);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, []);
 
-  // Compliance scores are slightly adjusted based on real finding count
-  const violationCount = topFindings.length;
-  const masTrmScore = Math.max(70, 100 - (violationCount * 2));
-  
-  const frameworks = [
-    { name: 'MAS TRM 2024', score: masTrmScore, trend: -(violationCount), status: masTrmScore < 90 ? 'warning' : 'healthy' },
-    { name: 'PDPA Singapore', score: 100, trend: 0, status: 'healthy' },
-    { name: 'ISO 27001:2022', score: 95, trend: +2, status: 'healthy' },
-    { name: 'IM8A', score: Math.max(80, 100 - violationCount), trend: -1, status: violationCount > 2 ? 'warning' : 'healthy' },
-    { name: 'NIST CSF 2.0', score: 91, trend: +1, status: 'healthy' },
-    { name: 'SOC 2 Type II', score: 87, trend: -3, status: 'warning' },
-    { name: 'PCI DSS v4.0', score: 93, trend: 0, status: 'healthy' },
-    { name: 'CSA Cyber Trust', score: 96, trend: +2, status: 'healthy' },
-  ];
+  const toggleFramework = async (fwId: string) => {
+    if (expandedFramework === fwId) {
+      setExpandedFramework(null);
+      return;
+    }
+    setExpandedFramework(fwId);
+    setControlsLoading(true);
+    try {
+      const res = await fetch(`/api/standard/frameworks/${fwId}/controls`);
+      const data = await res.json();
+      setControls(data.controls || []);
+    } catch {
+      setControls([]);
+    } finally {
+      setControlsLoading(false);
+    }
+  };
+
+  const updateControlStatus = async (fwId: string, controlId: string, newStatus: string) => {
+    try {
+      await fetch(`/api/standard/frameworks/${fwId}/controls/${controlId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+      // Refresh controls
+      const res = await fetch(`/api/standard/frameworks/${fwId}/controls`);
+      const data = await res.json();
+      setControls(data.controls || []);
+      // Refresh framework scores
+      const fwRes = await fetch('/api/standard/frameworks');
+      setFrameworks(await fwRes.json());
+    } catch (e) {
+      console.error('Failed to update control status:', e);
+    }
+  };
+
+  const uploadEvidence = async (fwId: string, controlId: string) => {
+    try {
+      await fetch(`/api/standard/frameworks/${fwId}/controls/${controlId}/evidence`, { method: 'POST' });
+      alert(`Evidence recorded for ${controlId}`);
+      // Refresh controls
+      const res = await fetch(`/api/standard/frameworks/${fwId}/controls`);
+      setControls((await res.json()).controls || []);
+    } catch {
+      alert('Upload failed');
+    }
+  };
+
+  const statusColors: Record<string, string> = {
+    compliant: 'text-success bg-success/10 border-success/20',
+    partial: 'text-warning bg-warning/10 border-warning/20',
+    non_compliant: 'text-danger bg-danger/10 border-danger/20',
+    not_assessed: 'text-text-muted bg-surfaceHover border-border',
+    not_applicable: 'text-text-muted bg-surface border-border',
+  };
+
+  const statusLabels: Record<string, string> = {
+    compliant: 'Compliant',
+    partial: 'Partial',
+    non_compliant: 'Non-Compliant',
+    not_assessed: 'Not Assessed',
+    not_applicable: 'N/A',
+  };
+
+  if (loading) return <div className="p-8 text-text-muted animate-pulse">Loading compliance frameworks...</div>;
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -46,104 +102,124 @@ export default function Standard() {
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {frameworks.map((fw) => (
-          <div key={fw.name} className="glass-panel p-5 relative overflow-hidden group hover:border-primary-500/30 transition-colors cursor-pointer">
-            <h3 className="text-sm font-semibold text-text-muted uppercase tracking-wider mb-4">{fw.name}</h3>
+          <div 
+            key={fw.id} 
+            onClick={() => toggleFramework(fw.id)}
+            className="glass-panel p-5 relative overflow-hidden group hover:border-primary-500/30 transition-colors cursor-pointer"
+          >
+            <h3 className="text-sm font-semibold text-text-muted uppercase tracking-wider mb-4 flex items-center justify-between">
+              {fw.name}
+              {expandedFramework === fw.id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            </h3>
             <div className="flex items-end justify-between">
-              <span className={`text-3xl font-black ${fw.status === 'warning' ? 'text-warning' : 'text-success'}`}>
+              <span className={`text-3xl font-black ${fw.score < 80 ? 'text-danger' : fw.score < 90 ? 'text-warning' : 'text-success'}`}>
                 {fw.score}%
               </span>
-              {fw.trend !== 0 && (
-                <span className={`flex items-center gap-1 text-xs font-medium ${fw.trend < 0 ? 'text-danger' : 'text-success'}`}>
-                  {fw.trend < 0 ? <TrendingDown size={14} /> : <TrendingDown size={14} className="transform rotate-180" />}
-                  {Math.abs(fw.trend)}%
-                </span>
-              )}
+              <div className="text-[10px] text-text-muted space-y-0.5 text-right">
+                <div><span className="text-success font-bold">{fw.compliant}</span> compliant</div>
+                <div><span className="text-warning font-bold">{fw.partial}</span> partial</div>
+                <div><span className="text-danger font-bold">{fw.non_compliant}</span> non-compliant</div>
+              </div>
             </div>
-            {/* simple progress bar */}
-             <div className="w-full bg-surface h-1.5 rounded-full mt-4 overflow-hidden">
-                <div 
-                  className={`h-full rounded-full transition-all duration-700 ${fw.status === 'warning' ? 'bg-warning' : 'bg-success'}`} 
-                  style={{ width: `${fw.score}%` }}
-                />
-             </div>
+            <div className="w-full bg-surface h-1.5 rounded-full mt-4 overflow-hidden">
+              <div 
+                className={`h-full rounded-full transition-all duration-700 ${fw.score < 80 ? 'bg-danger' : fw.score < 90 ? 'bg-warning' : 'bg-success'}`} 
+                style={{ width: `${fw.score}%` }}
+              />
+            </div>
           </div>
         ))}
       </div>
 
-      <div className="glass-panel p-6 border-warning/30">
-        <div className="flex items-center justify-between mb-6 border-b border-warning/20 pb-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-warning flex items-center gap-2">
-             <AlertOctagon size={16} /> Action Required: MAS TRM Controls
+      {/* Expanded Controls Panel */}
+      {expandedFramework && (
+        <div className="glass-panel p-6 animate-in fade-in slide-in-from-top-2 duration-300">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-text-muted mb-4 border-b border-border pb-3 flex items-center gap-2">
+            <ShieldAlert size={16} />
+            {frameworks.find(f => f.id === expandedFramework)?.name} — Control Details
           </h2>
-          <span className="text-xs font-medium bg-warning/10 text-warning px-2 py-1 rounded">
-            {loading ? '...' : `${Math.min(topFindings.length, 3)} Controls Flagged`}
-          </span>
-        </div>
-
-        <div className="space-y-4">
-          {loading && (
-            <div className="flex justify-center p-6">
-              <Loader2 className="animate-spin text-primary-500" size={24} />
+          
+          {controlsLoading ? (
+            <div className="flex justify-center p-6"><Loader2 className="animate-spin text-primary-500" size={24} /></div>
+          ) : (
+            <div className="space-y-3">
+              {controls.map(ctrl => (
+                <div key={ctrl.id} className="bg-surface border border-border rounded-lg p-4 flex items-start gap-4">
+                  <div className={`p-2 rounded shrink-0 mt-1 ${
+                    ctrl.status === 'compliant' ? 'bg-success/10 text-success' :
+                    ctrl.status === 'non_compliant' ? 'bg-danger/10 text-danger' :
+                    ctrl.status === 'partial' ? 'bg-warning/10 text-warning' :
+                    'bg-surfaceHover text-text-muted'
+                  }`}>
+                    {ctrl.status === 'compliant' ? <CheckCircle2 size={18} /> :
+                     ctrl.status === 'non_compliant' ? <XCircle size={18} /> :
+                     ctrl.status === 'partial' ? <AlertOctagon size={18} /> :
+                     <AlertOctagon size={18} />}
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex justify-between items-start">
+                      <h4 className="font-bold text-sm">{ctrl.title}</h4>
+                      <span className="text-xs font-mono text-text-muted">{ctrl.id}</span>
+                    </div>
+                    <p className="text-sm text-text-muted mt-1">{ctrl.description}</p>
+                    {ctrl.evidence && ctrl.evidence.length > 0 && (
+                      <div className="mt-2 text-xs text-primary-400">
+                        📎 {ctrl.evidence.length} evidence file(s) attached
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-2 shrink-0">
+                    <select
+                      value={ctrl.status}
+                      onChange={e => updateControlStatus(expandedFramework, ctrl.id, e.target.value)}
+                      className={`text-xs font-medium px-2 py-1.5 rounded border outline-none ${statusColors[ctrl.status]}`}
+                    >
+                      {Object.entries(statusLabels).map(([val, label]) => (
+                        <option key={val} value={val}>{label}</option>
+                      ))}
+                    </select>
+                    <button 
+                      onClick={() => uploadEvidence(expandedFramework, ctrl.id)}
+                      className="text-xs font-medium bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 px-3 py-1.5 rounded transition-colors flex items-center gap-1"
+                    >
+                      <UploadCloud size={12} /> Evidence
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
-          
-          {!loading && topFindings.length > 0 && (
-            <>
-              {/* Control 1 - dynamically linked to the top ransomware finding */}
-              <div className="bg-surface border border-border rounded-lg p-4 flex items-start gap-4">
+        </div>
+      )}
+
+      {/* MAS TRM Violations linked to real findings */}
+      {topFindings.length > 0 && (
+        <div className="glass-panel p-6 border-warning/30">
+          <div className="flex items-center justify-between mb-6 border-b border-warning/20 pb-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-warning flex items-center gap-2">
+              <AlertOctagon size={16} /> Active Compliance Violations (from CISA KEV)
+            </h2>
+            <span className="text-xs font-medium bg-warning/10 text-warning px-2 py-1 rounded">
+              {topFindings.length} Findings Linked
+            </span>
+          </div>
+          <div className="space-y-3">
+            {topFindings.slice(0, 3).map((f, i) => (
+              <div key={i} className="bg-surface border border-border rounded-lg p-4 flex items-start gap-4">
                 <div className="bg-danger/10 text-danger p-2 rounded shrink-0 mt-1">
                   <XCircle size={18} />
                 </div>
                 <div className="flex-1">
-                  <div className="flex justify-between">
-                    <h4 className="font-bold text-sm">Control 11.1.1 - Timely Patching of Critical Network Devices</h4>
-                    <span className="text-xs font-mono text-text-muted">MAS-TRM-11.1.1</span>
-                  </div>
-                  <p className="text-sm text-text-muted mt-1 leading-relaxed">
-                    The organization must apply security patches to critical network devices within the timeframe specified by the vendor or the organization's risk assessment.
+                  <h4 className="font-bold text-sm">{f.cve} — {f.title}</h4>
+                  <p className="text-xs text-text-muted mt-1">
+                    {f.vendor} {f.product} • CVSS {f.cvss?.toFixed(1)} • {f.ransomware ? '🔴 Ransomware-linked' : 'Known Exploited'}
                   </p>
-                  <div className="mt-3 p-3 bg-danger/5 border border-danger/20 rounded-md text-xs text-text-main flex gap-2">
-                    <ShieldAlert size={14} className="text-danger shrink-0 mt-0.5" />
-                    <span><span className="font-bold text-danger">Violation:</span> {topFindings[0].cve} — {topFindings[0].title} (CVSS {topFindings[0].cvss}) is listed in CISA's Known Exploited Vulnerabilities catalog with confirmed ransomware campaign use. Patching SLA has been breached.</span>
-                  </div>
-                  {topFindings.length > 1 && (
-                    <div className="mt-2 p-3 bg-warning/5 border border-warning/20 rounded-md text-xs text-text-main flex gap-2">
-                      <AlertOctagon size={14} className="text-warning shrink-0 mt-0.5" />
-                      <span><span className="font-bold text-warning">Additional:</span> {topFindings[1].cve} — {topFindings[1].title} ({topFindings[1].vendor} {topFindings[1].product}) also flagged as ransomware-linked.</span>
-                    </div>
-                  )}
-                </div>
-                <div className="flex flex-col gap-2 shrink-0">
-                  <button className="text-xs font-medium bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 px-3 py-2 rounded transition-colors flex items-center gap-2">
-                    <UploadCloud size={14} /> Upload Evidence
-                  </button>
                 </div>
               </div>
-            </>
-          )}
-
-          {/* Control 2 - always shown as compliant */}
-          <div className="bg-surface border border-border rounded-lg p-4 flex items-start gap-4">
-            <div className="bg-success/10 text-success p-2 rounded shrink-0 mt-1">
-              <CheckCircle2 size={18} />
-            </div>
-            <div className="flex-1">
-              <div className="flex justify-between">
-                <h4 className="font-bold text-sm">Control 11.2.3 - Vulnerability Scanning</h4>
-                <span className="text-xs font-mono text-text-muted">MAS-TRM-11.2.3</span>
-              </div>
-              <p className="text-sm text-text-muted mt-1">
-                Regular vulnerability scanning must be conducted on internal and external network infrastructure.
-              </p>
-              <div className="mt-2 p-2 bg-success/5 border border-success/20 rounded-md text-xs text-success flex gap-2 items-center">
-                <CheckCircle2 size={12} />
-                <span>CISA KEV catalog integrated. {topFindings.length > 0 ? `${topFindings.length} ransomware-linked findings` : 'Findings'} actively monitored via SCOUT module.</span>
-              </div>
-            </div>
+            ))}
           </div>
-
         </div>
-      </div>
+      )}
     </div>
   );
 }

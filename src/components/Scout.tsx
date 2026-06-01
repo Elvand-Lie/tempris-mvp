@@ -1,7 +1,9 @@
 import { Target, Search, AlertOctagon, CheckCircle2, ChevronRight, Loader2, ChevronLeft } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 export default function Scout() {
+  const navigate = useNavigate();
   const [findings, setFindings] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [vendors, setVendors] = useState<string[]>([]);
@@ -50,14 +52,16 @@ export default function Scout() {
   }, [page, search, selectedVendor, ransomwareOnly]);
 
   const [isScanning, setIsScanning] = useState(false);
+  const [scanTarget, setScanTarget] = useState('127.0.0.1');
 
   const launchScan = async () => {
+    if (!scanTarget) return;
     setIsScanning(true);
     try {
       const res = await fetch('/api/scanner/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target: 'http://localhost:8080' })
+        body: JSON.stringify({ target: scanTarget })
       });
       const data = await res.json();
       console.log('Scan result:', data);
@@ -77,14 +81,23 @@ export default function Scout() {
           <h1 className="text-2xl font-bold tracking-tight">SCOUT Vulnerability Scanner</h1>
           <p className="text-text-muted mt-1">Real-time CVE browser powered by CISA KEV catalog.</p>
         </div>
-        <button 
-          onClick={launchScan}
-          disabled={isScanning}
-          className="flex items-center gap-2 bg-primary-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-primary-600 transition-colors disabled:opacity-50"
-        >
-          {isScanning ? <Loader2 size={16} className="animate-spin" /> : <Target size={16} />}
-          {isScanning ? 'Scanning...' : 'Launch Scan'}
-        </button>
+        <div className="flex items-center gap-3">
+          <input 
+            type="text"
+            value={scanTarget}
+            onChange={e => setScanTarget(e.target.value)}
+            placeholder="Target IP/Domain"
+            className="bg-background border border-border rounded-lg px-3 py-2 text-sm outline-none w-[180px]"
+          />
+          <button 
+            onClick={launchScan}
+            disabled={isScanning || !scanTarget}
+            className="flex items-center gap-2 bg-primary-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-primary-600 transition-colors disabled:opacity-50"
+          >
+            {isScanning ? <Loader2 size={16} className="animate-spin" /> : <Target size={16} />}
+            {isScanning ? 'Scanning...' : 'Launch Scan'}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -198,7 +211,7 @@ export default function Scout() {
                   </tr>
                 )}
                 {!loading && findings.map((f) => (
-                  <tr key={f.id} className="hover:bg-surface/50 transition-colors group cursor-pointer">
+                  <tr key={f.id} onClick={() => navigate(`/spectrum?cve=${f.cve}`)} className="hover:bg-surface/50 transition-colors group cursor-pointer">
                     <td className="px-6 py-4 font-mono text-text-muted">{f.id}</td>
                     <td className="px-6 py-4">
                       <div className="font-bold text-text-main">{f.cve}</div>
