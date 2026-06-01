@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from datetime import datetime
 from sqlalchemy.orm import Session
@@ -15,6 +15,7 @@ class AuditEntry(BaseModel):
     action: str
     module: str
     detail: str
+    ip_address: str | None = None
 
 def _compute_hash(prev_hash: str, entry_data: str) -> str:
     """Chain hash for tamper detection."""
@@ -73,6 +74,7 @@ def append_to_audit_log_db(db: Session, entry: AuditEntry) -> dict:
         action=entry.action,
         module=entry.module,
         detail=entry.detail,
+        ip_address=entry.ip_address,
         hash=new_hash
     )
     db.add(record)
@@ -85,6 +87,7 @@ def append_to_audit_log_db(db: Session, entry: AuditEntry) -> dict:
         "action": record.action,
         "module": record.module,
         "detail": record.detail,
+        "ip_address": record.ip_address,
         "hash": record.hash
     }
 
@@ -110,10 +113,13 @@ def get_audit_log(db: Session = Depends(get_db)):
         "action": log.action,
         "module": log.module,
         "detail": log.detail,
+        "ip_address": log.ip_address or "",
         "hash": log.hash or ""
     } for log in logs]
 
 @router.post("/log")
-def log_action(entry: AuditEntry, db: Session = Depends(get_db)):
+def log_action(entry: AuditEntry, request: Request = None, db: Session = Depends(get_db)):
     """API endpoint to log an action directly."""
+    if request and not entry.ip_address:
+        entry.ip_address = request.headers.get("X-Real-IP", request.client.host if request.client else None)
     return append_to_audit_log_db(db, entry)

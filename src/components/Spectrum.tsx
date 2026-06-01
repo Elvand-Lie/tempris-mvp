@@ -7,6 +7,7 @@ export default function Spectrum() {
   const [loading, setLoading] = useState(true);
   const [activeStageIndex, setActiveStageIndex] = useState(2); // Default to 'Prioritise'
   const [edipDecision, setEdipDecision] = useState<string | null>(null);
+  const [edipRationale, setEdipRationale] = useState<string>('');
 
   useEffect(() => {
     fetch('/api/spectrum/findings')
@@ -50,7 +51,7 @@ export default function Spectrum() {
       await fetch(`/api/spectrum/findings/${finding.id}/edip`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision })
+        body: JSON.stringify({ decision, rationale: edipRationale || null })
       });
     } catch (e) {
       // API call is best-effort for the PoC demo
@@ -225,6 +226,26 @@ export default function Spectrum() {
                 >
                   Ignore (False Positive)
                 </button>
+              </div>
+
+              {/* EDIP Rationale */}
+              <div className="mt-4">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">
+                  Business Justification
+                </label>
+                <textarea
+                  value={edipRationale}
+                  onChange={(e) => setEdipRationale(e.target.value)}
+                  placeholder="Provide business rationale for this decision (required for compliance)..."
+                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-text-main placeholder-text-muted/50 focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 outline-none transition-colors resize-none"
+                  rows={3}
+                />
+                {edipDecision && edipRationale && (
+                  <div className="mt-2 flex items-center gap-2 text-xs text-success">
+                    <CheckCircle2 size={12} />
+                    <span>Rationale recorded for audit trail</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

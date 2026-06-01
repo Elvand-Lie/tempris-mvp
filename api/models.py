@@ -11,6 +11,7 @@ class AuditLog(Base):
     action = Column(String(100), nullable=False)
     module = Column(String(50), nullable=False)
     detail = Column(Text)
+    ip_address = Column(String(45))  # IPv4 or IPv6
     metadata_ = Column("metadata", JSON, default={})
     hash = Column(String(64))
 
@@ -21,6 +22,7 @@ class EdipDecision(Base):
     finding_id = Column(String(50), nullable=False)
     cve = Column(String(20))
     decision = Column(String(20), nullable=False)
+    rationale = Column(Text)  # Business justification for the decision
     decided_by = Column(String(255))
     decided_at = Column(DateTime(timezone=True), server_default=func.now())
 

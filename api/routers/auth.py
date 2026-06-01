@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
 import jwt
@@ -42,9 +42,18 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     return encoded_jwt
 
 @router.post("/login", response_model=TokenResponse)
-def login(req: LoginRequest):
+def login(req: LoginRequest, request: Request):
+    client_ip = request.headers.get("X-Real-IP", request.client.host if request.client else "unknown")
     user = USERS.get(req.email)
     if not user or not bcrypt.verify(req.password, user["password"]):
+        # Log failed login attempt with IP
+        append_to_audit_log(AuditEntry(
+            user=req.email,
+            action="USER_LOGIN_FAILED",
+            module="AUTH",
+            detail=f"Failed login attempt for {req.email}",
+            ip_address=client_ip
+        ))
         raise HTTPException(status_code=401, detail="Incorrect email or password")
     
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -56,7 +65,8 @@ def login(req: LoginRequest):
         user=req.email,
         action="USER_LOGIN",
         module="AUTH",
-        detail="User logged in successfully"
+        detail="User logged in successfully",
+        ip_address=client_ip
     ))
     
     return {
