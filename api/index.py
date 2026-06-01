@@ -69,6 +69,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Rate limiting middleware (auth=5/min, scanner=10/min, api=100/min)
+from middleware.rate_limit import RateLimitMiddleware
+app.add_middleware(RateLimitMiddleware)
+
 # ── SPEAK (Chat) ─────────────────────────────────────────────────────────────
 
 class ChatMessageReq(BaseModel):
@@ -315,6 +319,9 @@ def get_spotlight_history(db: Session = Depends(get_db)):
 
 # --- Serve React SPA (production VPS only) ---
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+# Also check Docker-mounted path
+if not FRONTEND_DIR.exists():
+    FRONTEND_DIR = Path("/frontend")
 if FRONTEND_DIR.exists():
     # Serve static assets (JS, CSS, images)
     app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR / "assets")), name="static_assets")

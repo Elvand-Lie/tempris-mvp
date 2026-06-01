@@ -1,13 +1,15 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from datetime import datetime, timedelta
-from jose import jwt
+from datetime import datetime, timedelta, timezone
+import jwt
 from passlib.hash import bcrypt
 from routers.audit import append_to_audit_log, AuditEntry
 
+import os
+
 router = APIRouter()
 
-SECRET_KEY = "tempris_demo_secret_key_do_not_use_in_prod"
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "tempris_dev_only_change_in_prod_" + "x" * 32)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 120
 
@@ -32,9 +34,9 @@ USERS = {
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt

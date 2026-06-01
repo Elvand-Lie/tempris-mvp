@@ -29,3 +29,9 @@ dist-ssr
 api/venv
 api/__pycache__
 *.pyc
+
+# Secrets — never commit these
+.env
+.env.*
+*.pem
+*.key
