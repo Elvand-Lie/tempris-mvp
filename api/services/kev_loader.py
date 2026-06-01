@@ -25,7 +25,7 @@ def load_kev_data():
                     poc_cves.add(cve_id)
                 priority_code = "P0" # Force PoC demo vulnerabilities to be Critical
                 finding = {
-                    "id": f"#{2000 + idx}",
+                    "id": f"F-{2000 + idx}",
                     "cve": cve_id,
                     "title": vuln.get('name', 'Unknown'),
                     "vendor": "Demo Target",
@@ -79,7 +79,7 @@ def load_kev_data():
         priority = 'P0' if (ransomware_known or cvss >= 9.0) else ('P1' if cvss >= 7.0 else 'P2')
         
         finding = {
-            "id": f"#{1000 + idx}",
+            "id": f"F-{1000 + idx}",
             "cve": cve,
             "title": name,
             "vendor": vendor,
