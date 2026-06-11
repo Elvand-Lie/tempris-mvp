@@ -27,8 +27,15 @@ dist-ssr
 
 # Python
 api/venv
-api/__pycache__
+__pycache__/
 *.pyc
+
+# Databases & journals — runtime artifacts, never commit
+*.db
+*.db-journal
+
+# Deployment tarballs
+*.tar.gz
 
 # Secrets — never commit these
 .env

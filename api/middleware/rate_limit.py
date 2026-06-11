@@ -1,81 +1,102 @@
 """
-Application-level rate limiting middleware for Tempris API.
-Implements per-IP rate limiting using an in-memory sliding window.
+H-04: Rate Limiting Middleware
+In-memory token-bucket per client IP with LRU eviction.
+Auth = 5/min, Scanner = 10/min, API = 100/min.
 """
 import time
-from collections import defaultdict
-from fastapi import Request, HTTPException
+import logging
+from collections import OrderedDict
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+from starlette.requests import Request
+
+logger = logging.getLogger("tempris.ratelimit")
+
+# ── Token-bucket per IP ───────────────────────────────────────────────────────
+
+class _Bucket:
+    __slots__ = ("tokens", "last_refill", "capacity", "rate")
+
+    def __init__(self, capacity: int, rate: float):
+        self.tokens = capacity
+        self.last_refill = time.monotonic()
+        self.capacity = capacity
+        self.rate = rate          # tokens per second
+
+    def consume(self) -> bool:
+        now = time.monotonic()
+        elapsed = now - self.last_refill
+        self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
+        self.last_refill = now
+        if self.tokens >= 1:
+            self.tokens -= 1
+            return True
+        return False
+
+
+# ── H-04 FIX: LRU-bounded bucket storage ─────────────────────────────────────
+
+MAX_BUCKETS = 10_000  # Prevent unbounded memory growth under DDoS
+
+class _LRUBuckets(OrderedDict):
+    """OrderedDict that evicts least-recently-used entries when full."""
+    def __getitem__(self, key):
+        # Move to end on access (most recently used)
+        self.move_to_end(key)
+        return super().__getitem__(key)
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        if len(self) > MAX_BUCKETS:
+            # Evict oldest entry
+            evicted_key, _ = self.popitem(last=False)
+            logger.debug(f"Rate limiter evicted bucket: {evicted_key}")
+
+
+# ── Config ────────────────────────────────────────────────────────────────────
+
+# path prefix → (bucket capacity, refill rate tokens/sec)
+_LIMITS = {
+    "/api/auth":    (5,  5 / 60),       # 5 per minute
+    "/api/scanner": (10, 10 / 60),      # 10 per minute
+}
+_DEFAULT_LIMIT = (100, 100 / 60)        # 100 per minute
+
+_buckets = _LRUBuckets()
+
+
+def _key(ip: str, prefix: str) -> str:
+    return f"{ip}:{prefix}"
+
+
+def _get_limit(path: str) -> tuple[int, float]:
+    for prefix, limit in _LIMITS.items():
+        if path.startswith(prefix):
+            return limit
+    return _DEFAULT_LIMIT
+
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """
-    Rate limiting middleware with different limits per endpoint category:
-    - /api/auth/*: 5 requests per 60 seconds (brute force protection)
-    - /api/scanner/*: 10 requests per 60 seconds (scan abuse prevention)
-    - /api/*: 100 requests per 60 seconds (general API)
-    """
-
-    def __init__(self, app):
-        super().__init__(app)
-        # {category: {ip: [timestamps]}}
-        self.requests: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-        self.limits = {
-            "auth": {"rate": 5, "window": 60},
-            "scanner": {"rate": 10, "window": 60},
-            "api": {"rate": 100, "window": 60},
-        }
-
-    def _get_category(self, path: str) -> str | None:
-        if path.startswith("/api/auth"):
-            return "auth"
-        elif path.startswith("/api/scanner"):
-            return "scanner"
-        elif path.startswith("/api/"):
-            return "api"
-        return None  # No rate limit for non-API routes (frontend)
-
-    def _is_rate_limited(self, category: str, client_ip: str) -> tuple[bool, int]:
-        now = time.time()
-        limit = self.limits[category]
-        window = limit["window"]
-        max_requests = limit["rate"]
-
-        # Clean old entries outside the window
-        self.requests[category][client_ip] = [
-            t for t in self.requests[category][client_ip] if now - t < window
-        ]
-
-        current_count = len(self.requests[category][client_ip])
-
-        if current_count >= max_requests:
-            # Calculate retry-after
-            oldest = self.requests[category][client_ip][0]
-            retry_after = int(window - (now - oldest)) + 1
-            return True, retry_after
-
-        # Record this request
-        self.requests[category][client_ip].append(now)
-        return False, 0
-
     async def dispatch(self, request: Request, call_next):
-        path = request.url.path
-        category = self._get_category(path)
-
-        if category is None:
+        # Skip health check
+        if request.url.path == "/api/health":
             return await call_next(request)
 
-        client_ip = request.headers.get("X-Real-IP", request.client.host if request.client else "unknown")
-        is_limited, retry_after = self._is_rate_limited(category, client_ip)
+        ip = request.client.host if request.client else "0.0.0.0"
+        path = request.url.path
+        cap, rate = _get_limit(path)
+        k = _key(ip, path.split("/")[2] if path.count("/") >= 3 else "api")
 
-        if is_limited:
+        bucket = _buckets.get(k)
+        if bucket is None:
+            bucket = _Bucket(cap, rate)
+            _buckets[k] = bucket
+
+        if not bucket.consume():
             return JSONResponse(
                 status_code=429,
-                content={
-                    "detail": f"Rate limit exceeded for {category} endpoints. Try again in {retry_after}s.",
-                    "retry_after": retry_after
-                },
-                headers={"Retry-After": str(retry_after)}
+                content={"detail": "Rate limit exceeded. Please try again shortly."},
+                headers={"Retry-After": str(int(1 / rate))},
             )
 
         response = await call_next(request)

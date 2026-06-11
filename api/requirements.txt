@@ -1,10 +1,15 @@
-fastapi>=0.115.12
+fastapi==0.115.12
 uvicorn==0.34.3
 pydantic==2.11.7
 SQLAlchemy==2.0.25
 psycopg2-binary==2.9.9
 PyJWT>=2.12.0
+python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-multipart==0.0.27
+chromadb==0.4.24
+numpy<2.0
 requests==2.33.0
+# M-03: Consider adding alembic for schema migrations in future
+# alembic==1.15.2

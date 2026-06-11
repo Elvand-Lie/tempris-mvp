@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { MessageSquare, X, Send, Bot, User, Loader2 } from 'lucide-react';
+import { MessageSquare, X, Send, Bot, User, Loader2, RotateCcw } from 'lucide-react';
+import { apiGet, apiPost } from '../lib/api';
 
 export default function SpeakWidget() {
   const [isOpen, setIsOpen] = useState(false);
@@ -21,8 +22,7 @@ export default function SpeakWidget() {
   // Load chat history from DB on first open
   useEffect(() => {
     if (isOpen && !historyLoaded) {
-      fetch('/api/speak/history')
-        .then(r => r.json())
+      apiGet('/api/speak/history')
         .then(data => {
           if (data.session_id) {
             setSessionId(data.session_id);
@@ -45,16 +45,11 @@ export default function SpeakWidget() {
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/speak/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, session_id: sessionId })
-      });
-      const data = await res.json();
+      const data = await apiPost('/api/speak/chat', { message: text, session_id: sessionId });
       if (data.session_id) setSessionId(data.session_id);
       setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
     } catch (e) {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'I am currently processing your request. Please try again in a moment.' }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I was unable to process that request. The AI service may be temporarily unavailable. Please try again.' }]);
     } finally {
       setIsLoading(false);
     }
@@ -84,9 +79,18 @@ export default function SpeakWidget() {
                 <p className="text-[10px] text-primary-500 uppercase tracking-wider font-semibold">Tempris AI Orchestrator</p>
               </div>
             </div>
-            <button onClick={() => setIsOpen(false)} className="text-text-muted hover:text-text-main transition-colors">
-              <X size={20} />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { setMessages([]); setSessionId(null); }}
+                title="New Chat"
+                className="text-text-muted hover:text-primary-500 transition-colors p-1 rounded-md hover:bg-primary-500/10"
+              >
+                <RotateCcw size={16} />
+              </button>
+              <button onClick={() => setIsOpen(false)} className="text-text-muted hover:text-text-main transition-colors">
+                <X size={20} />
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4">

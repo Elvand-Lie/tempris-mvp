@@ -1,25 +1,32 @@
 import { useEffect, useState } from 'react';
 import { Activity, ShieldAlert, CheckCircle, AlertTriangle, XCircle, TrendingUp, Bell, Target, Shield, FileText, MessageSquare, Database } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { apiGet } from '../lib/api';
 
 export default function Synthesis() {
   const [data, setData] = useState<any>(null);
   const [kevStats, setKevStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/synthesis/dashboard').then(res => res.json()),
-      fetch('/api/scout/stats').then(res => res.json())
+      apiGet('/api/synthesis/dashboard'),
+      apiGet('/api/scout/stats')
     ]).then(([dashData, statsData]) => {
       setData(dashData);
       setKevStats(statsData);
       setLoading(false);
+    }).catch((e) => {
+      setError(e.message || 'Failed to initialize SYNTHESIS telemetry. Connection timed out.');
+      setLoading(false);
     });
   }, []);
 
-  if (loading || !data) return <div className="p-8 text-text-muted animate-pulse">Initializing SYNTHESIS Telemetry...</div>;
+  if (loading) return <div className="p-8 text-text-muted animate-pulse">Initializing SYNTHESIS Telemetry...</div>;
+  if (error) return <div className="p-8 text-danger flex items-center gap-2"><AlertTriangle size={20}/> {error}</div>;
+  if (!data) return null;
 
   const getIcon = (name: string) => {
     if (name === 'SPECTRUM') return <Activity size={18} />;

@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, NavLink } from 'react-router-dom';
-import { LayoutDashboard, Activity, Target, Shield, FileText, Settings, ShieldAlert, LogOut } from 'lucide-react';
+import { LayoutDashboard, Activity, Target, Shield, FileText, Settings, ShieldAlert, LogOut, ClipboardCheck, Server } from 'lucide-react';
 import SpeakWidget from './components/SpeakWidget';
 import LoginPage from './components/LoginPage';
+import { clearToken } from './lib/api';
 
 import Synthesis from './components/Synthesis';
 import Spectrum from './components/Spectrum';
@@ -11,6 +12,8 @@ import Strike from './components/Strike';
 import Standard from './components/Standard';
 import Spotlight from './components/Spotlight';
 import AuditLog from './components/AuditLog';
+import GrcTes from './components/GrcTes';
+import Assets from './components/Assets';
 
 function Sidebar({ onLogout }: { onLogout: () => void }) {
   const navItems = [
@@ -19,6 +22,8 @@ function Sidebar({ onLogout }: { onLogout: () => void }) {
     { name: 'SCOUT', path: '/scout', icon: <Target size={20} /> },
     { name: 'STRIKE', path: '/strike', icon: <Shield size={20} /> },
     { name: 'STANDARD', path: '/standard', icon: <FileText size={20} /> },
+    { name: 'GRC', path: '/grc', icon: <ClipboardCheck size={20} /> },
+    { name: 'ASSETS', path: '/assets', icon: <Server size={20} /> },
     { name: 'SPOTLIGHT', path: '/spotlight', icon: <FileText size={20} /> },
   ];
 
@@ -96,9 +101,18 @@ function App() {
   const [user, setUser] = useState<any>(null);
 
   const handleLogout = () => {
-    localStorage.removeItem('tempris_token');
+    clearToken();
     setUser(null);
   };
+
+  // Listen for auth expiry events from apiFetch
+  useEffect(() => {
+    const handleExpiry = () => {
+      setUser(null);
+    };
+    window.addEventListener('tempris:logout', handleExpiry);
+    return () => window.removeEventListener('tempris:logout', handleExpiry);
+  }, []);
 
   if (!user) {
     return <LoginPage onLogin={setUser} />;
@@ -120,6 +134,8 @@ function App() {
               <Route path="/scout" element={<Scout />} />
               <Route path="/strike" element={<Strike />} />
               <Route path="/standard" element={<Standard />} />
+              <Route path="/grc" element={<GrcTes />} />
+              <Route path="/assets" element={<Assets />} />
               <Route path="/spotlight" element={<Spotlight />} />
               <Route path="/audit" element={<AuditLog />} />
             </Routes>

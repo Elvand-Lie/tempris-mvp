@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ShieldAlert, Bot } from 'lucide-react';
+import { setToken, apiPost } from '../lib/api';
 
 interface LoginPageProps {
   onLogin: (user: any) => void;
@@ -17,18 +18,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     setError('');
 
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Invalid credentials');
-      }
-
-      const data = await response.json();
-      localStorage.setItem('tempris_token', data.access_token);
+      const data = await apiPost(`/api/auth/login`, { email, password });
+      setToken(data.access_token);
       onLogin(data.user);
     } catch (err: any) {
       setError(err.message || 'Failed to login');

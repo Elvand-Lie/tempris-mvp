@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends
 from typing import List, Optional
 from services.kev_loader import get_all_findings
+from routers.auth import get_current_user
 import math
 
 router = APIRouter()
@@ -11,7 +12,8 @@ def get_scout_findings(
     limit: int = Query(20, ge=1, le=100),
     search: Optional[str] = None,
     vendor: Optional[str] = None,
-    ransomware_only: bool = False
+    ransomware_only: bool = False,
+    user = Depends(get_current_user),
 ):
     """Returns paginated, filterable findings for the SCOUT browser."""
     all_findings = get_all_findings()
@@ -20,7 +22,7 @@ def get_scout_findings(
     filtered = all_findings
     if search:
         search_lower = search.lower()
-        filtered = [f for f in filtered if search_lower in f["cve"].lower() or search_lower in f["title"].lower() or search_lower in f["id"].lower()]
+        filtered = [f for f in filtered if search_lower in (f.get("cve") or "").lower() or search_lower in (f.get("title") or "").lower() or search_lower in (f.get("id") or "").lower()]
         
     if vendor:
         filtered = [f for f in filtered if f["vendor"] == vendor]
@@ -45,7 +47,7 @@ def get_scout_findings(
     }
 
 @router.get("/stats")
-def get_scout_stats():
+def get_scout_stats(user = Depends(get_current_user)):
     """Returns aggregate stats for the SCOUT sidebar."""
     all_findings = get_all_findings()
     
@@ -60,7 +62,7 @@ def get_scout_stats():
     }
 
 @router.get("/vendors")
-def get_scout_vendors():
+def get_scout_vendors(user = Depends(get_current_user)):
     """Returns a list of unique vendors for the filter dropdown."""
     all_findings = get_all_findings()
     vendors = set(f["vendor"] for f in all_findings if f["vendor"])

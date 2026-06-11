@@ -25,6 +25,12 @@ class EdipDecision(Base):
     rationale = Column(Text)  # Business justification for the decision
     decided_by = Column(String(255))
     decided_at = Column(DateTime(timezone=True), server_default=func.now())
+    # L3: EDIP Engine enhancements
+    auto_classified = Column(Boolean, default=False)
+    confidence = Column(Float)
+    explanation = Column(Text)
+    original_decision = Column(String(20))  # for tracking overrides
+    override_reason = Column(Text)
 
 
 class StrikeAuthorization(Base):
@@ -108,3 +114,64 @@ class TesSnapshot(Base):
     finding_count = Column(Integer)
     critical_count = Column(Integer)
     snapshot_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── Phase 2: Asset Inventory ─────────────────────────────────────────────────
+
+class Asset(Base):
+    """L5-02/03/08: Asset Inventory for CTEM cycle. Links to findings and controls."""
+    __tablename__ = "assets"
+    id = Column(String(50), primary_key=True)  # e.g., "ASSET-001"
+    name = Column(String(255), nullable=False)
+    asset_type = Column(String(50))  # server, application, database, network, endpoint, iot
+    ip_address = Column(String(50))
+    hostname = Column(String(255))
+    criticality = Column(String(20), default="medium")  # critical, high, medium, low
+    owner = Column(String(255))
+    environment = Column(String(50))  # production, staging, development
+    tags = Column(JSON, default=[])
+    status = Column(String(20), default="active")  # active, decommissioned, maintenance
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── Phase 3: Scanner Findings Persistence ─────────────────────────────────────
+
+class ScanFinding(Base):
+    """L1-04: Persist scan findings to DB so they survive restarts."""
+    __tablename__ = "scan_findings"
+    id = Column(String(50), primary_key=True)
+    scan_id = Column(String(50))
+    target = Column(String(255))
+    port = Column(Integer)
+    service = Column(String(50))
+    risk = Column(String(20))
+    detail = Column(Text)
+    status = Column(String(20), default="new")
+    asset_id = Column(String(50))  # link to assets table
+    edip_decision = Column(String(20))
+    discovered_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── Phase 4: GRC / ISO 42001 ─────────────────────────────────────────────────
+
+class GrcState(Base):
+    """ISO/IEC 42001:2023 GRC state — toggles and SOP builder state."""
+    __tablename__ = "grc_states"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    toggles = Column(JSON)  # {agm: [bool], drf: [bool], tef: [bool]}
+    sop_state = Column(JSON)  # [{id, pic, notes, endUserAgreed, picAgreed}]
+    updated_by = Column(String(255))
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GrcSignoff(Base):
+    """Tracks individual PIC / end-user sign-offs for ISO 42001 controls."""
+    __tablename__ = "grc_signoffs"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    control_id = Column(String(20), nullable=False)
+    signoff_type = Column(String(20), nullable=False)  # 'end_user' or 'pic'
+    signed_by = Column(String(255))
+    signed_at = Column(DateTime(timezone=True), server_default=func.now())
+    notes = Column(Text)

@@ -4,7 +4,8 @@ from services.kev_loader import get_all_findings
 from services.tes_engine import calculate_tes, TESInputs
 from services.database import get_db
 from models import TesSnapshot
-from datetime import datetime, timedelta
+from routers.auth import get_current_user
+from datetime import datetime, timedelta, timezone
 
 router = APIRouter()
 
@@ -56,12 +57,12 @@ def get_dashboard_data():
     }
 
 @router.get("/dashboard")
-def dashboard(db: Session = Depends(get_db)):
+def dashboard(db: Session = Depends(get_db), user = Depends(get_current_user)):
     data = get_dashboard_data()
     
     # Compute TES trend from DB snapshots
     tes_trend = "+0.0"
-    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
     old_snapshot = db.query(TesSnapshot).filter(
         TesSnapshot.snapshot_at >= thirty_days_ago
     ).order_by(TesSnapshot.snapshot_at.asc()).first()
@@ -75,7 +76,7 @@ def dashboard(db: Session = Depends(get_db)):
     return data
 
 @router.post("/tes-snapshot")
-def take_tes_snapshot(db: Session = Depends(get_db)):
+def take_tes_snapshot(db: Session = Depends(get_db), user = Depends(get_current_user)):
     """Manually trigger a TES snapshot (also called on startup)."""
     data = get_dashboard_data()
     all_findings = get_all_findings()

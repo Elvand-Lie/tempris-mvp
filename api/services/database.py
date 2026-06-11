@@ -1,10 +1,20 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+import os
+import logging
 
-# PostgreSQL running in Docker on the same host
-DATABASE_URL = "postgresql://tempris:M8n7b6v5c4x3z21~@172.18.0.3:5432/tempris_db"
+logger = logging.getLogger("tempris.database")
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=10, max_overflow=20)
+# H-01: Database URL from environment — no hardcoded secrets in production
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "sqlite:///./tempris.db"  # dev-only fallback
+)
+
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=10, max_overflow=20)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -21,8 +31,9 @@ def init_db():
     from models import AuditLog, EdipDecision, StrikeAuthorization, StrikeSimulation
     from models import ControlStatus, ControlEvidence, SpotlightReport
     from models import ChatSession, ChatMessage, TesSnapshot
+    from models import Asset, ScanFinding, GrcState, GrcSignoff
     Base.metadata.create_all(bind=engine)
-    print("DB: All tables created/verified.")
+    logger.info("All tables created/verified.")
     
     # Enforce append-only on audit_logs
     try:
@@ -33,6 +44,6 @@ def init_db():
                 )
             )
             conn.commit()
-            print("DB: audit_logs append-only enforced.")
+            logger.info("audit_logs append-only enforced.")
     except Exception as e:
-        print(f"DB: Could not enforce append-only (may already be set): {e}")
+        logger.debug(f"Could not enforce append-only (may already be set): {e}")
