@@ -490,11 +490,27 @@ if FRONTEND_DIR.exists():
     @app.get("/")
     async def serve_root():
         return FileResponse(str(FRONTEND_DIR / "index.html"))
+    # Serve VDP policy page at /security (public, no auth)
+    DOCS_DIR = Path(__file__).resolve().parent / "docs"
+    if not DOCS_DIR.exists():
+        DOCS_DIR = Path("/app/docs")
+
+    @app.get("/security")
+    async def serve_vdp():
+        vdp_path = DOCS_DIR / "tempris_vdp_policy.html"
+        if vdp_path.is_file():
+            return FileResponse(str(vdp_path), media_type="text/html")
+        raise HTTPException(status_code=404, detail="VDP policy not found")
 
     # Catch-all: serve index.html for any non-API route (SPA client-side routing)
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
         if full_path.startswith("api"):
+            raise HTTPException(status_code=404, detail="Not found")
+        if full_path in (".well-known/security.txt", ".well-known/pgp-key.txt"):
+            file_path = (FRONTEND_DIR / full_path).resolve()
+            if file_path.is_file() and str(file_path).startswith(str(FRONTEND_DIR.resolve())):
+                return FileResponse(str(file_path), media_type="text/plain")
             raise HTTPException(status_code=404, detail="Not found")
         # H-13: Block dotfiles and sensitive paths
         if any(segment.startswith(".") for segment in full_path.split("/")):
