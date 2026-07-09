@@ -1,0 +1,2181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TEMPRIS — Quantum HNDL + CVE-2025-67038 BRIDGE:BREAK · Elvand Dev Ref · CTEM + EDIP Foundation · Build Specification v50</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Inter:wght@300;400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#03060A;--panel:#080F1A;--panel2:#0B1622;--panel3:#0F1E30;
+  --border:#0F2035;--border2:#1A3050;--border3:#243D5C;
+  --cyan:#00C8F0;--gold:#F59E0B;--purple:#8B5CF6;
+  --orange:#FF7A30;--red:#E8203A;--green:#20E87A;--teal:#0EA5A0;
+  --text:#D4E8F2;--text2:#8DBBD4;--muted:#4A7A9B;
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;font-size:13px;line-height:1.7;overflow-x:hidden}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:var(--border2)}
+
+/* NAV */
+nav{position:sticky;top:0;z-index:100;background:rgba(3,6,10,.95);backdrop-filter:blur(10px);border-bottom:1px solid var(--border2)}
+.nav-inner{max-width:1200px;margin:0 auto;padding:0 20px;display:flex;align-items:center;height:48px;gap:0}
+.nav-logo{font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:#fff;letter-spacing:2px;margin-right:20px;white-space:nowrap}
+.nav-logo span{color:var(--cyan)}
+.nav-links{display:flex;gap:0;flex:1;overflow-x:auto}
+.nav-links::-webkit-scrollbar{display:none}
+.nl{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:.5px;color:var(--muted);padding:0 12px;height:48px;display:flex;align-items:center;text-decoration:none;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap}
+.nl:hover,.nl.active{color:var(--cyan);border-bottom-color:var(--cyan)}
+.nav-badge{margin-left:auto;font-family:'Space Mono',monospace;font-size:8px;background:rgba(255,122,48,.12);border:1px solid rgba(255,122,48,.25);color:var(--orange);padding:4px 10px;white-space:nowrap;letter-spacing:.5px}
+
+/* LAYOUT */
+.amb{position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:radial-gradient(ellipse 70% 45% at 50% -5%,rgba(0,200,240,.06) 0%,transparent 70%),
+             radial-gradient(ellipse 30% 30% at 0% 70%,rgba(255,122,48,.04) 0%,transparent 60%)}
+.page{position:relative;z-index:1}
+.section{padding:56px 20px;border-bottom:1px solid var(--border);max-width:1200px;margin:0 auto}
+.section.dark{background:var(--panel);max-width:100%;padding:56px 0}
+.section.dark .inner{max-width:1200px;margin:0 auto;padding:0 20px}
+.inner{max-width:1200px;margin:0 auto}
+.eyebrow{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:4px;color:var(--muted);text-transform:uppercase;margin-bottom:8px}
+.h1{font-family:'Syne',sans-serif;font-size:clamp(26px,4vw,38px);font-weight:800;color:#fff;line-height:1.15;margin-bottom:12px}
+.h1 .acc{color:var(--cyan)}
+.h2{font-family:'Syne',sans-serif;font-size:clamp(18px,3vw,24px);font-weight:800;color:#fff;line-height:1.2;margin-bottom:10px}
+.h2 .acc{color:var(--cyan)}
+.h3{font-family:'Syne',sans-serif;font-size:15px;font-weight:700;color:#fff;margin-bottom:6px}
+.lead{font-size:13px;color:var(--text2);line-height:1.85;max-width:760px;margin-bottom:20px}
+.sdiv{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:4px;color:var(--muted);text-transform:uppercase;padding:12px 0 8px;border-top:1px solid var(--border);margin:24px 0 14px}
+
+/* GRIDS */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+
+/* CARDS */
+.card{background:var(--panel);border:1px solid var(--border2);padding:18px 20px}
+.card.c{border-top:2px solid var(--cyan)}.card.o{border-top:2px solid var(--orange)}
+.card.g{border-top:2px solid var(--green)}.card.r{border-top:2px solid var(--red)}
+.card.p{border-top:2px solid var(--purple)}.card.go{border-top:2px solid var(--gold)}
+
+/* MODULE BLOCKS */
+.mod-block{border:1px solid var(--border2);margin-bottom:20px;overflow:hidden}
+.mod-header{padding:14px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-bottom:1px solid var(--border2)}
+.mod-id{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:2px;flex-shrink:0}
+.mod-name{font-family:'Syne',sans-serif;font-size:17px;font-weight:800;color:#fff}
+.mod-name .star{color:var(--gold);font-size:14px}
+.mod-tagline{font-size:11px;color:var(--text2)}
+.mod-tags{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+.tag{font-family:'Space Mono',monospace;font-size:7px;padding:3px 7px;border-radius:2px;display:inline-block;letter-spacing:.5px;white-space:nowrap}
+.tag-c{background:rgba(0,200,240,.1);color:var(--cyan);border:1px solid rgba(0,200,240,.2)}
+.tag-o{background:rgba(255,122,48,.1);color:var(--orange);border:1px solid rgba(255,122,48,.2)}
+.tag-g{background:rgba(32,232,122,.1);color:var(--green);border:1px solid rgba(32,232,122,.2)}
+.tag-p{background:rgba(139,92,246,.1);color:var(--purple);border:1px solid rgba(139,92,246,.2)}
+.tag-go{background:rgba(245,158,11,.1);color:var(--gold);border:1px solid rgba(245,158,11,.2)}
+.tag-mu{background:rgba(74,122,155,.1);color:var(--muted);border:1px solid rgba(74,122,155,.2)}
+.mod-body{padding:18px 20px;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.mod-section-title{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:3px;color:var(--muted);margin-bottom:10px;text-transform:uppercase}
+.mod-list{list-style:none;padding:0}
+.mod-list li{font-size:11px;color:var(--text2);padding:4px 0;border-bottom:1px solid var(--border);line-height:1.6;display:flex;gap:8px}
+.mod-list li:last-child{border-bottom:none}
+.mod-list li::before{content:'→';color:var(--cyan);font-size:10px;flex-shrink:0;margin-top:1px}
+.mod-list li.r::before{color:var(--red)}
+.mod-list li.g::before{content:'✓';color:var(--green)}
+.mod-list li.o::before{content:'◆';color:var(--orange)}
+.api-row{display:flex;align-items:baseline;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:11px}
+.api-row:last-child{border-bottom:none}
+.api-method{font-family:'Space Mono',monospace;font-size:8px;padding:2px 6px;border-radius:2px;flex-shrink:0}
+.get{background:rgba(32,232,122,.12);color:var(--green)}
+.post{background:rgba(0,200,240,.12);color:var(--cyan)}
+.put{background:rgba(245,158,11,.12);color:var(--gold)}
+.del{background:rgba(232,32,58,.12);color:var(--red)}
+.api-path{font-family:'Space Mono',monospace;font-size:9px;color:#fff}
+.api-desc{font-size:10px;color:var(--muted)}
+.tech-pill{display:inline-block;font-family:'Space Mono',monospace;font-size:8px;padding:3px 8px;background:var(--panel2);border:1px solid var(--border2);color:var(--text2);margin:2px 3px 2px 0;border-radius:2px}
+
+/* CTEM CYCLE */
+.ctem-strip{display:grid;grid-template-columns:repeat(7,1fr);gap:0;border:1px solid var(--border2);margin:16px 0}
+.cs{padding:12px 6px;text-align:center;border-right:1px solid var(--border2)}
+.cs:last-child{border-right:none}
+.cs-n{font-family:'Space Mono',monospace;font-size:11px;font-weight:700;color:var(--cyan);display:block;margin-bottom:4px}
+.cs-name{font-size:10px;font-weight:600;color:#fff;display:block;margin-bottom:3px}
+.cs-mod{font-size:8px;color:var(--muted);display:block;margin-bottom:4px}
+.cs-own{font-size:8px;padding:2px 5px;border-radius:2px;display:inline-block}
+
+/* SOP TABLE */
+.sop-table{width:100%;border-collapse:collapse}
+.sop-table th{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:2px;color:var(--muted);padding:8px 12px;text-align:left;background:var(--panel2);border-bottom:1px solid var(--border2)}
+.sop-table td{padding:9px 12px;border-bottom:1px solid var(--border);font-size:11px;vertical-align:top;line-height:1.6}
+.sop-table tr:last-child td{border-bottom:none}
+.sop-table tr:hover td{background:rgba(255,255,255,.01)}
+.num{font-family:'Space Mono',monospace;font-size:10px;font-weight:700;color:var(--cyan);width:32px;flex-shrink:0}
+.owner{font-size:10px;color:var(--muted);white-space:nowrap}
+.must{font-family:'Space Mono',monospace;font-size:7px;padding:2px 6px;background:rgba(232,32,58,.1);color:var(--red);border:1px solid rgba(232,32,58,.2)}
+.when{font-family:'Space Mono',monospace;font-size:7px;padding:2px 6px;background:rgba(0,200,240,.08);color:var(--cyan);border:1px solid rgba(0,200,240,.15)}
+
+/* TACF DOMAIN CARDS */
+.tacf-card{background:var(--panel);border:1px solid var(--border2);padding:18px 20px}
+.tacf-id{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);margin-bottom:6px;display:block;letter-spacing:2px}
+.tacf-title{font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:#fff;margin-bottom:4px}
+.tacf-sub{font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.6}
+.tacf-controls{list-style:none;padding:0}
+.tacf-controls li{font-size:10px;color:var(--text2);padding:3px 0;border-bottom:1px solid var(--border);display:flex;gap:6px;align-items:baseline}
+.tacf-controls li:last-child{border-bottom:none}
+.tc-id{font-family:'Space Mono',monospace;font-size:8px;color:var(--cyan);flex-shrink:0}
+
+/* ARCH DIAGRAM */
+.arch-flow{display:flex;flex-direction:column;gap:2px;margin:16px 0}
+.arch-layer{display:flex;align-items:stretch;gap:2px}
+.arch-label{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;color:var(--muted);width:120px;flex-shrink:0;display:flex;align-items:center;text-align:right;justify-content:flex-end;padding-right:10px}
+.arch-content{flex:1;display:flex;gap:2px;flex-wrap:wrap}
+.arch-box{background:var(--panel);border:1px solid var(--border2);padding:8px 12px;font-size:10px;color:var(--text);flex:1;min-width:80px;text-align:center}
+.arch-box.core{border-color:var(--cyan);background:rgba(0,200,240,.05)}
+.arch-box.w1{border-color:var(--orange);background:rgba(255,122,48,.04)}
+.arch-box.infra{border-color:var(--purple);background:rgba(139,92,246,.04)}
+.arch-arrow{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px;padding:2px 0}
+
+/* ALERT BOX */
+.alert{padding:14px 18px;margin:14px 0;font-size:12px;line-height:1.75;border:1px solid}
+.alert.info{background:rgba(0,200,240,.04);border-color:rgba(0,200,240,.2);color:var(--text)}
+.alert.warn{background:rgba(245,158,11,.05);border-color:rgba(245,158,11,.2);color:var(--text)}
+.alert.danger{background:rgba(232,32,58,.04);border-color:rgba(232,32,58,.2);color:var(--text)}
+
+/* DATA SCHEMA */
+.schema{background:var(--panel2);border:1px solid var(--border2);padding:14px 16px;font-family:'Space Mono',monospace;font-size:10px;color:var(--text2);line-height:1.8;overflow-x:auto}
+.schema .k{color:var(--cyan)}.schema .v{color:var(--green)}.schema .t{color:var(--muted)}.schema .s{color:var(--gold)}
+
+/* SRC */
+.src{font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);margin-top:10px;line-height:1.8}
+
+/* RESPONSIVE */
+@media(max-width:860px){
+  .g2,.g3,.g4{grid-template-columns:1fr}
+  .mod-body{grid-template-columns:1fr}
+  .ctem-strip{grid-template-columns:repeat(4,1fr)}
+  .arch-label{display:none}
+  .section{padding:36px 14px}
+  .section.dark .inner{padding:0 14px}
+}
+@media(max-width:520px){
+  .ctem-strip{grid-template-columns:repeat(3,1fr)}
+  .nav-links{display:none}
+  .h1{font-size:22px}
+  .h2{font-size:18px}
+}
+
+/* ISO 42001 v45 responsive enhancements */
+#iso42001-banner { box-sizing: border-box; }
+@media(max-width:768px){
+  #iso42001-banner { padding: 12px 14px; font-size:10px; }
+  #iso42001-banner div { flex-direction: column; align-items: flex-start; }
+}
+
+/* ═══════════════════════════════════════════
+   TEMPRIS v50 — GLOBAL RESPONSIVE PATCH
+   ═══════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { overflow-x: hidden; max-width: 100vw; }
+table { width: 100%; border-collapse: collapse; word-break: break-word; }
+.tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+.tab-nav, .tab-bar, .nav-links {
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  flex-wrap: nowrap; scrollbar-width: thin;
+}
+.tab-nav::-webkit-scrollbar, .tab-bar::-webkit-scrollbar { height: 3px; }
+.tab-nav::-webkit-scrollbar-thumb, .tab-bar::-webkit-scrollbar-thumb { background: rgba(0,200,240,0.3); }
+pre, code, .code-block { overflow-x: auto; white-space: pre-wrap; word-break: break-word; max-width: 100%; }
+body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+.cti-strip-v50 {
+  border:.5px solid rgba(0,200,240,.18); border-radius:6px;
+  padding:9px 14px; margin-bottom:12px;
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:10px;
+}
+.cti-strip-v50 .cti-label {
+  font-family:'Space Mono','IBM Plex Mono',monospace;
+  font-size:9px; letter-spacing:2px; font-weight:600;
+  text-transform:uppercase; flex-shrink:0;
+}
+.cti-strip-v50 span { font-family:'Space Mono','IBM Plex Mono',monospace; font-size:9px; white-space:nowrap; }
+@media (max-width:768px) {
+  .g2,.g3,.g4,.engine-grid,.edip-grid,.hero-grid,.mod-grid,
+  .detail-row,.fin-grid,.btl-row,.loop-grid,.cards,.card-row {
+    grid-template-columns:1fr !important; display:grid !important;
+  }
+  .ctem-flow { grid-template-columns:repeat(3,1fr) !important; }
+  .compare-table,.dt { font-size:11px !important; }
+  .page,.wrap,.inner,.wrapper,.app-wrapper {
+    padding-left:14px !important; padding-right:14px !important; max-width:100% !important;
+  }
+  .hero,section,.section { padding-left:16px !important; padding-right:16px !important; }
+  nav,.hdr-inner { padding:0 12px !important; }
+  .h1,.pg-title { font-size:clamp(22px,6vw,34px) !important; }
+  .h2 { font-size:clamp(18px,5vw,26px) !important; }
+  .hstat-val,.clock-num { font-size:clamp(28px,7vw,46px) !important; }
+  .ticker { flex-direction:column; align-items:flex-start; gap:6px; }
+  .tstats { margin-left:0 !important; flex-wrap:wrap; }
+  .pill { font-size:10px !important; padding:3px 8px !important; }
+  .tab { padding:0 10px !important; font-size:9px !important; }
+  .hero-kpis { flex-wrap:wrap !important; gap:8px !important; }
+  .rung-hdr { flex-direction:column !important; }
+  .hdr-top { flex-direction:column !important; }
+}
+@media (max-width:480px) {
+  .ctem-flow { grid-template-columns:repeat(2,1fr) !important; }
+  .edip-grid,.hero-grid,.fin-grid { grid-template-columns:1fr !important; }
+  pre { font-size:10px !important; }
+}
+nav,.hdr { z-index:100; }
+/* END v50 PATCH */
+
+</style>
+</head>
+<body>
+
+
+<!-- QUANTUM + BRIDGEBREAK ELVAND DEV REFERENCE v50 -->
+<div style="margin:16px 0;background:#080F1A;border:1px solid #1A3050;border-left:3px solid #00C8F0;border-radius:6px;padding:18px 22px;font-family:'IBM Plex Mono','Space Mono',monospace">
+  <div style="font-size:9px;letter-spacing:3px;color:#00C8F0;text-transform:uppercase;margin-bottom:12px">DEVELOPER ALERT · QUANTUM HNDL + CVE-2025-67038 BRIDGE:BREAK · v50 DUAL THREAT UPDATE</div>
+
+  <!-- SECTION A: QUANTUM -->
+  <div style="font-size:11px;color:#8B5CF6;font-weight:600;font-family:'Inter',sans-serif;margin-bottom:6px">A. HARVEST NOW DECRYPT LATER (HNDL) — SEALCHAIN MODULE CONTEXT</div>
+  <div style="background:#03060A;border:1px solid #0F2035;padding:12px 14px;margin-bottom:14px;font-size:11px;color:#8DBBD4;line-height:1.9">
+    <span style="color:#F59E0B">// THREAT CONTEXT</span><br>
+    Type     : Strategic long-horizon cryptographic threat<br>
+    Vector   : Nation-states harvesting encrypted traffic today for future quantum decryption<br>
+    Timeline : Q-Day estimated 2030–2038 (RSA-2048 / ECC-256 vulnerable)<br>
+    Scale    : ~$1B/yr to store 1% global traffic · 241M GB/day<br>
+    Target   : MAS-regulated FIs with long-lived KYC, loan, trade, regulatory data<br>
+    Response : Migrate to NIST PQC standards (CRYSTALS-Kyber FIPS 203, Dilithium FIPS 204)<br>
+    <br>
+    <span style="color:#F59E0B">// EDIP SSS INTAKE RECORD — ADD TO edip_non_cve_extension.py</span><br>
+    hndl_finding = {<br>
+    &nbsp;&nbsp;"finding_id": "SSS-2026-0626-HNDL-001",<br>
+    &nbsp;&nbsp;"type": "NON_CVE_SSS",<br>
+    &nbsp;&nbsp;"category": "STRATEGIC_CRYPTO",<br>
+    &nbsp;&nbsp;"title": "Harvest Now Decrypt Later — Post-Quantum Cryptographic Exposure",<br>
+    &nbsp;&nbsp;"base_severity": 8.5,<br>
+    &nbsp;&nbsp;"modifiers": {"AGM": 1.2, "DRF": 1.3, "TEF": 1.3},<br>
+    &nbsp;&nbsp;"tes": 10.0,  # capped<br>
+    &nbsp;&nbsp;"decision": "ESCALATE",<br>
+    &nbsp;&nbsp;"recommended_action": "COMPENSATING_CONTROL",<br>
+    &nbsp;&nbsp;"controls": ["Deploy CRYSTALS-Kyber (FIPS 203) for key encapsulation",<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"Deploy CRYSTALS-Dilithium (FIPS 204) for digital signatures",<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"Audit RSA/ECC-dependent data flows in SCOUT module",<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"Map to MAS TRM §9 long-term data protection requirements"],<br>
+    &nbsp;&nbsp;"mas_trm": "MAS TRM §9 — Long-term data confidentiality",<br>
+    &nbsp;&nbsp;"wave": "Wave 3 — SEALCHAIN",<br>
+    &nbsp;&nbsp;"ingested_at": "2026-06-26T00:00:00Z"<br>
+    }<br>
+    <br>
+    <span style="color:#20E87A">// WAVE 1 ACTION (now): Add SEALCHAIN placeholder to EDIP decision output</span><br>
+    // When scoring crypto-related findings, add flag:<br>
+    // "pqc_risk": true — triggers SEALCHAIN advisory in report output<br>
+    // Even if SEALCHAIN ships Wave 3, the advisory can appear in Wave 1 EDIP reports
+  </div>
+
+  <!-- SECTION B: BRIDGE:BREAK -->
+  <div style="font-size:11px;color:#F59E0B;font-weight:600;font-family:'Inter',sans-serif;margin-bottom:6px">B. CVE-2025-67038 — LANTRONIX BRIDGE:BREAK — OT/ICS IMPACT</div>
+  <div style="background:#03060A;border:1px solid #0F2035;padding:12px 14px;margin-bottom:14px;font-size:11px;color:#8DBBD4;line-height:1.9">
+    <span style="color:#F59E0B">// VULNERABILITY SUMMARY</span><br>
+    ID       : CVE-2025-67038<br>
+    CWE      : CWE-78 — OS Command Injection<br>
+    CVSS     : 9.8 CRITICAL (Network/None/None/Changed/High/High/High)<br>
+    Affects  : Lantronix EDS5000 firmware 2.1.0.0R3 (serial-to-IP converters)<br>
+    Root     : HTTP RPC username parameter concatenated unsanitised into root shell command<br>
+    Result   : Unauthenticated root command execution<br>
+    Exploit  : Zero-day — observed Apr 5, before BRIDGE:BREAK disclosed Apr 21<br>
+    Method   : Attackers reverse-engineered Lantronix patch (Feb 20) to build exploit<br>
+    KEV      : Added CISA KEV Jun 23 2026 · FCEB patch deadline Jun 26 2026<br>
+    Patch    : EDS5000 firmware 2.2.0.0R1<br>
+    <br>
+    <span style="color:#F59E0B">// EDIP INTAKE RECORD — ADD TO tempris_kev_intake_parser.py</span><br>
+    bb_finding = {<br>
+    &nbsp;&nbsp;"finding_id": "CVE-2025-67038",<br>
+    &nbsp;&nbsp;"type": "CVE",<br>
+    &nbsp;&nbsp;"title": "Lantronix EDS5000 Unauthenticated Root Command Injection — BRIDGE:BREAK",<br>
+    &nbsp;&nbsp;"cwe": "CWE-78",<br>
+    &nbsp;&nbsp;"cvss_base": 9.8,<br>
+    &nbsp;&nbsp;"cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",<br>
+    &nbsp;&nbsp;"modifiers": {"AGM": 1.2, "DRF": 1.1, "TEF": 1.3},<br>
+    &nbsp;&nbsp;"tes": 10.0,<br>
+    &nbsp;&nbsp;"decision": "ESCALATE",<br>
+    &nbsp;&nbsp;"recommended_action": "PATCH",<br>
+    &nbsp;&nbsp;"patch": "Lantronix EDS5000 firmware 2.2.0.0R1",<br>
+    &nbsp;&nbsp;"kev_eligible": True,<br>
+    &nbsp;&nbsp;"kev_added": "2026-06-23",<br>
+    &nbsp;&nbsp;"zero_day_note": "Exploited before BRIDGE:BREAK disclosure — patch-reversal technique",<br>
+    &nbsp;&nbsp;"mas_trm": "MAS TRM §9.1.3 — Third-party OT/ICS device risk",<br>
+    &nbsp;&nbsp;"ingested_at": "2026-06-26T00:00:00Z"<br>
+    }<br>
+    <br>
+    <span style="color:#20E87A">// SURGE BUG BOUNTY — SCOPE NOTE</span><br>
+    // Add to SURGE out-of-scope list (publicly known CVE):<br>
+    // "CVE-2025-67038 in Lantronix EDS5000 — patched in firmware 2.2.0.0R1"<br>
+    // IN SCOPE if found as novel variant in Tempris's own serial/OT integrations<br>
+    <br>
+    <span style="color:#20E87A">// WAVE 4 SEQUOIA NOTE</span><br>
+    // BRIDGE:BREAK class vulnerabilities (serial-to-IP OT/ICS) are the core<br>
+    // threat model for SEQUOIA module (Wave 3 — OT/ICS monitoring)<br>
+    // Add CVE-2025-67038 to SEQUOIA threat library as reference case
+  </div>
+
+  <!-- SECTION C: RELATED - Ubiquiti chain -->
+  <div style="font-size:11px;color:#20E87A;font-weight:600;font-family:'Inter',sans-serif;margin-bottom:6px">C. BONUS — UBIQUITI UNIFI OS CHAIN (same KEV batch, CVSS 10.0)</div>
+  <div style="background:#03060A;border:1px solid #0F2035;padding:12px 14px;font-size:11px;color:#8DBBD4;line-height:1.9">
+    CVE-2026-34908 + CVE-2026-34909 + CVE-2026-34910 — Ubiquiti UniFi OS<br>
+    All CVSS 10.0 · Added CISA KEV same batch as CVE-2025-67038<br>
+    Chain: NGINX auth bypass → path traversal → command injection → root RCE<br>
+    Exploit confirmed in wild (rogue admin accounts named "John Sim" observed)<br>
+    Patch: UniFi OS Server 5.0.8 (released May 21 2026)<br>
+    <br>
+    <span style="color:#4A7A9B">// These are also EDIP intake candidates if client runs Ubiquiti infrastructure</span><br>
+    // Add all 3 to tempris_kev_intake_parser.py batch alongside CVE-2025-67038<br>
+    // TEF = 1.3 for any network perimeter device · Decision = ESCALATE for all
+  </div>
+
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid #0F2035;font-size:9px;color:#4A7A9B;letter-spacing:.5px">
+    SOURCES: LinkedIn Jun 26 2026 · NIST PQC FIPS 203/204 · CISA KEV Jun 23 2026 · Forescout BRIDGE:BREAK · THN · SecurityWeek · Dataminr
+    · FOR: Elvand / Codingo Assignments Pte. Ltd. · Tempris Technology Pte. Ltd. · UEN 202613990D · CONFIDENTIAL
+  </div>
+</div>
+<!-- END QUANTUM + BRIDGEBREAK ELVAND DEV BLOCK -->
+<!-- ISO 42001 AI POLICY BANNER v48 -->
+<div id="iso42001-banner" style="background:linear-gradient(135deg,rgba(37,99,235,0.12),rgba(6,182,212,0.08));border:1px solid rgba(37,99,235,0.25);border-left:4px solid #2563eb;padding:14px 20px;margin:20px 0;font-family:'IBM Plex Mono','Space Mono',monospace;font-size:11px;position:relative;">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <span style="background:rgba(37,99,235,0.2);color:#60a5fa;border:1px solid rgba(37,99,235,0.35);padding:3px 10px;font-size:9px;letter-spacing:1.5px;font-weight:700;">ISO/IEC 42001:2023</span>
+      <span style="background:rgba(6,182,212,0.15);color:#22d3ee;border:1px solid rgba(6,182,212,0.3);padding:3px 10px;font-size:9px;letter-spacing:1.5px;font-weight:700;">AI POLICY COMPLIANT</span>
+      <span style="background:rgba(239,68,68,0.12);color:#fca5a5;border:1px solid rgba(239,68,68,0.2);padding:3px 10px;font-size:9px;letter-spacing:1.5px;font-weight:700;">🇸🇬 MAS FEAT · PDPA · IMDA</span>
+    </div>
+    <span style="color:#64748b;font-size:9px;letter-spacing:1px;">CTEM × EDIP × TES · v50</span>
+  </div>
+  <div style="margin-top:10px;color:#94a3b8;font-size:10px;line-height:1.7;font-family:'IBM Plex Mono','Space Mono',monospace;">
+    <strong style="color:#e2e8f0;">Tempris AI Policy (ISO/IEC 42001:2023):</strong> All AI systems within Tempris CTEM, EDIP, and TES scoring operate under a formally documented AI Management System aligned to ISO/IEC 42001:2023. 
+    Risk assessment (Cl. 6.1.2), AI impact assessment (Cl. 6.1.4), responsible use controls (A.9.2), data quality governance (A.7.4), and third-party supplier accountability (A.10.3) are embedded across all modules. 
+    The Tempris Exploitation Score (TES) incorporates AI Governance Modifier (AGM), Data Risk Factor (DRF), and Third-party Exposure Factor (TEF) — all sourced live from the EDIP GRC Standard Module. 
+    Singapore alignment: PDPA · MAS TRM 2024 · MAS FEAT Principles · IMDA AI Governance Framework v2.
+  </div>
+</div>
+<!-- END ISO 42001 AI POLICY BANNER -->
+
+
+<div class="amb"></div>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-inner">
+    <div class="nav-logo">TEMPRIS<span>.</span>BIZ</div>
+    <div class="nav-links">
+      <a class="nl" href="#overview">OVERVIEW</a>
+      <a class="nl" href="#architecture">ARCHITECTURE</a>
+      <a class="nl" href="#modules">6 MODULES</a>
+      <a class="nl" href="#ctem">CTEM CYCLE</a>
+      <a class="nl" href="#apis">API SPEC</a>
+      <a class="nl" href="#schema">DATA SCHEMA</a>
+      <a class="nl" href="#sop">SOP</a>
+      <a class="nl" href="#tacf">AI CONTROL · TACF</a>
+      <a class="nl" href="#deploy">DEPLOYMENT</a>
+      <a class="nl" href="#stack">TECH STACK</a>
+    </div>
+    <div class="nav-badge">WAVE 1 · DEV BRIEF · CONFIDENTIAL · v50</div>
+  </div>
+</nav>
+
+<div class="page">
+
+<!-- ══ OVERVIEW ══ -->
+<div class="section" id="overview">
+  <div class="eyebrow">Tempris Technology Pte. Ltd. · UEN 202613990D · Wave 1 Developer Brief · v50 · <strong style="color:#60a5fa;">TES: CTEM×EDIP×ISO42001</strong> · ISO/IEC 42001:2023 AI Policy Active · Confidential</div>
+  <div class="h1">Wave 1: <span class="acc">CTEM + EDIP Foundation</span><br>Full Stack Build Specification</div>
+  <div class="lead">This document is the complete technical specification for building the Tempris Wave 1 platform — the CTEM (Continuous Threat Exposure Management) and EDIP (Exposure Decision Intelligence Platform) foundation. This is sent to the appointed full-stack developer under NDA. It covers all 6 Wave 1 modules, the 7-stage CTEM cycle, API specifications, data schemas, SOP operations, and the TACF AI Control Framework. Do not share beyond the authorised development team.</div>
+
+  <div class="g4" style="margin:20px 0">
+    <div class="card c" style="text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--cyan);margin-bottom:4px">6</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted)">WAVE 1 MODULES</div>
+      <div style="font-size:10px;color:var(--text2);margin-top:4px">SYNTHESIS · SPECTRUM · SCOUT · SURGE · STRIKE · STANDARD · SPOTLIGHT</div>
+    </div>
+    <div class="card o" style="text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--orange);margin-bottom:4px">7</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted)">CTEM STAGES</div>
+      <div style="font-size:10px;color:var(--text2);margin-top:4px">Scope → Discover → Prioritise → Validate → Mobilise → Recover → Human</div>
+    </div>
+    <div class="card g" style="text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--green);margin-bottom:4px">SPEAK</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted)">PLATFORM ALWAYS-ON</div>
+      <div style="font-size:10px;color:var(--text2);margin-top:4px">Claude-powered AI chatbot · RAG across all modules · Included in Wave 1</div>
+    </div>
+    <div class="card p" style="text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--purple);margin-bottom:4px">TACF</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted)">AI CONTROL FRAMEWORK</div>
+      <div style="font-size:10px;color:var(--text2);margin-top:4px">ISO 42001 aligned · 6 domains · Controlled autonomy · On-chain audit</div>
+    </div>
+  </div>
+
+  <div class="alert info" style="background:rgba(0,200,240,.04);border-color:rgba(0,200,240,.2);margin-bottom:10px"><strong style="color:var(--cyan)">Platform purpose — Time Dominance:</strong> Every module you build has one mission: compress the time between a threat emerging and the right decision being made. The average breach goes undetected for 197 days. Tempris closes that to 4 minutes. The CTEM cycle you are building is the engine. EDIP is the decision layer. SPEAK is the interface that makes everything accessible without specialist knowledge. Build every module with this in mind: AI handles the relentless, continuous work so that decision-makers can focus on the work only humans can do. v50 · Jun 2026</div>
+  <div class="alert info"><strong style="color:var(--cyan)">Developer NDA requirement:</strong> This brief is transmitted under the Tempris Technology Pte. Ltd. Confidentiality, Non-Disclosure and IP Assignment Agreement. All code, architecture, AI logic, models and outputs produced are confidential and owned exclusively by Tempris. No reuse across any other client, system or repository. All IP rights vest immediately upon creation. Source code access requires countersigned NDA and explicit written authorisation from the Founder. UEN 202613990D.</div>
+
+  <div class="sdiv">WAVE 1 SCOPE — WHAT TO BUILD</div>
+  <div class="g3">
+    <div class="card">
+      <div class="eyebrow" style="color:var(--orange)">Detection-as-a-Service</div>
+      <div class="h3">Continuous exposure discovery, scoring, and cycle orchestration</div>
+      <div style="font-size:11px;color:var(--text2);line-height:1.8">SYNTHESIS orchestrates the full CTEM loop autonomously. SPECTRUM computes the Tempris Exposure Score (TES) from all ingested data. SCOUT discovers CVEs and network exposures via AI-orchestrated VAPT. All running 24/7 — not quarterly.</div>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="color:var(--cyan)">Decision-as-a-Service</div>
+      <div class="h3">EDIP — turn every exposure into a time-bounded board decision</div>
+      <div style="font-size:11px;color:var(--text2);line-height:1.8">SPOTLIGHT generates board-ready TES dashboards. STANDARD maps every finding to MAS TRM, PDPA, ISO 27001 obligations. SPEAK answers any security question in natural language. Every exposure becomes one number: the TES score.</div>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="color:var(--green)">What Wave 1 does NOT include</div>
+      <div class="h3">Out of scope — Wave 2 and Wave 3 modules</div>
+      <div style="font-size:11px;color:var(--text2);line-height:1.8"><strong style="color:#60a5fa">Wave 2 (+ Threat Hunting):</strong> SIGINT (dark web + APT threat intel) · SPECTRE (external attack surface + threat hunting) · SCRUTINY (supply chain / vendor risk). <strong style="color:#34d399">Wave 3 (+ Honeypot):</strong> SIREN (DaaS honeypot · deception traps · live attacker intelligence) · STOCKADE / SEALCHAIN (blockchain-anchored proof) · SUSTAIN (BCR / 4-hr RTO) · SEQUOIA (PQC encryption). <strong style="color:#a78bfa">Wave 4:</strong> SHADOW / SOVEREIGN / SAFEMIND. All data models and API structure must be designed to accommodate these without migration — design for extension from day one.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ ARCHITECTURE ══ -->
+<div class="section dark" id="architecture">
+  <div class="inner">
+    <div class="eyebrow">02 · System Architecture · Wave 1</div>
+    <div class="h2">Platform <span class="acc">Architecture</span></div>
+    <div class="lead">SYNTHESIS is the master orchestrator. All other modules are independently deployable services that register with SYNTHESIS via the central event bus. Zero Trust, mTLS between all services, RBAC throughout, JWT authentication.</div>
+
+    <div class="arch-flow">
+      <div class="arch-layer">
+        <div class="arch-label">CLIENT / FRONTEND</div>
+        <div class="arch-content">
+          <div class="arch-box core" style="flex:3">React 18 + TypeScript SPA · Vite · Tailwind CSS · SYNTHESIS Dashboard · Real-time WebSocket feed</div>
+          <div class="arch-box core" style="flex:1">SPEAK Chat UI · Claude API · RAG overlay</div>
+        </div>
+      </div>
+      <div class="arch-arrow">↕ HTTPS / WSS</div>
+      <div class="arch-layer">
+        <div class="arch-label">API GATEWAY</div>
+        <div class="arch-content">
+          <div class="arch-box infra" style="flex:1">nginx / Traefik · Rate limiting · mTLS · JWT validation · API versioning /api/v1/</div>
+        </div>
+      </div>
+      <div class="arch-arrow">↕ mTLS internal</div>
+      <div class="arch-layer">
+        <div class="arch-label">SERVICES</div>
+        <div class="arch-content">
+          <div class="arch-box w1">SYNTHESIS<br><span style="font-size:8px;color:var(--muted)">FastAPI · Orchestrator</span></div>
+          <div class="arch-box w1">SPECTRUM<br><span style="font-size:8px;color:var(--muted)">FastAPI · CTEM Engine</span></div>
+          <div class="arch-box w1">SCOUT<br><span style="font-size:8px;color:var(--muted)">FastAPI · VAPT</span></div>
+          <div class="arch-box w1">STRIKE<br><span style="font-size:8px;color:var(--muted)">FastAPI · Red Team</span></div>
+          <div class="arch-box w1">STANDARD<br><span style="font-size:8px;color:var(--muted)">FastAPI · GRC</span></div>
+                    <div class="arch-box w1">SURGE<br><span style="font-size:8px;color:var(--muted)">FastAPI · Bug Bounty</span></div>
+
+<div class="arch-box w1">SPOTLIGHT<br><span style="font-size:8px;color:var(--muted)">FastAPI · Reports</span></div>
+          <div class="arch-box core">SPEAK<br><span style="font-size:8px;color:var(--muted)">FastAPI · Claude API</span></div>
+        </div>
+      </div>
+      <div class="arch-arrow">↕ Kafka event bus · pub/sub</div>
+      <div class="arch-layer">
+        <div class="arch-label">DATA LAYER</div>
+        <div class="arch-content">
+          <div class="arch-box infra">PostgreSQL<br><span style="font-size:8px;color:var(--muted)">Primary · RBAC · Row-level security</span></div>
+          <div class="arch-box infra">Redis<br><span style="font-size:8px;color:var(--muted)">Cache · Sessions · Rate limiting</span></div>
+          <div class="arch-box infra">MinIO / S3<br><span style="font-size:8px;color:var(--muted)">Report storage · Evidence files</span></div>
+          <div class="arch-box infra">Kafka<br><span style="font-size:8px;color:var(--muted)">Event streaming · Module bus</span></div>
+        </div>
+      </div>
+      <div class="arch-arrow">↕ Docker / Kubernetes</div>
+      <div class="arch-layer">
+        <div class="arch-label">INFRA</div>
+        <div class="arch-content">
+          <div class="arch-box infra" style="flex:2">Docker Compose (dev) · Kubernetes (prod) · AWS / Azure / GCP · On-prem deployable · Air-gap capable</div>
+          <div class="arch-box infra" style="flex:1">CI/CD · GitHub Actions · pytest · Vitest · ArgoCD</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sdiv">SECURITY BASELINE — MANDATORY FOR ALL SERVICES</div>
+    <div class="g3">
+      <div class="card">
+        <div class="mod-section-title">Authentication &amp; Authorisation</div>
+        <ul class="mod-list">
+          <li>JWT access tokens · 8hr expiry · refresh token rotation</li>
+          <li>OAuth 2.0 / OIDC for enterprise SSO (Entra ID, Okta)</li>
+          <li>RBAC — roles: superadmin, admin, analyst, viewer, readonly</li>
+          <li>Row-level security in PostgreSQL — tenant isolation</li>
+          <li>mTLS between all internal services — no plaintext</li>
+          <li>API key management for module-to-module communication</li>
+          <li>TOTP MFA — mandatory for admin and analyst roles</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="mod-section-title">Data Security</div>
+        <ul class="mod-list">
+          <li>AES-256-GCM encryption at rest for all sensitive fields</li>
+          <li>TLS 1.3 minimum for all external connections</li>
+          <li>Secrets via HashiCorp Vault or AWS Secrets Manager</li>
+          <li>Tenant data fully isolated — no cross-tenant data access</li>
+          <li>PII handling compliant with Singapore PDPA</li>
+          <li>Audit log for all data access, modification, deletion</li>
+          <li>SIEM-ready structured logging (JSON, syslog forwarding)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="mod-section-title">Observability</div>
+        <ul class="mod-list">
+          <li>OpenTelemetry — traces, metrics, logs from all services</li>
+          <li>Prometheus metrics endpoint on every FastAPI service</li>
+          <li>Grafana dashboards — service health, CTEM cycle metrics</li>
+          <li>Structured JSON logging — Loki compatible</li>
+          <li>Health check endpoint: GET /health on every service</li>
+          <li>Alerting: PagerDuty / Slack / Teams webhook integration</li>
+          <li>SLA monitoring: TTD, TTV, TTRes tracked automatically</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ CTEM CYCLE ══ -->
+<div class="section" id="ctem">
+  <div class="eyebrow">03 · CTEM Cycle · 7 Stages</div>
+  <div class="h2">The <span class="acc">7-Stage CTEM Cycle</span> — Wave 1 implementation</div>
+  <div class="lead">SYNTHESIS orchestrates the full cycle autonomously. SPECTRUM is the engine. The cycle runs continuously — triggered on schedule (daily/weekly) or on-demand. Each stage feeds the next. Every stage output is stored, scored, and surfaced in SPOTLIGHT dashboards.</div>
+
+  <div class="ctem-strip">
+    <div class="cs"><span class="cs-n">S1</span><span class="cs-name">Scope</span><span class="cs-mod">SYNTHESIS + SPECTRUM</span><span class="cs-own tag-c">W1 Core</span></div>
+    <div class="cs"><span class="cs-n">S2</span><span class="cs-name">Discover</span><span class="cs-mod">SCOUT</span><span class="cs-own tag-o">W1 Add-on</span></div>
+    <div class="cs"><span class="cs-n">S2b</span><span class="cs-name">Community Discover</span><span class="cs-mod">SURGE</span><span class="cs-own tag-o">W1 Add-on</span></div>
+
+    <div class="cs"><span class="cs-n">S3</span><span class="cs-name">Prioritise</span><span class="cs-mod">SPECTRUM EDIP</span><span class="cs-own tag-c">W1 Core</span></div>
+    <div class="cs"><span class="cs-n">S4</span><span class="cs-name">Validate</span><span class="cs-mod">STRIKE</span><span class="cs-own tag-o">W1 Add-on</span></div>
+    <div class="cs"><span class="cs-n">S5</span><span class="cs-name">Mobilise</span><span class="cs-mod">SYNTHESIS + STANDARD</span><span class="cs-own tag-c">W1 Core</span></div>
+    <div class="cs" style="border:1px solid rgba(139,92,246,.4)"><span class="cs-n" style="color:var(--purple)">S6</span><span class="cs-name" style="color:var(--purple)">Recover</span><span class="cs-mod">SUSTAIN (Wave 3)</span><span class="cs-own tag-p">W3 Future</span></div>
+    <div class="cs" style="border:1px solid rgba(245,158,11,.4)"><span class="cs-n" style="color:var(--gold)">S7</span><span class="cs-name" style="color:var(--gold)">Human ★</span><span class="cs-mod">SHADOW (Wave 4)</span><span class="cs-own tag-go">W4 Future</span></div>
+  </div>
+
+  <div class="alert info"><strong style="color:var(--cyan)">Architecture note:</strong> Build S6 and S7 data models and API stubs now, even though the modules are not built yet. Wave 2+ modules must be able to plug into the existing SYNTHESIS event bus without migration or schema changes. Design for extension from day one.</div>
+
+  <div class="sdiv">CTEM STAGE DETAIL — WAVE 1 IMPLEMENTATION</div>
+
+  <div class="g2">
+    <div class="card c">
+      <div class="mod-section-title" style="color:var(--cyan)">S1 · SCOPING — SYNTHESIS + SPECTRUM</div>
+      <ul class="mod-list">
+        <li>Define attack surface scope per client tenant</li>
+        <li>Asset inventory import — IP ranges, hostnames, cloud accounts, AD domains, SaaS apps</li>
+        <li>Asset criticality scoring — 0–10 scale, business owner mapping</li>
+        <li>Asset grouping — production, staging, dev, cloud, endpoint, identity</li>
+        <li>Threat actor profile selection — APT29, Lazarus, FIN7, UNC2452, regional actors</li>
+        <li>Scope boundary definition — what is in/out of CTEM coverage</li>
+        <li>CTEM cycle schedule configuration — daily/weekly/on-demand</li>
+        <li>Output: AssetGroup model, ScopeConfig model, ThreatActorProfile model</li>
+      </ul>
+    </div>
+    <div class="card o">
+      <div class="mod-section-title" style="color:var(--orange)">S2 · DISCOVERY — SCOUT</div>
+      <ul class="mod-list">
+        <li>CVE scanning via OpenVAS / Nessus API integration (pluggable scanner interface)</li>
+        <li>Network exposure enumeration — open ports, services, banners</li>
+        <li>Web application surface discovery — OWASP ZAP integration</li>
+        <li>CISA KEV correlation — flag any asset with a known exploited vulnerability</li>
+        <li>Priority scanner: SonicWall, FortiGate, Citrix, Ivanti, PAN-OS CVEs flagged P0</li>
+        <li>Cloud misconfiguration discovery — S3 public buckets, open security groups</li>
+        <li>Output: Finding model, CVERecord model, ExposureItem model</li>
+        <li>Scan results feed into SPECTRUM risk engine automatically via Kafka event</li>
+      </ul>
+    </div>
+    <div class="card c">
+      <div class="mod-section-title" style="color:var(--cyan)">S3 · PRIORITISATION — SPECTRUM EDIP</div>
+      <ul class="mod-list">
+        <li><strong style="color:#fff">TES Formula:</strong> (CVSS/10 × 0.35) + (Exploitability × 0.25) + (Business Impact × 0.20) + (Asset Criticality × 0.12) + (Threat Actor Activity × 0.08) = TES score 0–10</li>
+        <li>Each finding scored against all 5 factors → ranked priority queue</li>
+        <li>Business impact: client-defined asset criticality weight</li>
+        <li>Exploitability: CISA KEV, public PoC, Darktrace ATR signals</li>
+        <li>Threat actor activity: MITRE ATT&amp;CK TTP mapping from SIGINT feeds (stubbed W1)</li>
+        <li>Top 5 critical findings surfaced on SYNTHESIS Hub in real time</li>
+        <li>Output: ScoredFinding model with TES, EDIP decision recommendation</li>
+      </ul>
+    </div>
+    <div class="card o">
+      <div class="mod-section-title" style="color:var(--orange)">
+  <div class="mod-section">
+    <div class="mod-section-title" style="color:var(--gold)">SURGE · Bug Bounty &amp; Responsible Disclosure</div>
+    <div class="mod-desc-full">
+      <p>SURGE is the Wave 1 bug bounty and vulnerability disclosure management module. It provides a researcher submission portal, EDIP-powered auto-triage, bounty payout tracking, and full integration with SPECTRUM's TES scoring and the Audit Log.</p>
+      <p style="margin-top:8px"><strong style="color:var(--cyan)">Phase 2 scope:</strong> Private programme — invited researchers, NDA-gated submission portal, EDIP triage, status tracking, Hall of Fame. <strong style="color:var(--gold)">Phase 3:</strong> Public programme with HackerOne/Bugcrowd API integration.</p>
+    </div>
+    <div class="spec-grid" style="margin-top:12px">
+      <div class="spec-row"><span class="spec-k">Submission portal</span><span class="spec-v">Public-facing researcher intake form — title, severity, description, PoC upload, attachments. NDA acceptance gate for private programme.</span></div>
+      <div class="spec-row"><span class="spec-k">EDIP auto-triage</span><span class="spec-v">Every submission classified by EDIP: Critical / High / Medium / Low. Duplicate detection against existing SCOUT findings. Fix/Defer/Accept decision generated automatically.</span></div>
+      <div class="spec-row"><span class="spec-k">Status workflow</span><span class="spec-v">New → Under Review → Accepted / Rejected / Duplicate → Fix Assigned → Fixed → Bounty Approved → Paid. Email notification to researcher at each state change.</span></div>
+      <div class="spec-row"><span class="spec-k">SPECTRUM integration</span><span class="spec-v">Every Accepted finding pushes a Kafka event to SPECTRUM. TES score updates in real time. Finding appears in SPECTRUM dashboard with source tag: SURGE.</span></div>
+      <div class="spec-row"><span class="spec-k">Audit Log integration</span><span class="spec-v">Every submission, triage decision, status change, override, and payout recorded in the Audit Log — tamper-evident chain of custody.</span></div>
+      <div class="spec-row"><span class="spec-k">Bounty tracker</span><span class="spec-v">Per-finding bounty amount, payment status, payment method (manual in Phase 2). Totals dashboard for programme cost tracking.</span></div>
+      <div class="spec-row"><span class="spec-k">Hall of Fame</span><span class="spec-v">Public researcher acknowledgement page. Shows researcher handle, number of valid findings, severity badges. Drives community engagement.</span></div>
+      <div class="spec-row"><span class="spec-k">Admin dashboard</span><span class="spec-v">Internal triage queue, submission detail view, assignment to developer, fix verification workflow. React frontend.</span></div>
+      <div class="spec-row"><span class="spec-k">API endpoints</span><span class="spec-v">POST /surge/submit · GET /surge/submissions · PATCH /surge/submissions/:id/status · POST /surge/submissions/:id/triage · GET /surge/hall-of-fame</span></div>
+      <div class="spec-row"><span class="spec-k">DB schema</span><span class="spec-v">surge_submissions (id, title, severity, description, poc_url, attachments, researcher_id, status, edip_decision, bounty_amount, paid_at, created_at) · surge_researchers (id, handle, email, nda_signed_at, reputation_score)</span></div>
+    </div>
+  </div>
+
+S4 · VALIDATION — STRIKE</div>
+      <ul class="mod-list">
+        <li>Adversarial simulation against top-scored TES findings</li>
+        <li>Breach and Attack Simulation (BAS) — CALDERA integration / Metasploit Framework</li>
+        <li>MITRE ATT&amp;CK technique mapping — every test mapped to ATT&amp;CK TTP ID</li>
+        <li>Exploit confirmation: is the CVE actually exploitable in this environment?</li>
+        <li>Red team engagement workflow — requires explicit written authorisation before execution</li>
+        <li>Attack path visualisation — graph of exploit chain from initial access to crown jewel</li>
+        <li>Validation result updates TES score — confirmed exploitable → TES boosted</li>
+        <li>Output: ValidationResult model, AttackPath model, ATTACKTTPMapping model</li>
+      </ul>
+    </div>
+    <div class="card c">
+      <div class="mod-section-title" style="color:var(--cyan)">S5 · MOBILISATION — SYNTHESIS + STANDARD</div>
+      <ul class="mod-list">
+        <li>Auto-assign remediation owners from asset owner mapping</li>
+        <li>SLA clock starts on assignment — critical: 24hr, high: 7d, medium: 30d, low: 90d</li>
+        <li>Ticket creation: Jira, ServiceNow, GitHub Issues (pluggable integration)</li>
+        <li>Slack / Teams webhook notifications on assignment and SLA breach</li>
+        <li>Remediation playbook auto-attached per finding type</li>
+        <li>Closure verification — post-remediation re-scan to confirm fix</li>
+        <li>STANDARD maps every finding to MAS TRM / PDPA / ISO 27001 controls</li>
+        <li>SLA tracking dashboard — % on-time, overdue by owner</li>
+        <li>Output: RemediationTicket model, ComplianceMapping model, SLARecord model</li>
+      </ul>
+    </div>
+    <div class="card" style="border-top:2px solid var(--muted)">
+      <div class="mod-section-title">S6 + S7 · STUB NOW · BUILD WAVE 3+</div>
+      <ul class="mod-list">
+        <li class="r"><strong style="color:#fff">S6 RECOVER (SUSTAIN, Wave 3):</strong> Create empty API routes /api/v1/sustain/* and data models. BCR backup, DORA, RTO tracking. Build the schema now.</li>
+        <li class="r"><strong style="color:#fff">S7 HUMAN SURFACE (SHADOW, Wave 4):</strong> Create empty API routes /api/v1/shadow/* and data models. Human risk scoring, HRA. Build the schema now.</li>
+        <li class="g">Both stages visible in the SPECTRUM CTEM UI — shown as "Wave 3" and "Wave 4" with locked state in Wave 1</li>
+        <li class="g">SYNTHESIS event bus topics for both stages must be pre-registered and ready to receive events</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODULES ══ -->
+<div class="section dark" id="modules">
+  <div class="inner">
+    <div class="eyebrow">04 · Wave 1 Module Specifications · 6 modules + SPEAK</div>
+    <div class="h2"><span class="acc">6 Modules</span> — Full build specifications</div>
+
+    <!-- SYNTHESIS -->
+    <div class="mod-block" style="border-top:3px solid var(--cyan)">
+      <div class="mod-header" style="background:rgba(0,200,240,.04)">
+        <div class="mod-id">W1 · 01 · CORE</div>
+        <div>
+          <div class="mod-name">SYNTHESIS <span class="star">★</span></div>
+          <div class="mod-tagline">Master Orchestrator — the AI brain coordinating all modules and driving the continuous CTEM loop autonomously</div>
+        </div>
+        <div class="mod-tags">
+          <span class="tag tag-c">ALL STAGES</span>
+          <span class="tag tag-c">PLATFORM CORE</span>
+          <span class="tag tag-o">ALWAYS FIRST</span>
+        </div>
+      </div>
+      <div class="mod-body">
+        <div>
+          <div class="mod-section-title">Core Functions to Build</div>
+          <ul class="mod-list">
+            <li>Real-time SYNTHESIS Hub dashboard — module status grid (ONLINE/OFFLINE/DEGRADED)</li>
+            <li>Kafka event bus integration — publish/subscribe orchestration across all modules</li>
+            <li>CTEM cycle trigger and scheduler — cron + on-demand, per-tenant configuration</li>
+            <li>Asset inventory management — unified register, criticality scoring, owner mapping</li>
+            <li>Risk posture score — aggregate TES from SPECTRUM, displayed as single number 0–10</li>
+            <li>Critical alerts feed — real-time WebSocket push to all connected clients</li>
+            <li>Module health monitoring — heartbeat checks every 30s, auto-alert on failure</li>
+            <li>Tenant management — multi-tenant isolation, per-tenant config, RBAC</li>
+            <li>Auto-task delegation — route CTEM stages to correct module automatically</li>
+            <li>Incident command — P1/P2/P3 classification, escalation rules, on-call routing</li>
+            <li>Integration hub — Jira, ServiceNow, Slack, Teams, PagerDuty webhook management</li>
+            <li>STOCKADE stub — audit log API (full blockchain in Wave 3, stub all events now)</li>
+          </ul>
+        </div>
+        <div>
+          <div class="mod-section-title">SYNTHESIS Hub UI Components</div>
+          <ul class="mod-list">
+            <li>Live module status grid — 7×3 grid, colour-coded ONLINE/OFFLINE/WAVE 2+</li>
+            <li>Real-time event feed — SYNTHESIS Orchestrator Feed with pause/clear controls</li>
+            <li>TES risk gauge — animated 0–10 dial, trend line 30 days</li>
+            <li>Top 5 critical exposures panel — CVSS, asset, status, assigned to</li>
+            <li>Compliance score strip — ISO 27001, SOC 2, NIST CSF, PDPA, MAS TRM</li>
+            <li>Threat intel feed panel — ACTOR / TTP / IMPACT table (static + live CISA KEV)</li>
+            <li>CTEM cycle live log — terminal-style output during scan execution</li>
+            <li>Active clients count + pipeline + ARR metrics (for internal Tempris view)</li>
+            <li>Incident command panel — P1/P2/P3 queue with SLA clock</li>
+            <li>Start-of-day checklist strip — 8 mandatory SOC opening checks</li>
+          </ul>
+          <div class="mod-section-title" style="margin-top:14px">Kafka Topics (Wave 1)</div>
+          <ul class="mod-list">
+            <li><span style="color:var(--cyan);font-family:'Space Mono',monospace;font-size:9px">tempris.assets.updated</span> — asset inventory changes</li>
+            <li><span style="color:var(--cyan);font-family:'Space Mono',monospace;font-size:9px">tempris.ctem.cycle.started</span> — cycle initiation event</li>
+            <li><span style="color:var(--cyan);font-family:'Space Mono',monospace;font-size:9px">tempris.findings.new</span> — new finding from any module</li>
+            <li><span style="color:var(--cyan);font-family:'Space Mono',monospace;font-size:9px">tempris.findings.scored</span> — TES score computed by SPECTRUM</li>
+            <li><span style="color:var(--cyan);font-family:'Space Mono',monospace;font-size:9px">tempris.remediation.assigned</span> — ticket created, owner set</li>
+            <li><span style="color:var(--cyan);font-family:'Space Mono',monospace;font-size:9px">tempris.remediation.closed</span> — finding closed, re-scan triggered</li>
+            <li><span style="color:var(--cyan);font-family:'Space Mono',monospace;font-size:9px">tempris.compliance.updated</span> — GRC score changed</li>
+            <li><span style="color:var(--cyan);font-family:'Space Mono',monospace;font-size:9px">tempris.audit.event</span> — all audit-worthy actions for STOCKADE stub</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- SPECTRUM -->
+    <div class="mod-block" style="border-top:3px solid var(--cyan)">
+      <div class="mod-header" style="background:rgba(0,200,240,.04)">
+        <div class="mod-id">W1 · 02 · CORE</div>
+        <div>
+          <div class="mod-name">SPECTRUM <span class="star">★</span></div>
+          <div class="mod-tagline">CTEM Engine — continuously scoring, prioritising, and driving exposure reduction. Computes the Tempris Exposure Score (TES).</div>
+        </div>
+        <div class="mod-tags">
+          <span class="tag tag-c">S1–S5 ENGINE</span>
+          <span class="tag tag-c">TES SCORE</span>
+          <span class="tag tag-c">EDIP LAYER</span>
+        </div>
+      </div>
+      <div class="mod-body">
+        <div>
+          <div class="mod-section-title">Core Functions to Build</div>
+          <ul class="mod-list">
+            <li>TES scoring engine — formula: (CVSS×0.35) + (Exploitability×0.25) + (Business Impact×0.20) + (Asset Criticality×0.12) + (Threat Actor×0.08)</li>
+            <li>CTEM 7-stage UI — visual cycle with stage progress, finding counts, status per stage</li>
+            <li>Attack surface scoping — asset groups, threat actor profiles, scope boundaries</li>
+            <li>Risk-based finding prioritisation — ranked queue by TES, filterable by stage/severity/asset</li>
+            <li>Attack path mapping — graph visualisation of exploit chains (D3.js or Cytoscape)</li>
+            <li>Exposure trend chart — 30-day TES history, cycle-by-cycle improvement proof</li>
+            <li>EDIP decision layer — per-finding decision: Accept / Mitigate / Transfer / Ignore</li>
+            <li>EDIP decision rationale — AI-generated recommendation via Claude API</li>
+            <li>SLA dashboard — % findings closed on-time, overdue by owner, MTTR tracking</li>
+            <li>Connector architecture — pluggable data sources (SCOUT, future SIGINT/SPECTRE)</li>
+            <li>CTEM cycle scheduler — tenant-configurable, stores cycle history and delta metrics</li>
+            <li>Board-ready export — TES trend, top risks, compliance scores — one PDF/email</li>
+          </ul>
+        </div>
+        <div>
+          <div class="mod-section-title">SPECTRUM UI Pages</div>
+          <ul class="mod-list">
+            <li><strong style="color:#fff">CTEM Overview:</strong> 7-stage pipeline visual, cycle status, exposure score gauge</li>
+            <li><strong style="color:#fff">Findings Queue:</strong> sortable table, TES score, CVSS, asset, owner, SLA clock</li>
+            <li><strong style="color:#fff">Attack Surface Map:</strong> asset inventory browser, criticality heatmap</li>
+            <li><strong style="color:#fff">Attack Paths:</strong> interactive graph — asset → exploit chain → crown jewel</li>
+            <li><strong style="color:#fff">EDIP Panel:</strong> per-finding decision interface, AI rationale, decision log</li>
+            <li><strong style="color:#fff">Trend Analytics:</strong> TES over time, cycle-by-cycle improvement, MTTR</li>
+            <li><strong style="color:#fff">Connectors:</strong> data source configuration — SCOUT, cloud ASM, future modules</li>
+          </ul>
+          <div class="mod-section-title" style="margin-top:14px">EDIP Decisions</div>
+          <ul class="mod-list">
+            <li><strong style="color:#fff">MITIGATE:</strong> Assign owner, set SLA, trigger remediation workflow</li>
+            <li><strong style="color:#fff">ACCEPT:</strong> Document justification, set review date, log to audit trail</li>
+            <li><strong style="color:#fff">TRANSFER:</strong> Flag for cyber insurance / third-party, document transfer rationale</li>
+            <li><strong style="color:#fff">IGNORE:</strong> Mark as false positive, require evidence, flag for re-eval next cycle</li>
+            <li>All decisions logged with timestamp, analyst ID, rationale, and audit stub event</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- SCOUT -->
+    <div class="mod-block" style="border-top:3px solid var(--orange)">
+      <div class="mod-header" style="background:rgba(255,122,48,.04)">
+        <div class="mod-id">W1 · 03 · ADD-ON</div>
+        <div>
+          <div class="mod-name">SCOUT</div>
+          <div class="mod-tagline">AI-Orchestrated VAPT — CVE discovery, network scanning, web app testing. Feeds findings directly into SPECTRUM TES scoring.</div>
+        </div>
+        <div class="mod-tags">
+          <span class="tag tag-o">S2 DISCOVERY</span>
+          <span class="tag tag-o">VAPT ENGINE</span>
+          <span class="tag tag-mu">ANNUAL + PROJECT</span>
+        </div>
+      </div>
+      <div class="mod-body">
+        <div>
+          <div class="mod-section-title">Core Functions to Build</div>
+          <ul class="mod-list">
+            <li>Pluggable scanner interface — adapter pattern for OpenVAS, Nessus, Nuclei (start with Nuclei OSS)</li>
+            <li>Scan profile management — discovery (fast), full (all plugins), compliance, web app</li>
+            <li>Scan scheduling — per asset group, per environment, frequency config</li>
+            <li>CISA KEV correlation — auto-flag any CVE in Known Exploited Vulnerabilities catalogue</li>
+            <li>Priority CVE flagging — SonicWall, FortiGate, Citrix, Ivanti, PAN-OS = immediate P0</li>
+            <li>Web app scanning — OWASP ZAP integration, passive + active scan modes</li>
+            <li>Cloud misconfiguration — AWS/Azure/GCP API scan for public S3, open SGs, IAM misconfigs</li>
+            <li>Finding deduplication — merge duplicate CVEs across scans, track first seen / last seen</li>
+            <li>Scan-to-SPECTRUM event — publish to tempris.findings.new on completion</li>
+            <li>Scan history — per-asset scan timeline, delta from previous scan</li>
+          </ul>
+        </div>
+        <div>
+          <div class="mod-section-title">SCOUT UI Pages</div>
+          <ul class="mod-list">
+            <li><strong style="color:#fff">Scan Dashboard:</strong> active scans, queue, history, completion rates</li>
+            <li><strong style="color:#fff">Asset Scanner:</strong> select asset group, profile, run scan</li>
+            <li><strong style="color:#fff">CVE Browser:</strong> findings table — CVSS, KEV flag, P0 alerts, asset</li>
+            <li><strong style="color:#fff">Scan Report:</strong> per-scan report, exportable PDF, delta from last scan</li>
+            <li><strong style="color:#fff">Connectors:</strong> scanner API config — Nuclei, OpenVAS, Nessus, ZAP</li>
+          </ul>
+          <div class="mod-section-title" style="margin-top:14px">Priority Scanner Flags (P0 Auto-Alert)</div>
+          <ul class="mod-list">
+            <li>SonicWall SSL VPN — CVE-2024-40766 and successors</li>
+            <li>FortiGate / FortiOS — CVE-2024-21762 and successors</li>
+            <li>Citrix NetScaler — CVE-2023-3519 and successors</li>
+            <li>Ivanti Connect Secure — CVE-2025-0282 and successors</li>
+            <li>PAN-OS GlobalProtect — CVE-2024-3400 and successors</li>
+            <li>PHP CGI — CVE-2024-4577 (active exploitation confirmed)</li>
+            <li>Any CVE with CISA KEV entry = automatic CRITICAL regardless of CVSS</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- STRIKE -->
+    <div class="mod-block" style="border-top:3px solid var(--red)">
+      <div class="mod-header" style="background:rgba(232,32,58,.04)">
+        <div class="mod-id">W1 · 04 · ADD-ON</div>
+        <div>
+          <div class="mod-name">STRIKE</div>
+          <div class="mod-tagline">Red Team &amp; APT Simulation — validates SPECTRUM findings by confirming real exploitability. MITRE ATT&amp;CK mapped.</div>
+        </div>
+        <div class="mod-tags">
+          <span class="tag tag-o" style="background:rgba(232,32,58,.1);color:var(--red);border-color:rgba(232,32,58,.2)">S4 VALIDATION</span>
+          <span class="tag tag-mu">PROJECT BILLING</span>
+          <span class="tag tag-mu">AUTH REQUIRED</span>
+        </div>
+      </div>
+      <div class="mod-body">
+        <div>
+          <div class="mod-section-title">Core Functions to Build</div>
+          <ul class="mod-list">
+            <li><strong style="color:var(--red)">MANDATORY:</strong> Written client authorisation workflow — must be approved before any simulation runs</li>
+            <li>CALDERA integration — MITRE ATT&amp;CK adversary simulation via CALDERA REST API</li>
+            <li>Metasploit Framework adapter — exploit confirmation, not full attack</li>
+            <li>BAS (Breach and Attack Simulation) — automated playbooks for top 10 TTPs</li>
+            <li>ATT&amp;CK TTP mapping — every test run mapped to MITRE technique ID (T1xxx)</li>
+            <li>Attack path confirmation — validate SPECTRUM's predicted attack chains</li>
+            <li>Exploit confirmation → TES update — confirmed exploitable boosts TES score</li>
+            <li>Red team engagement workflow — scoped targets, duration, rules of engagement</li>
+            <li>Finding cross-reference — STRIKE result linked to originating SCOUT/SPECTRUM finding</li>
+            <li>Authorisation audit trail — client sign-off stored, every execution logged</li>
+          </ul>
+        </div>
+        <div>
+          <div class="mod-section-title">STRIKE UI Pages</div>
+          <ul class="mod-list">
+            <li><strong style="color:#fff">Authorisation:</strong> client auth workflow — digital sign-off, scope confirmation, stored audit</li>
+            <li><strong style="color:#fff">Simulation Console:</strong> select technique, target asset, run with CALDERA/MSF</li>
+            <li><strong style="color:#fff">ATT&amp;CK Matrix:</strong> interactive MITRE matrix, highlight tested techniques</li>
+            <li><strong style="color:#fff">Results:</strong> confirmed / not confirmed, evidence, TES impact, remediation link</li>
+            <li><strong style="color:#fff">Red Team Report:</strong> CREST-style report, executive summary, technical findings</li>
+          </ul>
+          <div class="mod-section-title" style="margin-top:14px">ATT&amp;CK Techniques — Wave 1 BAS Library</div>
+          <ul class="mod-list">
+            <li>T1190 — Exploit Public-Facing Application (top entry vector)</li>
+            <li>T1078 — Valid Accounts (credential stuffing, default creds)</li>
+            <li>T1059 — Command and Scripting Interpreter (PowerShell, Bash)</li>
+            <li>T1486 — Data Encrypted for Impact (ransomware simulation)</li>
+            <li>T1566.001 — Spear Phishing Attachment (email simulation)</li>
+            <li>T1110 — Brute Force (credential attacks against VPN/RDP)</li>
+            <li>T1046 — Network Service Discovery (internal reconnaissance)</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- STANDARD -->
+    <div class="mod-block" style="border-top:3px solid var(--green)">
+      <div class="mod-header" style="background:rgba(32,232,122,.04)">
+        <div class="mod-id">W1 · 05 · CORE</div>
+        <div>
+          <div class="mod-name">STANDARD <span class="star">★</span></div>
+          <div class="mod-tagline">GRC Automation — MAS TRM, PDPA, ISO 27001, SOC 2, PCI DSS v4.0. Maps every CTEM finding to specific regulatory obligations.</div>
+        </div>
+        <div class="mod-tags">
+          <span class="tag tag-g">ALL STAGES</span>
+          <span class="tag tag-g">GRC COMPLIANCE</span>
+          <span class="tag tag-g">ANNUAL RENEWAL</span>
+          <span class="tag tag-g">MAS TRM NATIVE</span>
+        </div>
+      </div>
+      <div class="mod-body">
+        <div>
+          <div class="mod-section-title">Core Functions to Build</div>
+          <ul class="mod-list">
+            <li>Control library — 500+ controls mapped: MAS TRM, PDPA, ISO 27001, SOC 2, NIST CSF, PCI DSS v4.0</li>
+            <li>Assessment workflow — create assessment, assign controls, track status per control</li>
+            <li>Control status: Not Assessed / Compliant / Partial / Non-Compliant / N/A</li>
+            <li>Evidence management — upload, link to finding, store with timestamp</li>
+            <li>Auto-mapping — CTEM finding → regulatory control gap (e.g. CVE-2024-4577 → MAS TRM 9.2)</li>
+            <li>Compliance score — weighted % per framework, trend over time</li>
+            <li>MAS TRM 1-hour notification workflow — incident → notification package builder</li>
+            <li>Cyber Trust Mark alignment checklist (Singapore)</li>
+            <li>PDPA data impact assessment — personal data breach response workflow</li>
+            <li>Audit-ready export — control evidence pack, regulator submission package</li>
+            <li>Control owner assignment — per control, with SLA and review date</li>
+            <li>SPOTLIGHT integration — compliance score pushed to board dashboard automatically</li>
+          </ul>
+        </div>
+        <div>
+          <div class="mod-section-title">Control Frameworks — Wave 1 Required</div>
+          <ul class="mod-list">
+            <li><strong style="color:#fff">MAS TRM 2024</strong> — full framework, all sections, Singapore financial institutions</li>
+            <li><strong style="color:#fff">PDPA Singapore</strong> — all obligations, breach notification, DPO requirements</li>
+            <li><strong style="color:#fff">ISO 27001:2022</strong> — all 93 controls, Annex A complete</li>
+            <li><strong style="color:#fff">NIST CSF 2.0</strong> — Govern, Identify, Protect, Detect, Respond, Recover</li>
+            <li><strong style="color:#fff">SOC 2 Type II</strong> — Trust Services Criteria (TSC) — CC1–CC9</li>
+            <li><strong style="color:#fff">PCI DSS v4.0</strong> — 12 requirements, SAQ-D scope</li>
+            <li><strong style="color:#fff">CSA Singapore</strong> — Cyber Trust Mark, MSOC requirements</li>
+          </ul>
+          <div class="mod-section-title" style="margin-top:14px">STANDARD UI Pages</div>
+          <ul class="mod-list">
+            <li><strong style="color:#fff">Framework Dashboard:</strong> compliance scores, trend, gap count per framework</li>
+            <li><strong style="color:#fff">Control Browser:</strong> all controls, status filter, domain filter, owner filter</li>
+            <li><strong style="color:#fff">Assessment Workspace:</strong> per-framework assessment, inline evidence upload</li>
+            <li><strong style="color:#fff">MAS TRM Incident Pack:</strong> 1-hour notification builder, submission log</li>
+            <li><strong style="color:#fff">Audit Export:</strong> regulator-ready evidence bundle, PDF + evidence files</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- SPOTLIGHT -->
+    <div class="mod-block" style="border-top:3px solid var(--purple)">
+      <div class="mod-header" style="background:rgba(139,92,246,.04)">
+        <div class="mod-id">W1 · 06 · CORE</div>
+        <div>
+          <div class="mod-name">SPOTLIGHT <span class="star">★</span></div>
+          <div class="mod-tagline">AI Board Reporting — TES dashboards, executive risk briefs, compliance evidence packages. One number for every boardroom.</div>
+        </div>
+        <div class="mod-tags">
+          <span class="tag tag-p">EDIP OUTPUT</span>
+          <span class="tag tag-p">BOARD REPORTING</span>
+          <span class="tag tag-p">AI NARRATIVE</span>
+        </div>
+      </div>
+      <div class="mod-body">
+        <div>
+          <div class="mod-section-title">Core Functions to Build</div>
+          <ul class="mod-list">
+            <li>Executive Risk Brief — AI-generated narrative via Claude API, 3 paragraphs, board language</li>
+            <li>TES trend chart — 30/60/90 day exposure score history with cycle annotations</li>
+            <li>Top risks panel — top 5 by TES, with remediation status and owner</li>
+            <li>Compliance score snapshot — all frameworks, % score, trend arrow</li>
+            <li>CTEM cycle summary — findings discovered, closed, in-progress, overdue by cycle</li>
+            <li>Automated report delivery — email scheduled report (daily/weekly/monthly)</li>
+            <li>PDF generation — Jinja2 + WeasyPrint, branded Tempris report</li>
+            <li>Report history — all generated reports stored and downloadable</li>
+            <li>Custom branding — client logo, colour scheme, report header</li>
+            <li>CISO dashboard view — detailed analyst view vs board summary view</li>
+            <li>Cyber insurance brief — TES trend, MTTR, controls evidence for underwriters</li>
+          </ul>
+        </div>
+        <div>
+          <div class="mod-section-title">SPOTLIGHT UI Pages</div>
+          <ul class="mod-list">
+            <li><strong style="color:#fff">Board Dashboard:</strong> TES gauge, top risks, compliance, AI narrative — designed for non-technical viewers</li>
+            <li><strong style="color:#fff">Report Generator:</strong> select type (Executive / CISO / Compliance / Insurance), generate PDF</li>
+            <li><strong style="color:#fff">Report History:</strong> all reports, download, regenerate, share link</li>
+            <li><strong style="color:#fff">Schedule Config:</strong> automated delivery — frequency, recipients, format</li>
+            <li><strong style="color:#fff">Branding:</strong> client logo, colour, report header configuration</li>
+          </ul>
+          <div class="mod-section-title" style="margin-top:14px">AI Report Narrative — Claude API Prompt Structure</div>
+          <ul class="mod-list">
+            <li>System: "You are a senior security analyst writing a board-ready executive brief for a Singapore enterprise. Use precise, boardroom-appropriate language. No jargon without explanation."</li>
+            <li>Input: current TES score, top 5 findings with CVSS + asset + status, compliance scores, MTTR, cycle count, delta from last cycle</li>
+            <li>Output: 3 paragraphs — (1) current posture, (2) top 3 risks, (3) recommended board actions</li>
+            <li>Max 250 words. Plain paragraphs, no markdown headers. Formal tone.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- SPEAK -->
+    <div class="mod-block" style="border-top:3px solid var(--teal)">
+      <div class="mod-header" style="background:rgba(14,165,160,.04)">
+        <div class="mod-id">PLATFORM · ALWAYS-ON</div>
+        <div>
+          <div class="mod-name" style="color:var(--teal)">SPEAK</div>
+          <div class="mod-tagline">Claude-powered AI security assistant — natural language SOC interface, RAG across all modules + SG regulations, always-on across all tiers.</div>
+        </div>
+        <div class="mod-tags">
+          <span class="tag" style="background:rgba(14,165,160,.1);color:var(--teal);border:1px solid rgba(14,165,160,.2)">ALWAYS-ON</span>
+          <span class="tag" style="background:rgba(14,165,160,.1);color:var(--teal);border:1px solid rgba(14,165,160,.2)">CLAUDE API</span>
+          <span class="tag tag-c">ALL TIERS</span>
+        </div>
+      </div>
+      <div class="mod-body">
+        <div>
+          <div class="mod-section-title">Core Functions to Build</div>
+          <ul class="mod-list">
+            <li>Claude API integration — claude-sonnet-4-20250514, streaming responses, 1500 max tokens</li>
+            <li>Session management — persist conversation history, 20-message rolling context window</li>
+            <li>Cybersecurity system prompt — CTEM, EDIP, MAS TRM, PDPA, CVE analysis expertise</li>
+            <li>RAG pipeline — vector embeddings of all Tempris module docs + SG regulations</li>
+            <li>Context injection — current TES score, top findings, compliance scores injected per session</li>
+            <li>Starter prompts library — 10 curated prompts per module for onboarding</li>
+            <li>Session history — per-user, searchable, exportable</li>
+            <li>Investor Q&amp;A mode — preset questions for investor demo conversations</li>
+            <li>Floating chat widget — available on every page of the platform, minimisable</li>
+            <li>Token tracking — usage per session, per tenant, cost monitoring</li>
+          </ul>
+        </div>
+        <div>
+          <div class="mod-section-title">SPEAK System Prompt (Core)</div>
+          <div class="schema" style="font-size:9px;line-height:1.7">
+            <span class="k">You are SPEAK</span> — Tempris's AI Security Intelligence Assistant.<br><br>
+            <span class="s">Expertise:</span> CTEM (7-stage Gartner cycle), EDIP decision intelligence, MAS TRM 2024, PDPA Singapore, ISO 27001:2022, NIST CSF 2.0, SOC 2, PCI DSS v4.0, CVE analysis, CVSS scoring, MITRE ATT&amp;CK, threat intelligence, APT tracking, incident response.<br><br>
+            <span class="s">Communication style:</span> Direct, precise, security-professional. Technical terminology for analysts. Plain language for executives. Never make up CVE details — state uncertainty clearly.<br><br>
+            <span class="s">When analysing a finding:</span> (1) What it is (2) Exploitability (3) Business impact (4) Recommended action with timeline — Critical: 24h, High: 7d, Medium: 30d, Low: 90d.<br><br>
+            <span class="s">Platform context:</span> You have access to the client's current TES score, top findings, and compliance posture when provided.
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /inner -->
+</div>
+
+<!-- ══ API SPEC ══ -->
+<div class="section" id="apis">
+  <div class="eyebrow">05 · API Specification · REST + WebSocket</div>
+  <div class="h2">API <span class="acc">Endpoints</span> — Wave 1</div>
+  <div class="lead">All endpoints under /api/v1/. JWT Bearer token required on all routes except /auth/*. Versioned from day one — future modules add /api/v1/sigint/, /api/v1/sustain/ etc. without breaking existing routes.</div>
+
+  <div class="sdiv">AUTHENTICATION</div>
+  <div class="card">
+    <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/auth/register</span><span class="api-desc">Register new user — email, password, role, tenant_id</span></div>
+    <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/auth/login</span><span class="api-desc">Login — returns access_token (JWT), refresh_token</span></div>
+    <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/auth/refresh</span><span class="api-desc">Refresh access token using refresh_token</span></div>
+    <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/auth/logout</span><span class="api-desc">Invalidate refresh token — server-side session end</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/auth/me</span><span class="api-desc">Current user profile, roles, tenant</span></div>
+    <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/auth/mfa/setup</span><span class="api-desc">TOTP MFA setup — returns QR code seed</span></div>
+    <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/auth/mfa/verify</span><span class="api-desc">Verify TOTP code — completes login</span></div>
+  </div>
+
+  <div class="sdiv">SYNTHESIS — ORCHESTRATOR</div>
+  <div class="card">
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/synthesis/hub</span><span class="api-desc">Hub dashboard — module status, TES score, alert counts, compliance scores</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/synthesis/modules</span><span class="api-desc">All module status — name, status, last heartbeat, version</span></div>
+    <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/synthesis/cycle/trigger</span><span class="api-desc">Trigger CTEM cycle manually — optionally scoped to asset_group_id</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/synthesis/cycle/status</span><span class="api-desc">Current cycle status — stage, progress, findings count</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/synthesis/feed</span><span class="api-desc">Live orchestrator event feed — last 100 events, SSE stream</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/synthesis/assets</span><span class="api-desc">Full asset inventory — all tenants assets with criticality, owner, group</span></div>
+    <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/synthesis/assets</span><span class="api-desc">Create asset — name, IP, type, criticality, owner, tags</span></div>
+    <div class="api-row"><span class="api-method put">PUT</span><span class="api-path">/api/v1/synthesis/assets/{id}</span><span class="api-desc">Update asset — criticality, owner, group, active status</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/synthesis/incidents</span><span class="api-desc">Incident queue — P1/P2/P3, status, SLA clock, assigned to</span></div>
+    <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/synthesis/incidents</span><span class="api-desc">Raise incident — severity, description, affected assets, assigned to</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/ws/synthesis/feed</span><span class="api-desc">WebSocket — live event stream, module status updates, new findings</span></div>
+  </div>
+
+  <div class="sdiv">SPECTRUM — CTEM ENGINE</div>
+  <div class="card">
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/spectrum/score</span><span class="api-desc">Current TES score — value, trend, delta from last cycle</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/spectrum/findings</span><span class="api-desc">All findings — filter: stage, severity, status, asset_id, assigned_to</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/spectrum/findings/{id}</span><span class="api-desc">Single finding detail — full TES breakdown, EDIP decision, remediation history</span></div>
+    <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/spectrum/findings/{id}/decide</span><span class="api-desc">EDIP decision — action: mitigate/accept/transfer/ignore, rationale, owner, sla_days</span></div>
+    <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/spectrum/findings/{id}/close</span><span class="api-desc">Close finding — evidence, resolution notes, triggers re-scan verification</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/spectrum/cycle/history</span><span class="api-desc">Cycle history — all past cycles, findings per stage, TES delta, duration</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/spectrum/attack-paths</span><span class="api-desc">Attack path graph — nodes (assets) + edges (exploit steps) for visualisation</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/spectrum/sla</span><span class="api-desc">SLA dashboard — % on-time by severity, overdue count, MTTR average</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/spectrum/summary</span><span class="api-desc">Dashboard summary — TES, finding counts by stage/severity, validated, remediated</span></div>
+  </div>
+
+  <div class="sdiv">SCOUT — VAPT</div>
+  <div class="card">
+    <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/scout/scan</span><span class="api-desc">Start scan — asset_id or asset_group_id, profile (discovery/full/compliance/web)</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/scout/scans</span><span class="api-desc">Scan history — status, finding count, TES impact, duration, asset</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/scout/scans/{id}</span><span class="api-desc">Scan detail — all findings, CVE list, severity breakdown, CISA KEV flags</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/scout/cves</span><span class="api-desc">CVE browser — all discovered CVEs, CVSS, KEV flag, asset, status</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/scout/summary</span><span class="api-desc">Scout summary — total scans, avg TES impact, KEV count, P0 count</span></div>
+  </div>
+
+  <div class="sdiv">STRIKE · STANDARD · SPOTLIGHT · SPEAK</div>
+  <div class="card">
+    <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/strike/authorise</span><span class="api-desc">Client authorisation request — scope, duration, rules of engagement, digital sign-off</span></div>
+    <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/strike/simulate</span><span class="api-desc">Run BAS simulation — technique_id (ATT&CK T-ID), target_asset_id, auth_id</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/strike/results</span><span class="api-desc">Simulation results — confirmed/not-confirmed, TES impact, ATT&CK mapping</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/standard/assessments</span><span class="api-desc">All compliance assessments — framework, score, control counts, last updated</span></div>
+    <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/standard/assessments</span><span class="api-desc">Create assessment — framework (mas_trm/pdpa/iso27001/soc2/nist_csf/pci_dss)</span></div>
+    <div class="api-row"><span class="api-method patch">PUT</span><span class="api-path">/api/v1/standard/controls/{id}</span><span class="api-desc">Update control — status, evidence, owner, due_date, notes</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/standard/assessments/{id}/summary</span><span class="api-desc">Assessment summary — score, compliant/partial/gap counts, top gaps</span></div>
+    <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/spotlight/reports</span><span class="api-desc">Generate report — type (executive/ciso/compliance/insurance), date range, asset_ids</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/spotlight/reports</span><span class="api-desc">Report history — all reports, status, download URL</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/spotlight/reports/{id}/download</span><span class="api-desc">Download PDF report — streaming file response</span></div>
+    <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/speak/chat</span><span class="api-desc">Send message — session_id (optional), message, context (module name)</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/speak/sessions</span><span class="api-desc">Session list — all user sessions, title, message count, last updated</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/speak/sessions/{id}/messages</span><span class="api-desc">Session messages — full conversation history</span></div>
+    <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/health</span><span class="api-desc">Health check — every service must expose this at root, returns {status: ok, module: name, version}</span></div>
+  </div>
+</div>
+
+<!-- ══ DATA SCHEMA ══ -->
+<div class="section dark" id="schema">
+  <div class="inner">
+    <div class="eyebrow">06 · Data Schema · PostgreSQL · SQLAlchemy</div>
+    <div class="h2">Core <span class="acc">Data Models</span></div>
+    <div class="lead">All models use UUID primary keys. Multi-tenant via tenant_id on every table. Row-level security in PostgreSQL enforces tenant isolation at DB level. All models must support future Wave 2+ extensions without migration.</div>
+
+    <div class="g2" style="margin-top:16px">
+      <div>
+        <div class="mod-section-title" style="margin-bottom:8px">ASSET MODEL</div>
+        <div class="schema">
+<span class="k">class Asset</span>(<span class="v">Base</span>):<br>
+&nbsp;&nbsp;id: <span class="t">UUID</span> <span class="s"># PK</span><br>
+&nbsp;&nbsp;tenant_id: <span class="t">UUID</span> <span class="s"># FK → Tenant · RLS</span><br>
+&nbsp;&nbsp;name: <span class="v">str</span><br>
+&nbsp;&nbsp;ip_address: <span class="v">str | None</span><br>
+&nbsp;&nbsp;hostname: <span class="v">str | None</span><br>
+&nbsp;&nbsp;asset_type: <span class="t">Enum</span> <span class="s"># server/endpoint/cloud/network/app/db</span><br>
+&nbsp;&nbsp;environment: <span class="v">str</span> <span class="s"># prod/staging/dev</span><br>
+&nbsp;&nbsp;criticality_score: <span class="t">float</span> <span class="s"># 0–10</span><br>
+&nbsp;&nbsp;owner_id: <span class="t">UUID</span> <span class="s"># FK → User</span><br>
+&nbsp;&nbsp;asset_group_id: <span class="t">UUID</span> <span class="s"># FK → AssetGroup</span><br>
+&nbsp;&nbsp;tags: <span class="t">JSONB</span><br>
+&nbsp;&nbsp;is_active: <span class="v">bool</span><br>
+&nbsp;&nbsp;last_scanned: <span class="t">datetime | None</span><br>
+&nbsp;&nbsp;created_at: <span class="t">datetime</span>
+        </div>
+      </div>
+      <div>
+        <div class="mod-section-title" style="margin-bottom:8px">FINDING MODEL (CTEM)</div>
+        <div class="schema">
+<span class="k">class Finding</span>(<span class="v">Base</span>):<br>
+&nbsp;&nbsp;id: <span class="t">UUID</span><br>
+&nbsp;&nbsp;tenant_id: <span class="t">UUID</span><br>
+&nbsp;&nbsp;asset_id: <span class="t">UUID</span> <span class="s"># FK → Asset</span><br>
+&nbsp;&nbsp;source_module: <span class="v">str</span> <span class="s"># SCOUT/STRIKE/SPECTRUM</span><br>
+&nbsp;&nbsp;ctem_stage: <span class="t">Enum</span> <span class="s"># S1–S7</span><br>
+&nbsp;&nbsp;title: <span class="v">str</span><br>
+&nbsp;&nbsp;description: <span class="v">text</span><br>
+&nbsp;&nbsp;severity: <span class="t">Enum</span> <span class="s"># critical/high/medium/low/info</span><br>
+&nbsp;&nbsp;cvss_score: <span class="t">float | None</span><br>
+&nbsp;&nbsp;cve_id: <span class="v">str | None</span><br>
+&nbsp;&nbsp;cisa_kev: <span class="v">bool</span><br>
+&nbsp;&nbsp;tes_score: <span class="t">float</span> <span class="s"># 0–10</span><br>
+&nbsp;&nbsp;tes_breakdown: <span class="t">JSONB</span> <span class="s"># TES formula components</span><br>
+&nbsp;&nbsp;edip_decision: <span class="t">Enum | None</span><br>
+&nbsp;&nbsp;edip_rationale: <span class="v">text | None</span><br>
+&nbsp;&nbsp;edip_decided_by: <span class="t">UUID | None</span><br>
+&nbsp;&nbsp;remediation: <span class="v">text | None</span><br>
+&nbsp;&nbsp;owner_id: <span class="t">UUID | None</span><br>
+&nbsp;&nbsp;sla_due: <span class="t">datetime | None</span><br>
+&nbsp;&nbsp;is_validated: <span class="v">bool</span><br>
+&nbsp;&nbsp;is_remediated: <span class="v">bool</span><br>
+&nbsp;&nbsp;attack_path_id: <span class="t">UUID | None</span><br>
+&nbsp;&nbsp;discovered_at: <span class="t">datetime</span>
+        </div>
+      </div>
+      <div>
+        <div class="mod-section-title" style="margin-bottom:8px">COMPLIANCE CONTROL MODEL</div>
+        <div class="schema">
+<span class="k">class ComplianceControl</span>(<span class="v">Base</span>):<br>
+&nbsp;&nbsp;id: <span class="t">UUID</span><br>
+&nbsp;&nbsp;assessment_id: <span class="t">UUID</span> <span class="s"># FK → Assessment</span><br>
+&nbsp;&nbsp;control_id: <span class="v">str</span> <span class="s"># MAS-TRM-9.2, ISO-A.12.6</span><br>
+&nbsp;&nbsp;framework: <span class="t">Enum</span><br>
+&nbsp;&nbsp;domain: <span class="v">str</span><br>
+&nbsp;&nbsp;title: <span class="v">str</span><br>
+&nbsp;&nbsp;description: <span class="v">text</span><br>
+&nbsp;&nbsp;status: <span class="t">Enum</span> <span class="s"># not_assessed/compliant/partial/non_compliant/na</span><br>
+&nbsp;&nbsp;evidence: <span class="v">text | None</span><br>
+&nbsp;&nbsp;evidence_files: <span class="t">JSONB</span> <span class="s"># file URLs</span><br>
+&nbsp;&nbsp;owner: <span class="v">str | None</span><br>
+&nbsp;&nbsp;due_date: <span class="t">datetime | None</span><br>
+&nbsp;&nbsp;finding_links: <span class="t">JSONB</span> <span class="s"># linked finding IDs</span><br>
+&nbsp;&nbsp;notes: <span class="v">text | None</span><br>
+&nbsp;&nbsp;updated_at: <span class="t">datetime</span>
+        </div>
+      </div>
+      <div>
+        <div class="mod-section-title" style="margin-bottom:8px">CTEM CYCLE + AUDIT LOG</div>
+        <div class="schema">
+<span class="k">class CTEMCycle</span>(<span class="v">Base</span>):<br>
+&nbsp;&nbsp;id: <span class="t">UUID</span><br>
+&nbsp;&nbsp;tenant_id: <span class="t">UUID</span><br>
+&nbsp;&nbsp;status: <span class="t">Enum</span> <span class="s"># running/completed/failed</span><br>
+&nbsp;&nbsp;current_stage: <span class="v">str</span> <span class="s"># S1–S7</span><br>
+&nbsp;&nbsp;started_at: <span class="t">datetime</span><br>
+&nbsp;&nbsp;completed_at: <span class="t">datetime | None</span><br>
+&nbsp;&nbsp;findings_count: <span class="t">int</span><br>
+&nbsp;&nbsp;tes_before: <span class="t">float</span><br>
+&nbsp;&nbsp;tes_after: <span class="t">float | None</span><br>
+&nbsp;&nbsp;stage_log: <span class="t">JSONB</span> <span class="s"># per-stage timing + counts</span><br><br>
+<span class="k">class AuditLog</span>(<span class="v">Base</span>): <span class="s"># STOCKADE stub</span><br>
+&nbsp;&nbsp;id: <span class="t">UUID</span><br>
+&nbsp;&nbsp;tenant_id: <span class="t">UUID</span><br>
+&nbsp;&nbsp;actor_id: <span class="t">UUID</span> <span class="s"># user or system</span><br>
+&nbsp;&nbsp;action: <span class="v">str</span> <span class="s"># finding.created, decision.made</span><br>
+&nbsp;&nbsp;resource_type: <span class="v">str</span><br>
+&nbsp;&nbsp;resource_id: <span class="t">UUID</span><br>
+&nbsp;&nbsp;payload: <span class="t">JSONB</span><br>
+&nbsp;&nbsp;ip_address: <span class="v">str</span><br>
+&nbsp;&nbsp;created_at: <span class="t">datetime</span> <span class="s"># Wave 3: hash → SEALCHAIN</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SOP ══ -->
+<div class="section" id="sop">
+  <div class="eyebrow">07 · SOP — Standard Operating Procedures · Wave 1</div>
+  <div class="h2">Operations <span class="acc">Playbook</span> — build these into the platform</div>
+  <div class="lead">These SOPs must be rendered as a dedicated page within the platform UI (STANDARD module → SOP tab). They govern deployment, daily operations, and incident response. All procedures are ISO 27001, MAS TRM, and PDPA aligned. Build the SOP page as a structured, printable HTML document within the app.</div>
+
+  <div class="sdiv">TIME DOMINANCE SLA TARGETS — HARD-CODED INTO PLATFORM</div>
+  <div class="g4" style="margin-bottom:20px">
+    <div class="card c" style="text-align:center"><div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:var(--cyan)">&lt; 4 hrs</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);margin-top:4px">TTD · Time to Detect</div><div style="font-size:10px;color:var(--text2);margin-top:4px">SIGINT · SPECTRUM · SCOUT</div></div>
+    <div class="card o" style="text-align:center"><div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:var(--orange)">&lt; 72 hrs</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);margin-top:4px">TTV · Time to Validate</div><div style="font-size:10px;color:var(--text2);margin-top:4px">SCOUT · STRIKE · SPECTRUM</div></div>
+    <div class="card go" style="text-align:center"><div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:var(--gold)">24–48 hrs</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);margin-top:4px">TTRes · Critical CVE Patch</div><div style="font-size:10px;color:var(--text2);margin-top:4px">SYNTHESIS · STANDARD</div></div>
+    <div class="card p" style="text-align:center"><div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:var(--purple)">RTO &lt; 4 hrs</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);margin-top:4px">TTRec · Recovery (Wave 3)</div><div style="font-size:10px;color:var(--text2);margin-top:4px">SUSTAIN (stub in Wave 1)</div></div>
+  </div>
+
+  <div class="sdiv">PRE-DEPLOYMENT CHECKLIST — MANDATORY BEFORE CLIENT ACCESS</div>
+  <table class="sop-table">
+    <tr><th>#</th><th>ACTION</th><th>DETAIL</th><th>OWNER</th><th>STATUS</th></tr>
+    <tr><td class="num">01</td><td><strong style="color:#fff">Client agreements signed</strong></td><td>NDA, Developer Agreement, and Service Agreement executed and filed before any access granted</td><td class="owner">Head of Operations</td><td><span class="must">MANDATORY</span></td></tr>
+    <tr><td class="num">02</td><td><strong style="color:#fff">Network prerequisites verified</strong></td><td>Firewall ports open, API connectivity confirmed, cloud/on-prem hybrid documented</td><td class="owner">Head of IT</td><td><span class="must">MANDATORY</span></td></tr>
+    <tr><td class="num">03</td><td><strong style="color:#fff">Asset inventory collected</strong></td><td>All client IP ranges, hostnames, cloud accounts, AD domains, and SaaS apps listed</td><td class="owner">CISO / SOC Lead</td><td><span class="must">MANDATORY</span></td></tr>
+    <tr><td class="num">04</td><td><strong style="color:#fff">SYNTHESIS Core deployed</strong></td><td>Master orchestrator installed, health check passed, API keys generated, Kafka topics registered</td><td class="owner">Head of IT</td><td><span class="must">MANDATORY</span></td></tr>
+    <tr><td class="num">05</td><td><strong style="color:#fff">Audit log initialised</strong></td><td>AuditLog table active, STOCKADE stub confirmed writing events, no gaps in log since deployment</td><td class="owner">Head of IT</td><td><span class="must">MANDATORY</span></td></tr>
+    <tr><td class="num">06</td><td><strong style="color:#fff">Module group selected</strong></td><td>Client tier confirmed — Detect / Defend / Respond / Dominate — modules enabled accordingly</td><td class="owner">CSO / Partner</td><td><span class="must">MANDATORY</span></td></tr>
+    <tr><td class="num">07</td><td><strong style="color:#fff">SPOTLIGHT email connected</strong></td><td>Client email linked for report delivery. Test report sent and confirmed received</td><td class="owner">Head of Operations</td><td><span class="must">MANDATORY</span></td></tr>
+    <tr><td class="num">08</td><td><strong style="color:#fff">Client admin walkthrough</strong></td><td>Client designated contact trained on SYNTHESIS Hub, SPEAK chatbot, and SPECTRUM TES dashboard</td><td class="owner">CSO</td><td><span class="must">MANDATORY</span></td></tr>
+    <tr><td class="num">09</td><td><strong style="color:#fff">STRIKE authorisation workflow</strong></td><td>Client confirms in writing which assets are in scope for STRIKE. Sign-off stored in AuditLog</td><td class="owner">CISO / CSO</td><td><span class="must">MANDATORY before STRIKE runs</span></td></tr>
+    <tr><td class="num">10</td><td><strong style="color:#fff">Day 1 health check</strong></td><td>All active modules show ONLINE in SYNTHESIS Hub. No critical alerts pending. SOC opening checklist passed</td><td class="owner">SOC Analyst</td><td><span class="must">MANDATORY</span></td></tr>
+  </table>
+
+  <div class="sdiv">MODULE DEPLOYMENT SEQUENCE — DEPENDENCY ORDER</div>
+  <div class="g2">
+    <div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div class="card c" style="display:flex;gap:12px;align-items:flex-start">
+          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:var(--cyan);flex-shrink:0">1</div>
+          <div><div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);margin-bottom:3px">FOUNDATION · DEPLOY FIRST · DAY 1</div><div style="font-size:12px;color:#fff;font-weight:600">SYNTHESIS + Audit Log stub</div><div style="font-size:11px;color:var(--text2)">Master orchestrator must be live before all other modules. Kafka topics registered. Audit log writing. No other module starts without SYNTHESIS ONLINE.</div></div>
+        </div>
+        <div class="card" style="display:flex;gap:12px;align-items:flex-start;border-color:var(--orange)">
+          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:var(--orange);flex-shrink:0">2</div>
+          <div><div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);margin-bottom:3px">CTEM ENGINE · DAY 1</div><div style="font-size:12px;color:#fff;font-weight:600">SPECTRUM</div><div style="font-size:11px;color:var(--text2)">CTEM engine starts after SYNTHESIS. Asset groups loaded. First scoping run completes. TES baseline established.</div></div>
+        </div>
+        <div class="card" style="display:flex;gap:12px;align-items:flex-start;border-color:var(--orange)">
+          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:var(--orange);flex-shrink:0">3</div>
+          <div><div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);margin-bottom:3px">DISCOVERY · DAY 1–2</div><div style="font-size:12px;color:#fff;font-weight:600">SCOUT</div><div style="font-size:11px;color:var(--text2)">Asset inventory complete before scanning begins. First SCOUT scan run. Findings feed into SPECTRUM automatically.</div></div>
+        </div>
+        <div class="card" style="display:flex;gap:12px;align-items:flex-start;border-color:var(--green)">
+          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:var(--green);flex-shrink:0">4</div>
+          <div><div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);margin-bottom:3px">COMPLIANCE + REPORTING · DAY 3–5</div><div style="font-size:12px;color:#fff;font-weight:600">STANDARD + SPOTLIGHT</div><div style="font-size:11px;color:var(--text2)">Compliance mapping starts after first CTEM cycle. SPOTLIGHT configured for scheduled report delivery. Board dashboard live.</div></div>
+        </div>
+        <div class="card" style="display:flex;gap:12px;align-items:flex-start;border-color:var(--red)">
+          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:var(--red);flex-shrink:0">5</div>
+          <div><div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);margin-bottom:3px">RED TEAM · DAY 7+ · WRITTEN AUTH FIRST</div><div style="font-size:12px;color:#fff;font-weight:600">STRIKE</div><div style="font-size:11px;color:var(--text2)">Only after defensive layer fully operational. Written client authorisation mandatory. STRIKE only runs on in-scope assets.</div></div>
+        </div>
+        <div class="card" style="display:flex;gap:12px;align-items:flex-start">
+          <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:var(--teal);flex-shrink:0">6</div>
+          <div><div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);margin-bottom:3px">AI INTERFACE · DAY 1 · ALWAYS-ON</div><div style="font-size:12px;color:#fff;font-weight:600">SPEAK</div><div style="font-size:11px;color:var(--text2)">SPEAK available from day one as a floating widget on every page. Context injected from SYNTHESIS data.</div></div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="sdiv" style="margin-top:0">DAILY SOC OPENING — BUILD AS IN-PLATFORM CHECKLIST</div>
+      <table class="sop-table">
+        <tr><th>#</th><th>ACTION</th><th>OWNER</th></tr>
+        <tr><td class="num">01</td><td>Log into SYNTHESIS Hub — confirm all active modules ONLINE. Any not ONLINE = immediate investigation</td><td class="owner">SOC L1</td></tr>
+        <tr><td class="num">02</td><td>Review overnight alerts — SPECTRUM findings feed. Verify auto-closed alerts for false negatives</td><td class="owner">SOC L1</td></tr>
+        <tr><td class="num">03</td><td>Check critical CVE count — any CVSS ≥ 9.0 or CISA KEV unaddressed = immediate review</td><td class="owner">SOC L2</td></tr>
+        <tr><td class="num">04</td><td>Check CTEM SLA queue — any overdue critical/high findings must have active escalation</td><td class="owner">SOC L2</td></tr>
+        <tr><td class="num">05</td><td>Confirm audit log active — AuditLog table must show entries since last check. Gaps = incident</td><td class="owner">Head IT</td></tr>
+        <tr><td class="num">06</td><td>Check compliance score — STANDARD score must not drop &gt; 3% since yesterday. Flag drops</td><td class="owner">Governance</td></tr>
+        <tr><td class="num">07</td><td>Send daily brief to CISO — SPOTLIGHT: Generate Executive Risk Brief. Auto-deliver to CISO</td><td class="owner">SOC Lead</td></tr>
+        <tr><td class="num">08</td><td>Review incident queue — all P1/P2 must have assigned owner and active SLA clock running</td><td class="owner">SOC L2</td></tr>
+      </table>
+
+      <div class="sdiv">WEEKLY CTEM CYCLE — BUILD AS SCHEDULED WORKFLOW</div>
+      <table class="sop-table">
+        <tr><th>#</th><th>ACTION</th><th>OWNER</th></tr>
+        <tr><td class="num">01</td><td>Initiate CTEM cycle — SPECTRUM → Run Full Cycle. SYNTHESIS delegates stages to all modules</td><td class="owner">SOC Lead</td></tr>
+        <tr><td class="num">02</td><td>Scoping review — verify asset groups current. Confirm threat actor profiles updated</td><td class="owner">CISO</td></tr>
+        <tr><td class="num">03</td><td>Discovery phase — SCOUT scan completes. Review all net-new findings vs delta from last cycle</td><td class="owner">SOC L2</td></tr>
+        <tr><td class="num">04</td><td>Prioritisation review — SPECTRUM top critical actions validated. Business impact scores confirmed</td><td class="owner">CISO</td></tr>
+        <tr><td class="num">05</td><td>Validation simulation — STRIKE (if authorised) BAS on top 5 critical. Exploitability confirmed</td><td class="owner">Red Team / CISO</td></tr>
+        <tr><td class="num">06</td><td>Mobilisation — SYNTHESIS auto-assigns owners, SLA clocks start. STANDARD maps to controls</td><td class="owner">SOC Lead</td></tr>
+        <tr><td class="num">07</td><td>Board report — SPOTLIGHT generates weekly TES trend report. Auto-delivered to board recipients</td><td class="owner">SOC Lead</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══ TACF ══ -->
+<div class="section dark" id="tacf">
+  <div class="inner">
+    <div class="eyebrow">08 · TACF — Tempris AI Control Framework · v1.0 · Wave 1 Implementation</div>
+    <div class="h2">AI Control <span class="acc">Framework</span> — build this into every AI-powered feature</div>
+    <div class="lead">TACF v1.0 is the governance model for all autonomous and AI-assisted actions within the Tempris platform. Every AI-powered feature must implement TACF. Accountability always remains with a human authority layer — never the AI. All AI actions must be traceable, auditable, and reversible.</div>
+
+    <div class="alert warn" style="margin-bottom:20px">
+      <strong style="color:var(--gold)">TACF Core Principle:</strong> Tempris defines what can be done (permission layer). The client defines what should be done (objective layer). The AI executes within those boundaries (execution layer). The AI never has authority — only the human operator does. Every AI action is logged to AuditLog with full trace: model, prompt hash, input, output, operator_id, timestamp.
+    </div>
+
+    <!-- AI Control Flow -->
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:2px;margin-bottom:20px">
+      <div style="background:rgba(0,200,240,.06);border:1px solid rgba(0,200,240,.2);padding:14px 12px;text-align:center">
+        <div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);margin-bottom:6px">STEP 1</div>
+        <div style="font-size:11px;font-weight:600;color:#fff;margin-bottom:4px">REQUEST</div>
+        <div style="font-size:10px;color:var(--text2)">Client defines what should be done — objective, scope, risk appetite</div>
+      </div>
+      <div style="background:rgba(245,158,11,.05);border:1px solid rgba(245,158,11,.2);padding:14px 12px;text-align:center">
+        <div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);margin-bottom:6px">STEP 2</div>
+        <div style="font-size:11px;font-weight:600;color:#fff;margin-bottom:4px">DECISION</div>
+        <div style="font-size:10px;color:var(--text2)">Policy engine validates against TACF constraints — is this permitted?</div>
+      </div>
+      <div style="background:rgba(232,32,58,.05);border:1px solid rgba(232,32,58,.2);padding:14px 12px;text-align:center">
+        <div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);margin-bottom:6px">STEP 3</div>
+        <div style="font-size:11px;font-weight:600;color:#fff;margin-bottom:4px">CONTROL</div>
+        <div style="font-size:10px;color:var(--text2)">Tempris defines what can be done — permission framework, blast radius cap</div>
+      </div>
+      <div style="background:rgba(32,232,122,.05);border:1px solid rgba(32,232,122,.2);padding:14px 12px;text-align:center">
+        <div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);margin-bottom:6px">STEP 4</div>
+        <div style="font-size:11px;font-weight:600;color:#fff;margin-bottom:4px">EXECUTION</div>
+        <div style="font-size:10px;color:var(--text2)">AI executes within approved boundaries only — traceable, reversible</div>
+      </div>
+      <div style="background:rgba(139,92,246,.05);border:1px solid rgba(139,92,246,.2);padding:14px 12px;text-align:center">
+        <div style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);margin-bottom:6px">STEP 5</div>
+        <div style="font-size:11px;font-weight:600;color:#fff;margin-bottom:4px">AUDIT</div>
+        <div style="font-size:10px;color:var(--text2)">Every action committed to AuditLog — Wave 3: on-chain SEALCHAIN proof</div>
+      </div>
+    </div>
+
+    <div class="sdiv">TACF — 6 CONTROL DOMAINS · ALL MUST BE IMPLEMENTED IN WAVE 1</div>
+    <div class="g3">
+      <div class="tacf-card" style="border-top:2px solid var(--cyan)">
+        <span class="tacf-id">TACF-D1 · GOVERNANCE</span>
+        <div class="tacf-title">AI Governance &amp; Accountability</div>
+        <div class="tacf-sub">Establishes who owns what. Defines accountability chains and oversight obligations for all autonomous AI actions.</div>
+        <ul class="tacf-controls">
+          <li><span class="tc-id">D1.1</span> AI Accountability Register — every AI feature listed with owner, purpose, risk level</li>
+          <li><span class="tc-id">D1.2</span> Decision Rights Matrix — what can AI decide autonomously vs what needs human approval</li>
+          <li><span class="tc-id">D1.3</span> Human Override Protocol — any AI action can be stopped/reversed by authorised user</li>
+          <li><span class="tc-id">D1.4</span> Founder/board AI risk disclosure — quarterly review of AI feature risk register</li>
+        </ul>
+      </div>
+      <div class="tacf-card" style="border-top:2px solid var(--gold)">
+        <span class="tacf-id">TACF-D2 · POLICY ENGINE</span>
+        <div class="tacf-title">Permission &amp; Constraint Framework</div>
+        <div class="tacf-sub">Technical and contractual ruleset governing what any AI agent is permitted to do. Enforced at runtime, not just by policy document.</div>
+        <ul class="tacf-controls">
+          <li><span class="tc-id">D2.1</span> Execution boundary definition — per module, per AI feature, per tenant</li>
+          <li><span class="tc-id">D2.2</span> Approval threshold tables — actions requiring human sign-off before execution</li>
+          <li><span class="tc-id">D2.3</span> Blast radius caps — limits on how many assets/systems one AI action can touch</li>
+          <li><span class="tc-id">D2.4</span> Rate limiting &amp; circuit breakers — AI cannot spam APIs or flood systems</li>
+        </ul>
+      </div>
+      <div class="tacf-card" style="border-top:2px solid var(--red)">
+        <span class="tacf-id">TACF-D3 · RISK CONTROL</span>
+        <div class="tacf-title">Agent Risk Management</div>
+        <div class="tacf-sub">Continuous assessment of AI behaviour against expected baselines. Rollback capability and real-time kill-switch authority.</div>
+        <ul class="tacf-controls">
+          <li><span class="tc-id">D3.1</span> Behavioural baseline monitoring — flag anomalous AI output patterns</li>
+          <li><span class="tc-id">D3.2</span> Autonomous action risk scoring — every AI-recommended action gets a risk score before execution</li>
+          <li><span class="tc-id">D3.3</span> Rollback &amp; reversal capability — all AI-driven changes must be reversible where possible</li>
+          <li><span class="tc-id">D3.4</span> Emergency kill-switch — global AI pause, per-module AI pause, per-tenant AI pause</li>
+        </ul>
+      </div>
+      <div class="tacf-card" style="border-top:2px solid var(--purple)">
+        <span class="tacf-id">TACF-D4 · TRANSPARENCY</span>
+        <div class="tacf-title">Explainability &amp; Traceability</div>
+        <div class="tacf-sub">Every AI action traceable to a specific permission, request, and outcome. No black-box decisions in production.</div>
+        <ul class="tacf-controls">
+          <li><span class="tc-id">D4.1</span> Decision explanation logs — every AI recommendation includes "why" in plain language</li>
+          <li><span class="tc-id">D4.2</span> Action → outcome tracing — full chain: input → model → output → action → result</li>
+          <li><span class="tc-id">D4.3</span> AuditLog entry for every AI call — model used, prompt hash, token count, operator_id</li>
+          <li><span class="tc-id">D4.4</span> Regulator-ready exports — AI action log exportable for MAS/CSA review</li>
+        </ul>
+      </div>
+      <div class="tacf-card" style="border-top:2px solid var(--green)">
+        <span class="tacf-id">TACF-D5 · COMPLIANCE</span>
+        <div class="tacf-title">Regulatory Alignment</div>
+        <div class="tacf-sub">Maps TACF controls to MAS TRM, PDPA, CSA, ISO 42001, EU AI Act, and NIST AI RMF.</div>
+        <ul class="tacf-controls">
+          <li><span class="tc-id">D5.1</span> MAS TRM AI Annex — explainability and human oversight requirements met</li>
+          <li><span class="tc-id">D5.2</span> PDPA automated decision controls — no automated decisions affecting individuals without human review</li>
+          <li><span class="tc-id">D5.3</span> ISO 42001 AI Management System — documented AI governance process</li>
+          <li><span class="tc-id">D5.4</span> EU AI Act risk category — classify all AI features by risk tier (limited/high/unacceptable)</li>
+        </ul>
+      </div>
+      <div class="tacf-card" style="border-top:2px solid var(--orange)">
+        <span class="tacf-id">TACF-D6 · ASSURANCE</span>
+        <div class="tacf-title">Audit &amp; Continuous Assurance</div>
+        <div class="tacf-sub">Immutable audit trail. Every TACF control check, every AI action, every override is committed to AuditLog (stub in Wave 1 → SEALCHAIN in Wave 3).</div>
+        <ul class="tacf-controls">
+          <li><span class="tc-id">D6.1</span> Immutable audit log — AuditLog table, append-only, no deletes permitted</li>
+          <li><span class="tc-id">D6.2</span> Tamper detection — periodic hash chain verification of AuditLog integrity</li>
+          <li><span class="tc-id">D6.3</span> Timestamp integrity — UTC timestamps, NTP-synced, logged with entry</li>
+          <li><span class="tc-id">D6.4</span> Wave 3 upgrade path — AuditLog designed to feed SEALCHAIN without schema migration</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="sdiv">WAVE 1 AI FEATURES — TACF CLASSIFICATION TABLE</div>
+    <table class="sop-table">
+      <tr><th>AI FEATURE</th><th>MODULE</th><th>AUTONOMY LEVEL</th><th>HUMAN APPROVAL REQUIRED</th><th>TACF DOMAINS</th></tr>
+      <tr><td><strong style="color:#fff">EDIP Decision Recommendation</strong></td><td>SPECTRUM</td><td>Advisory only — analyst must confirm</td><td>Yes — analyst approves decision</td><td>D1, D2, D4</td></tr>
+      <tr><td><strong style="color:#fff">TES Score Computation</strong></td><td>SPECTRUM</td><td>Fully autonomous — formula-based</td><td>No — deterministic algorithm</td><td>D4, D6</td></tr>
+      <tr><td><strong style="color:#fff">CTEM Cycle Orchestration</strong></td><td>SYNTHESIS</td><td>Autonomous — schedule or triggered</td><td>No — but can be paused/cancelled</td><td>D2, D3, D4, D6</td></tr>
+      <tr><td><strong style="color:#fff">SCOUT Scan Execution</strong></td><td>SCOUT</td><td>Autonomous — within authorised scope</td><td>Scope must be pre-approved</td><td>D2, D3, D4, D6</td></tr>
+      <tr><td><strong style="color:#fff">STRIKE Simulation</strong></td><td>STRIKE</td><td>Supervised — analyst-initiated</td><td>Yes — written client auth mandatory</td><td>D1, D2, D3, D4, D6</td></tr>
+      <tr><td><strong style="color:#fff">SPEAK Chat Responses</strong></td><td>SPEAK</td><td>Advisory only — information only</td><td>No — advisory, no system changes</td><td>D4, D5, D6</td></tr>
+      <tr><td><strong style="color:#fff">SPOTLIGHT AI Narrative</strong></td><td>SPOTLIGHT</td><td>Advisory only — report narrative</td><td>No — human reviews before sending</td><td>D4, D5</td></tr>
+      <tr><td><strong style="color:#fff">Remediation Auto-Assignment</strong></td><td>SYNTHESIS</td><td>Semi-autonomous — assigns by rule</td><td>Analyst can override assignment</td><td>D1, D2, D4, D6</td></tr>
+      <tr><td><strong style="color:#fff">Compliance Auto-Mapping</strong></td><td>STANDARD</td><td>Automatic — finding → control mapping</td><td>Analyst reviews and confirms</td><td>D4, D5, D6</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ══ DEPLOYMENT ══ -->
+<div class="section" id="deploy">
+  <div class="eyebrow">09 · Deployment · Dev → Staging → Production</div>
+  <div class="h2">Deployment <span class="acc">Requirements</span></div>
+  <div class="g3">
+    <div class="card c">
+      <div class="mod-section-title">Development Environment</div>
+      <ul class="mod-list">
+        <li>Docker Compose — all 7 services + PostgreSQL + Redis + Kafka + MinIO</li>
+        <li>Single docker-compose.yml brings entire stack up locally</li>
+        <li>Hot reload — FastAPI --reload, Vite HMR for React frontend</li>
+        <li>Seed data — sample tenant, assets, findings, compliance controls pre-loaded</li>
+        <li>.env.example — all required environment variables documented</li>
+        <li>Makefile — make dev, make test, make migrate, make seed</li>
+        <li>Alembic migrations — all schema changes tracked from day one</li>
+        <li>pytest — minimum 80% coverage, CI enforced</li>
+        <li>Vitest + React Testing Library — frontend unit tests</li>
+      </ul>
+    </div>
+    <div class="card o">
+      <div class="mod-section-title">Environment Variables Required</div>
+      <div class="schema" style="font-size:9px;line-height:1.9">
+        <span class="k">DATABASE_URL</span>=postgresql+asyncpg://...<br>
+        <span class="k">REDIS_URL</span>=redis://localhost:6379<br>
+        <span class="k">KAFKA_BOOTSTRAP</span>=localhost:9092<br>
+        <span class="k">SECRET_KEY</span>=<span class="s"># 32-byte hex</span><br>
+        <span class="k">JWT_ALGORITHM</span>=HS256<br>
+        <span class="k">ACCESS_TOKEN_EXPIRE</span>=480<span class="t"># minutes</span><br>
+        <span class="k">ANTHROPIC_API_KEY</span>=sk-ant-...<br>
+        <span class="k">OPENVAS_HOST</span>=localhost<br>
+        <span class="k">OPENVAS_PORT</span>=9390<br>
+        <span class="k">NUCLEI_PATH</span>=/usr/local/bin/nuclei<br>
+        <span class="k">CALDERA_URL</span>=http://caldera:8888<br>
+        <span class="k">MINIO_ENDPOINT</span>=localhost:9000<br>
+        <span class="k">MINIO_ACCESS_KEY</span>=...<br>
+        <span class="k">REPORT_OUTPUT_DIR</span>=/tmp/tempris-reports<br>
+        <span class="k">ALLOWED_ORIGINS</span>=["http://localhost:3000"]<br>
+        <span class="k">ENVIRONMENT</span>=development<br>
+        <span class="k">LOG_LEVEL</span>=INFO
+      </div>
+    </div>
+    <div class="card p">
+      <div class="mod-section-title">Production Requirements</div>
+      <ul class="mod-list">
+        <li>Kubernetes — Helm charts for all 7 services, HPA for SPECTRUM/SCOUT under load</li>
+        <li>PostgreSQL — managed (AWS RDS / Azure Database) with automated backups</li>
+        <li>Redis Cluster — managed, 3-node minimum for session resilience</li>
+        <li>Kafka — managed (Confluent / MSK) — minimum 3 brokers, replication factor 3</li>
+        <li>TLS everywhere — Cert Manager + Let's Encrypt for external, internal mTLS via Istio</li>
+        <li>Secrets — HashiCorp Vault or AWS Secrets Manager — no secrets in code or env files</li>
+        <li>CI/CD — GitHub Actions → ArgoCD → K8s cluster — no manual deployments</li>
+        <li>Monitoring — Prometheus + Grafana + Loki + Alertmanager stack</li>
+        <li>Backup — daily encrypted database snapshots, 30-day retention minimum</li>
+        <li>WAF — Cloudflare or AWS WAF in front of all external-facing services</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ══ TECH STACK ══ -->
+<div class="section dark" id="stack">
+  <div class="inner">
+    <div class="eyebrow">10 · Tech Stack · Confirmed · Wave 1</div>
+    <div class="h2">Full Stack <span class="acc">Technology</span> Requirements</div>
+
+    <div class="g2" style="margin-top:16px">
+      <div>
+        <div class="mod-section-title">Backend</div>
+        <div style="margin-bottom:10px">
+          <span class="tech-pill">Python 3.11+</span>
+          <span class="tech-pill">FastAPI 0.115+</span>
+          <span class="tech-pill">SQLAlchemy 2.0 (async)</span>
+          <span class="tech-pill">Alembic</span>
+          <span class="tech-pill">Pydantic v2</span>
+          <span class="tech-pill">pydantic-settings</span>
+          <span class="tech-pill">asyncpg</span>
+          <span class="tech-pill">aioredis</span>
+          <span class="tech-pill">aiokafka</span>
+          <span class="tech-pill">python-jose (JWT)</span>
+          <span class="tech-pill">passlib (bcrypt)</span>
+          <span class="tech-pill">anthropic SDK</span>
+          <span class="tech-pill">jinja2</span>
+          <span class="tech-pill">weasyprint</span>
+          <span class="tech-pill">httpx</span>
+          <span class="tech-pill">pytest + pytest-asyncio</span>
+          <span class="tech-pill">celery (async tasks)</span>
+          <span class="tech-pill">minio SDK</span>
+        </div>
+        <div class="mod-section-title" style="margin-top:12px">Security Scanning</div>
+        <div style="margin-bottom:10px">
+          <span class="tech-pill">Nuclei (OSS — primary Wave 1)</span>
+          <span class="tech-pill">OpenVAS / GVM (python-gvm)</span>
+          <span class="tech-pill">OWASP ZAP (zaproxy SDK)</span>
+          <span class="tech-pill">CALDERA (REST API)</span>
+          <span class="tech-pill">Metasploit RPC</span>
+          <span class="tech-pill">CISA KEV API (free)</span>
+          <span class="tech-pill">MISP (optional)</span>
+          <span class="tech-pill">VirusTotal API (optional)</span>
+        </div>
+        <div class="mod-section-title" style="margin-top:12px">Infrastructure</div>
+        <div>
+          <span class="tech-pill">PostgreSQL 16</span>
+          <span class="tech-pill">Redis 7</span>
+          <span class="tech-pill">Apache Kafka 3.7</span>
+          <span class="tech-pill">MinIO (S3-compatible)</span>
+          <span class="tech-pill">Docker + Docker Compose</span>
+          <span class="tech-pill">Kubernetes (prod)</span>
+          <span class="tech-pill">nginx / Traefik</span>
+          <span class="tech-pill">Prometheus</span>
+          <span class="tech-pill">Grafana</span>
+          <span class="tech-pill">Loki</span>
+          <span class="tech-pill">GitHub Actions</span>
+          <span class="tech-pill">ArgoCD</span>
+        </div>
+      </div>
+      <div>
+        <div class="mod-section-title">Frontend</div>
+        <div style="margin-bottom:10px">
+          <span class="tech-pill">React 18</span>
+          <span class="tech-pill">TypeScript 5</span>
+          <span class="tech-pill">Vite 5</span>
+          <span class="tech-pill">Tailwind CSS 3</span>
+          <span class="tech-pill">React Router v6</span>
+          <span class="tech-pill">Zustand (state)</span>
+          <span class="tech-pill">Axios (HTTP)</span>
+          <span class="tech-pill">Recharts (charts)</span>
+          <span class="tech-pill">D3.js (attack graph)</span>
+          <span class="tech-pill">Lucide React (icons)</span>
+          <span class="tech-pill">React Query (data fetching)</span>
+          <span class="tech-pill">Vitest (testing)</span>
+          <span class="tech-pill">React Testing Library</span>
+          <span class="tech-pill">WebSocket (native)</span>
+          <span class="tech-pill">EventSource (SSE)</span>
+        </div>
+        <div class="mod-section-title" style="margin-top:12px">AI / ML</div>
+        <div>
+          <span class="tech-pill">Anthropic Claude API (claude-sonnet-4-20250514)</span>
+          <span class="tech-pill">LangChain (RAG pipeline)</span>
+          <span class="tech-pill">pgvector (vector storage)</span>
+          <span class="tech-pill">OpenAI text-embedding-3-small (embeddings)</span>
+        </div>
+        <div class="mod-section-title" style="margin-top:12px">Integrations — Wave 1</div>
+        <div>
+          <span class="tech-pill">Jira REST API</span>
+          <span class="tech-pill">ServiceNow REST API</span>
+          <span class="tech-pill">Slack Webhooks</span>
+          <span class="tech-pill">Microsoft Teams Webhooks</span>
+          <span class="tech-pill">AWS SDK (boto3)</span>
+          <span class="tech-pill">Azure SDK</span>
+          <span class="tech-pill">GCP Client Libraries</span>
+          <span class="tech-pill">SMTP (email reports)</span>
+          <span class="tech-pill">PagerDuty API</span>
+        </div>
+        <div class="alert info" style="margin-top:12px">
+          <strong style="color:var(--cyan)">Architecture constraint:</strong> All service-to-service calls must go through the Kafka event bus — not direct REST calls between modules. This ensures loose coupling and allows Wave 2+ modules to subscribe to events without changes to existing services. Direct REST is only permitted for synchronous UI requests (frontend → API gateway → specific service).
+        </div>
+      </div>
+    </div>
+
+    <div class="sdiv">DELIVERABLES — WHAT THE DEVELOPER MUST PRODUCE</div>
+    <div class="g3">
+      <div class="card">
+        <div class="mod-section-title">Code &amp; Repository</div>
+        <ul class="mod-list">
+          <li class="g">Monorepo structure: /backend (Python) + /frontend (React) + /infra (Docker/K8s)</li>
+          <li class="g">All code committed to Tempris private GitHub repository under NDA</li>
+          <li class="g">Comprehensive README — setup, dev environment, architecture diagram</li>
+          <li class="g">API documentation — FastAPI auto-docs (/docs) + OpenAPI spec export</li>
+          <li class="g">Database migration files — all Alembic migrations numbered and labelled</li>
+          <li class="g">Environment setup — .env.example with all required keys documented</li>
+          <li class="g">Docker Compose — single command to run full local stack</li>
+          <li class="g">CI/CD pipeline — GitHub Actions running tests on every PR</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="mod-section-title">Testing</div>
+        <ul class="mod-list">
+          <li class="g">Minimum 80% test coverage — backend (pytest) and frontend (Vitest)</li>
+          <li class="g">Integration tests — every API endpoint tested with real DB (not mocks)</li>
+          <li class="g">Auth flow tests — login, refresh, logout, MFA setup and verify</li>
+          <li class="g">CTEM cycle test — full end-to-end cycle from trigger to SPOTLIGHT report</li>
+          <li class="g">Multi-tenant isolation test — confirm no cross-tenant data leakage</li>
+          <li class="g">Load test — SYNTHESIS Hub + WebSocket with 50 concurrent connections</li>
+          <li class="g">Security scan — bandit (Python) + npm audit (Node) must pass clean</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="mod-section-title">Handover Package</div>
+        <ul class="mod-list">
+          <li class="g">Architecture decision records (ADR) — key technical choices documented</li>
+          <li class="g">IP assignment signed — all code IP transferred to Tempris per NDA terms</li>
+          <li class="g">Deletion certificate — developer confirms deletion of all local copies</li>
+          <li class="g">Secrets handover — all API keys and credentials transferred to Tempris Vault</li>
+          <li class="g">GitHub access revoked — all developer accounts removed from repo at handover</li>
+          <li class="g">Deployment runbook — how to deploy to production step by step</li>
+          <li class="g">Wave 2 extension guide — how to add new modules to the event bus</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- FOOTER -->
+    <div style="margin-top:32px;padding:20px 22px;background:rgba(0,200,240,.04);border:1px solid rgba(0,200,240,.15)">
+      <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--cyan);letter-spacing:2px;margin-bottom:10px">CONTACT · AUTHORISATION · QUESTIONS</div>
+      <div class="g3">
+        <div>
+          <div style="font-size:11px;font-weight:600;color:#fff;margin-bottom:4px">All technical questions</div>
+          <div style="font-size:11px;color:var(--text2)">Submit via the Tempris developer Slack channel or email below. Do not discuss implementation details on any other platform or with any third party.</div>
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:600;color:#fff;margin-bottom:4px">Access requests</div>
+          <div style="font-size:11px;color:var(--text2)">All repository access, API key requests, and environment access must be authorised in writing by the Founder before any access is granted.</div>
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:600;color:#fff;margin-bottom:4px">Contact</div>
+          <div style="font-size:11px;color:var(--text2)">
+            Sherie Loh · Founder &amp; CEO<br>
+            <span style="color:var(--cyan)">sherie@tempris.biz</span><br>
+            Tempris Technology Pte. Ltd. · UEN 202613990D<br>
+            Singapore
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="src" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+      TEMPRIS TECHNOLOGY PTE. LTD. · UEN 202613990D · SINGAPORE · TEMPRIS.BIZ · SHERIE@TEMPRIS.BIZ<br>
+      CONFIDENTIAL — WAVE 1 DEVELOPER BRIEF v48 · FOR AUTHORISED DEVELOPMENT TEAM ONLY UNDER NDA<br>
+      All IP generated under this brief vests exclusively in Tempris Technology Pte. Ltd. from the moment of creation. Source: S-Suite Synthesis Mockup v48 · <strong style="color:#60a5fa;">TES: CTEM×EDIP×ISO42001</strong> · ISO/IEC 42001:2023 AI Policy Active · Tempris PDB v1.0 · TACF v1.0 · SOP v1.0 · Darktrace ATR Jun 2026 · Gartner CTEM 2024–2026 · MAS TRM 2024 · ISO 42001 · ISO 27001:2022
+    </div>
+  </div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SECTION: IDOR / BUSINESS LOGIC FLAW — SSS INTAKE (v48 NEW) -->
+<!-- ============================================================ -->
+<div style="margin:32px 0;border:2px solid #FF7A30;border-radius:0;padding:0;overflow:hidden;" id="section-blflaw">
+  <!-- Header -->
+  <div style="background:rgba(255,122,48,0.12);padding:18px 20px;border-bottom:1px solid #FF7A30;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <span style="font-family:'Space Mono',monospace;font-size:9px;color:#FF7A30;letter-spacing:2px;">v48 · WAVE 1 · NEW</span>
+    <span style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800;color:#fff;">IDOR &amp; Business Logic Flaw — SSS Intake Pipeline</span>
+    <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;">
+      <span class="tag tag-o">EDIP</span>
+      <span class="tag tag-c">SSS</span>
+      <span class="tag tag-p">NON-CVE</span>
+    </div>
+  </div>
+  <div style="padding:18px 20px;">
+
+    <!-- WHY THIS EXISTS -->
+    <div style="background:#080F1A;border:1px solid #1A3050;padding:14px 16px;margin-bottom:18px;">
+      <div style="font-family:'Space Mono',monospace;font-size:8px;letter-spacing:3px;color:#4A7A9B;margin-bottom:10px;text-transform:uppercase;">Context — Why This Matters (v48)</div>
+      <p style="font-size:11px;color:#D4E8F2;line-height:1.8;margin:0;">Business logic flaws — IDORs, broken access control, horizontal privilege escalation, business flow bypasses — are design-level vulnerabilities. <strong style="color:#FF7A30;">They do not generate CVEs.</strong> Traditional DAST scanners see a valid 200 OK and mark it passing. They have no concept of data ownership across sessions. Tools like XBOW (autonomous AI pentester) now surface these at scale. Tempris EDIP must be able to <strong style="color:#00C8F0;">accept, score, and queue</strong> these findings via the SSS non-CVE pipeline.</p>
+    </div>
+
+    <!-- FINDING TYPES TABLE -->
+    <div style="margin-bottom:18px;">
+      <div style="font-family:'Space Mono',monospace;font-size:8px;letter-spacing:3px;color:#4A7A9B;margin-bottom:12px;text-transform:uppercase;">Supported Finding Subtypes — EDIP SSS Intake</div>
+      <table class="sop-table" style="width:100%;">
+        <thead>
+          <tr>
+            <th>Subtype Code</th>
+            <th>Finding Class</th>
+            <th>SSS Range</th>
+            <th>Source Tools</th>
+            <th>COMPENSATING_CONTROL?</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span style="font-family:'Space Mono',monospace;font-size:10px;color:#FF7A30;">IDOR</span></td>
+            <td style="color:#D4E8F2;">Cross-user data access (User A reads User B data)</td>
+            <td style="color:#E8203A;font-family:'Space Mono',monospace;">7.0–9.5</td>
+            <td style="font-size:10px;color:#4A7A9B;">XBOW, Manual Pentest, Bug Bounty</td>
+            <td style="font-size:10px;color:#20E87A;">Yes — rate limit + logging</td>
+          </tr>
+          <tr>
+            <td><span style="font-family:'Space Mono',monospace;font-size:10px;color:#FF7A30;">BFLAW-BAC</span></td>
+            <td style="color:#D4E8F2;">Broken Access Control (lower role → admin resource)</td>
+            <td style="color:#E8203A;font-family:'Space Mono',monospace;">6.5–9.0</td>
+            <td style="font-size:10px;color:#4A7A9B;">XBOW, Manual Pentest</td>
+            <td style="font-size:10px;color:#20E87A;">Yes — WAF rule + arch review</td>
+          </tr>
+          <tr>
+            <td><span style="font-family:'Space Mono',monospace;font-size:10px;color:#FF7A30;">BFLAW-HPE</span></td>
+            <td style="color:#D4E8F2;">Horizontal Privilege Escalation (same tier, lateral move)</td>
+            <td style="color:#F59E0B;font-family:'Space Mono',monospace;">5.0–8.0</td>
+            <td style="font-size:10px;color:#4A7A9B;">XBOW, Internal Red Team</td>
+            <td style="font-size:10px;color:#20E87A;">Yes — session isolation controls</td>
+          </tr>
+          <tr>
+            <td><span style="font-family:'Space Mono',monospace;font-size:10px;color:#FF7A30;">BFLAW-BFB</span></td>
+            <td style="color:#D4E8F2;">Business Flow Bypass (payment/approval gate skipped)</td>
+            <td style="color:#F59E0B;font-family:'Space Mono',monospace;">4.5–7.5</td>
+            <td style="font-size:10px;color:#4A7A9B;">Manual Pentest, XBOW</td>
+            <td style="font-size:10px;color:#20E87A;">Yes — server-side state validation</td>
+          </tr>
+          <tr>
+            <td><span style="font-family:'Space Mono',monospace;font-size:10px;color:#FF7A30;">BFLAW-MSC</span></td>
+            <td style="color:#D4E8F2;">Multi-Step Logic Chain (cascading exploit sequence)</td>
+            <td style="color:#F59E0B;font-family:'Space Mono',monospace;">5.5–9.5</td>
+            <td style="font-size:10px;color:#4A7A9B;">XBOW, Red Team</td>
+            <td style="font-size:10px;color:#8B5CF6;">Yes — architecture review gate</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="g2" style="margin-bottom:18px;">
+      <!-- PYTHON BACKEND -->
+      <div>
+        <div style="font-family:'Space Mono',monospace;font-size:8px;letter-spacing:3px;color:#4A7A9B;margin-bottom:10px;text-transform:uppercase;">Python — edip_non_cve_extension.py (extend existing)</div>
+        <div style="background:#03060A;border:1px solid #0F2035;padding:14px;font-family:'Space Mono',monospace;font-size:10px;color:#D4E8F2;line-height:1.8;overflow-x:auto;white-space:pre;">
+<span style="color:#4A7A9B;"># v48 — Business Logic Flaw Finding Types
+# Add to FINDING_TYPE enum in edip_non_cve_extension.py</span>
+
+class FindingType(Enum):
+    <span style="color:#00C8F0;">IDOR</span>          = "IDOR"
+    <span style="color:#00C8F0;">BFLAW_BAC</span>    = "BFLAW-BAC"
+    <span style="color:#00C8F0;">BFLAW_HPE</span>    = "BFLAW-HPE"
+    <span style="color:#00C8F0;">BFLAW_BFB</span>    = "BFLAW-BFB"
+    <span style="color:#00C8F0;">BFLAW_MSC</span>    = "BFLAW-MSC"
+    <span style="color:#4A7A9B;"># existing types retained below...</span>
+
+<span style="color:#4A7A9B;"># SSS default ranges per subtype</span>
+BL_SSS_DEFAULTS = {
+    FindingType.IDOR:       (7.0, 9.5),
+    FindingType.BFLAW_BAC:  (6.5, 9.0),
+    FindingType.BFLAW_HPE:  (5.0, 8.0),
+    FindingType.BFLAW_BFB:  (4.5, 7.5),
+    FindingType.BFLAW_MSC:  (5.5, 9.5),
+}
+
+<span style="color:#4A7A9B;"># Source tool tracking field</span>
+@dataclass
+class BLFlawFinding:
+    finding_type: FindingType
+    sss: float  <span style="color:#4A7A9B;"># analyst-assigned 0–10</span>
+    source_tool: str  <span style="color:#4A7A9B;"># XBOW | Manual | BugBounty</span>
+    pii_exposed: bool = False
+    patch_available: bool = True
+    description: str = ""
+    asset_id: str = ""
+
+<span style="color:#4A7A9B;"># TES calculation (SSS replaces CVSS base)</span>
+def calc_tes_blflaw(finding: BLFlawFinding,
+                    agm: float, drf: float,
+                    tef: float) -&gt; dict:
+    raw = finding.sss * agm * drf * tef
+    tes = min(10.0, round(raw, 1))
+    band = (
+        "ESCALATE" if tes &gt;= 9.0 else
+        "PATCH"    if tes &gt;= 7.0 else
+        "INVESTIGATE" if tes &gt;= 4.0 else
+        "DEFER"
+    )
+    action = (
+        "COMPENSATING_CONTROL"
+        if not finding.patch_available
+        else band
+    )
+    return {
+        "tes": tes, "band": band,
+        "action": action,
+        "sss_used": finding.sss,
+        "modifiers": {
+            "AGM": agm, "DRF": drf, "TEF": tef
+        }
+    }
+        </div>
+      </div>
+      <!-- REACT FRONTEND -->
+      <div>
+        <div style="font-family:'Space Mono',monospace;font-size:8px;letter-spacing:3px;color:#4A7A9B;margin-bottom:10px;text-transform:uppercase;">React — BLFlawIntakeCard.jsx (new component)</div>
+        <div style="background:#03060A;border:1px solid #0F2035;padding:14px;font-family:'Space Mono',monospace;font-size:10px;color:#D4E8F2;line-height:1.8;overflow-x:auto;white-space:pre;">
+<span style="color:#4A7A9B;">// BLFlawIntakeCard.jsx
+// Renders SSS intake form for business logic findings
+// Place in: /src/components/edip/BLFlawIntakeCard.jsx</span>
+
+import { useState } from "react";
+
+<span style="color:#4A7A9B;">const TYPES = [
+  { code:"IDOR",       label:"IDOR — Cross-user data" },
+  { code:"BFLAW-BAC",  label:"Broken Access Control" },
+  { code:"BFLAW-HPE",  label:"Horiz. Privilege Escalation" },
+  { code:"BFLAW-BFB",  label:"Business Flow Bypass" },
+  { code:"BFLAW-MSC",  label:"Multi-Step Logic Chain" },
+];</span>
+
+export default function BLFlawIntakeCard({ agm, drf, tef }) {
+  const [type, setType]   = useState("IDOR");
+  const [sss,  setSss]    = useState(8.0);
+  const [pii,  setPii]    = useState(false);
+  const [patch, setPatch] = useState(true);
+  const [src,  setSrc]    = useState("xbow");
+
+  <span style="color:#4A7A9B;">// TES = SSS × AGM × DRF × TEF capped at 10</span>
+  const tes  = Math.min(10, +(sss*agm*drf*tef).toFixed(1));
+  const band = tes&gt;=9?"ESCALATE":tes&gt;=7?"PATCH":
+               tes&gt;=4?"INVESTIGATE":"DEFER";
+  const act  = !patch ? "COMPENSATING_CONTROL" : band;
+  const col  = tes&gt;=9?"#E8203A":tes&gt;=7?"#FF7A30":
+               tes&gt;=4?"#F59E0B":"#20E87A";
+
+  return (
+    &lt;div className="bl-intake-card"&gt;
+      &lt;h3&gt;Business Logic Flaw Intake&lt;/h3&gt;
+
+      &lt;select value={type}
+        onChange={e=&gt;setType(e.target.value)}&gt;
+        {TYPES.map(t=&gt;
+          &lt;option key={t.code} value={t.code}&gt;
+            {t.label}
+          &lt;/option&gt;)}
+      &lt;/select&gt;
+
+      &lt;label&gt;SSS: {sss.toFixed(1)}
+        &lt;input type="range" min="0" max="10"
+          step="0.1" value={sss}
+          onChange={e=&gt;setSss(+e.target.value)} /&gt;
+      &lt;/label&gt;
+
+      &lt;label&gt;
+        &lt;input type="checkbox" checked={pii}
+          onChange={e=&gt;setPii(e.target.checked)} /&gt;
+        PII / Financial data exposed
+      &lt;/label&gt;
+
+      &lt;label&gt;
+        &lt;input type="checkbox" checked={patch}
+          onChange={e=&gt;setPatch(e.target.checked)} /&gt;
+        Patch / remediation available
+      &lt;/label&gt;
+
+      &lt;div style={{color:col,fontSize:"2rem"}}&gt;
+        TES: {tes}
+      &lt;/div&gt;
+      &lt;div&gt;Action: {act}&lt;/div&gt;
+    &lt;/div&gt;
+  );
+}
+        </div>
+      </div>
+    </div>
+
+    <!-- API ENDPOINT SPEC -->
+    <div style="margin-bottom:18px;">
+      <div style="font-family:'Space Mono',monospace;font-size:8px;letter-spacing:3px;color:#4A7A9B;margin-bottom:10px;text-transform:uppercase;">FastAPI — New Endpoints (add to edip router)</div>
+      <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/edip/intake/blflaw</span><span class="api-desc">Submit a business logic flaw finding — returns SSS, TES score, EDIP action</span></div>
+      <div class="api-row"><span class="api-method get">GET</span><span class="api-path">/api/v1/edip/intake/blflaw</span><span class="api-desc">List all BL flaw findings in the intake queue, ranked by TES descending</span></div>
+      <div class="api-row"><span class="api-method put">PUT</span><span class="api-path">/api/v1/edip/intake/blflaw/{id}</span><span class="api-desc">Update SSS, patch status, or compensating control notes on an existing finding</span></div>
+      <div class="api-row"><span class="api-method post">POST</span><span class="api-path">/api/v1/edip/intake/blflaw/{id}/resolve</span><span class="api-desc">Mark finding resolved — triggers STANDARD audit trail entry</span></div>
+    </div>
+
+    <!-- DB SCHEMA -->
+    <div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;letter-spacing:3px;color:#4A7A9B;margin-bottom:10px;text-transform:uppercase;">PostgreSQL — edip_blflaw_findings table (new)</div>
+      <div style="background:#03060A;border:1px solid #0F2035;padding:14px;font-family:'Space Mono',monospace;font-size:10px;color:#D4E8F2;line-height:1.8;overflow-x:auto;white-space:pre;">
+<span style="color:#4A7A9B;">-- Run via Elvand on Hostinger KVM2 PostgreSQL instance
+-- Add to Wave 1 migration set</span>
+
+CREATE TABLE edip_blflaw_findings (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  asset_id        VARCHAR(100),
+  finding_type    VARCHAR(20) NOT NULL,
+  <span style="color:#4A7A9B;">-- CHECK: IDOR | BFLAW-BAC | BFLAW-HPE | BFLAW-BFB | BFLAW-MSC</span>
+  source_tool     VARCHAR(50),  <span style="color:#4A7A9B;">-- XBOW | Manual | BugBounty | RedTeam</span>
+  sss             DECIMAL(4,2) NOT NULL CHECK (sss BETWEEN 0 AND 10),
+  tes_score       DECIMAL(4,2),
+  edip_action     VARCHAR(30),  <span style="color:#4A7A9B;">-- ESCALATE|PATCH|INVESTIGATE|DEFER|COMPENSATING_CONTROL</span>
+  pii_exposed     BOOLEAN DEFAULT FALSE,
+  patch_available BOOLEAN DEFAULT TRUE,
+  description     TEXT,
+  status          VARCHAR(20) DEFAULT 'OPEN',
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  resolved_at     TIMESTAMPTZ,
+  agm_at_intake   DECIMAL(4,3),
+  drf_at_intake   DECIMAL(4,3),
+  tef_at_intake   DECIMAL(4,3)
+);
+
+CREATE INDEX idx_blflaw_tes ON edip_blflaw_findings(tes_score DESC);
+CREATE INDEX idx_blflaw_status ON edip_blflaw_findings(status);
+CREATE INDEX idx_blflaw_type ON edip_blflaw_findings(finding_type);
+      </div>
+    </div>
+
+  </div>
+</div>
+<!-- /SECTION: BLFLAW -->
+</div><!-- /page -->
+
+<script>
+const sections = document.querySelectorAll('[id]');
+const navLinks = document.querySelectorAll('.nl');
+window.addEventListener('scroll', () => {
+  let current = '';
+  sections.forEach(s => { if (window.scrollY >= s.offsetTop - 60) current = s.id; });
+  navLinks.forEach(l => l.classList.toggle('active', l.getAttribute('href') === '#' + current));
+}, { passive: true });
+</script>
+
+<!-- CVE-2026-8932 CURL MTLS BLOCK v50 -->
+<div style="margin:16px 0;background:linear-gradient(135deg,rgba(232,32,58,.07),rgba(139,92,246,.04));border:1px solid rgba(232,32,58,.25);border-left:3px solid #E8203A;border-radius:6px;padding:18px 22px">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+    <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:3px;color:#E8203A;text-transform:uppercase">NEW · CVE-2026-8932 · PATCHED JUN 24 2026</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(232,32,58,.15);color:#E8203A;border:1px solid rgba(232,32,58,.3);padding:2px 8px">CVSS 7.5 MEDIUM</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(32,232,122,.12);color:#20E87A;border:1px solid rgba(32,232,122,.25);padding:2px 8px">TES 10.0 → ESCALATE</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(245,158,11,.12);color:#F59E0B;border:1px solid rgba(245,158,11,.25);padding:2px 8px">AGE: 25 years (introduced curl 7.7 — Mar 22, 2001)</span>
+  </div>
+  <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:#fff;margin-bottom:6px">curl mTLS Connection Reuse — Authentication Bypass</div>
+  <div style="font-size:12px;color:#8DBBD4;line-height:1.85;margin-bottom:12px">
+    <strong style="color:#D4E8F2">What it is:</strong> libcurl could reuse an existing mTLS connection even after client certificate or private key settings had changed — silently authenticating with the <em>wrong identity</em>. Affects libcurl applications (not the curl CLI). Every MAS-regulated financial institution running Python <code style="background:rgba(0,200,240,.1);color:#00C8F0;padding:1px 4px;font-size:10px">requests</code>, Node.js <code style="background:rgba(0,200,240,.1);color:#00C8F0;padding:1px 4px;font-size:10px">axios</code>, Java SDKs, or any modern API stack is exposed — because libcurl is embedded in all of them.<br><br>
+    <strong style="color:#D4E8F2">Why it matters here:</strong> MAS TRM §9 mandates mutual TLS for inter-system communication. CVE-2026-8932 directly undermines that control. A connection that believes it is using Certificate A may actually be authenticated as Certificate B — making it a direct MAS audit finding.<br><br>
+    <strong style="color:#D4E8F2">Scale:</strong> curl runs on <strong style="color:#E8203A">30 billion devices</strong>. This flaw lived undetected for <strong style="color:#E8203A">25 years</strong> (since curl 7.7, March 22, 2001). Part of a record 18-CVE release — the most ever patched in a single curl version.
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(232,32,58,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#E8203A">7.5</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">CVSS v3.1</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(32,232,122,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#20E87A">10.0</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">TES → ESCALATE</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(245,158,11,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#F59E0B">25 YRS</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">UNDETECTED</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(0,200,240,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#00C8F0">30B</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">DEVICES AFFECTED</div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:11px;color:#8DBBD4">
+    <div>
+      <div style="color:#20E87A;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">PATCH ACTION</div>
+      Upgrade to <strong style="color:#00C8F0">curl 8.21.0</strong> immediately. Audit all services using libcurl with dynamic certificate loading, mTLS-authenticated microservices, and any API gateway or SDK calling external endpoints with client certs. If immediate upgrade is blocked, isolate affected services and apply COMPENSATING_CONTROL via EDIP.
+    </div>
+    <div>
+      <div style="color:#F59E0B;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">TEMPRIS EDIP INTAKE</div>
+      <strong style="color:#D4E8F2">CVE:</strong> CVE-2026-8932 · <strong style="color:#D4E8F2">Type:</strong> CVE (KEV-eligible)<br>
+      <strong style="color:#D4E8F2">CWE:</strong> CWE-305 Authentication Bypass<br>
+      <strong style="color:#D4E8F2">AGM:</strong> 1.1 · <strong style="color:#D4E8F2">DRF:</strong> 1.1 · <strong style="color:#D4E8F2">TEF:</strong> 1.2<br>
+      <strong style="color:#D4E8F2">Decision:</strong> PATCH (upgrade to 8.21.0) or COMPENSATING_CONTROL
+    </div>
+  </div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(232,32,58,.15);font-family:'Space Mono',monospace;font-size:9px;color:#4A7A9B">
+    SOURCE: curl.se/docs/CVE-2026-8932.html · SecurityWeek Jun 24 2026 · daniel.haxx.se/blog/2026/06/24/curl-8-21-0 · CWE-305
+  </div>
+</div>
+
+<!-- QUANTUM HNDL BLOCK v50 -->
+<div style="margin:16px 0;background:linear-gradient(135deg,rgba(0,200,240,.06),rgba(139,92,246,.06));border:1px solid rgba(0,200,240,.25);border-left:3px solid #00C8F0;border-radius:6px;padding:18px 22px">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+    <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:3px;color:#00C8F0;text-transform:uppercase">WAVE 3 THREAT · HARVEST NOW DECRYPT LATER · POST-QUANTUM RISK · 2026</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(0,200,240,.12);color:#00C8F0;border:1px solid rgba(0,200,240,.3);padding:2px 8px">SEALCHAIN MODULE</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(139,92,246,.12);color:#8B5CF6;border:1px solid rgba(139,92,246,.3);padding:2px 8px">MAS TRM §9 LONG-TERM RISK</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(245,158,11,.12);color:#F59E0B;border:1px solid rgba(245,158,11,.3);padding:2px 8px">HORIZON: 2030–2038</span>
+  </div>
+  <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:#fff;margin-bottom:6px">Harvest Now, Decrypt Later — The Quantum Threat Hiding in Plain Sight</div>
+  <div style="font-size:12px;color:#8DBBD4;line-height:1.85;margin-bottom:14px">
+    <strong style="color:#D4E8F2">What is happening right now:</strong> Nation-state adversaries are systematically capturing encrypted network traffic today — including HTTPS, VPN tunnels, TLS-protected API calls, and encrypted banking transactions — and storing it at scale. The cost of storing 1% of global internet traffic is approximately <strong style="color:#00C8F0">$1 billion per year</strong>. Targeted harvesting of specific companies, industries, or IP ranges costs dramatically less. The data being captured in 2026 will remain encrypted and unreadable — until quantum computing reaches the decryption threshold, estimated between 2030 and 2038.<br><br>
+    <strong style="color:#D4E8F2">Why MAS-regulated institutions are primary targets:</strong> Singapore financial institutions hold the highest-value long-lived data: client KYC records, loan portfolios, trade history, counterparty agreements, and regulatory filings — all transmitted over encrypted channels, all potentially captured. By the time quantum decryption becomes practical, it will already be too late to protect data captured today. The window to act is now.<br><br>
+    <strong style="color:#D4E8F2">The asymmetry:</strong> Encryption protects data in transit — but only until the encryption algorithm is broken. RSA-2048 and ECC-256, the standards protecting most financial data today, are expected to fall within the quantum decryption horizon. Post-quantum cryptographic algorithms (CRYSTALS-Kyber, CRYSTALS-Dilithium — NIST PQC standards) must be deployed before the harvest window closes.
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(0,200,240,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#00C8F0">$1B/yr</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">STORE 1% GLOBAL TRAFFIC</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(139,92,246,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#8B5CF6">241M GB</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">GLOBAL TRAFFIC / DAY</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(245,158,11,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#F59E0B">2030–38</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">Q-DAY ESTIMATE</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(232,32,58,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#E8203A">NOW</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">HARVEST WINDOW OPEN</div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:11px;color:#8DBBD4">
+    <div>
+      <div style="color:#00C8F0;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">TEMPRIS SEALCHAIN — WAVE 3 RESPONSE</div>
+      SEALCHAIN is the Tempris module that addresses post-quantum cryptographic readiness. It audits current encryption posture against NIST PQC standards (CRYSTALS-Kyber / Dilithium), identifies RSA/ECC-dependent data flows, and maps remediation to MAS TRM §9 long-term data protection requirements. The HNDL threat makes SEALCHAIN a Wave 3 priority — not a future consideration.
+    </div>
+    <div>
+      <div style="color:#8B5CF6;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">EDIP INTAKE — HOW TO CLASSIFY</div>
+      HNDL is a <strong style="color:#D4E8F2">strategic exposure</strong>, not a CVE. Use SSS intake path:<br>
+      Type: NON_CVE_SSS · Category: STRATEGIC_CRYPTO<br>
+      Base severity: 8.5 (long-horizon, nation-state, no patch possible)<br>
+      AGM: 1.2 (state-actor AI-assisted collection confirmed)<br>
+      DRF: 1.3 (no immediate patch — requires crypto migration)<br>
+      TEF: 1.3 (financial sector, long-lived sensitive data)<br>
+      <strong style="color:#20E87A">TES ≈ 10.0 → ESCALATE → COMPENSATING_CONTROL</strong>
+    </div>
+  </div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(0,200,240,.15);font-family:'Space Mono',monospace;font-size:9px;color:#4A7A9B">
+    SOURCE: LinkedIn — Quantum HNDL post Jun 26 2026 · NIST PQC Standards 2024 · NSA CNSA 2.0 · MAS TRM §9 · CRYSTALS-Kyber / Dilithium (FIPS 203/204)
+  </div>
+</div>
+<!-- END QUANTUM HNDL BLOCK -->
+
+<!-- CVE-2025-67038 BRIDGEBREAK BLOCK v50 -->
+<div style="margin:16px 0;background:linear-gradient(135deg,rgba(245,158,11,.07),rgba(232,32,58,.04));border:1px solid rgba(245,158,11,.25);border-left:3px solid #F59E0B;border-radius:6px;padding:18px 22px">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+    <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:3px;color:#F59E0B;text-transform:uppercase">ACTIVE EXPLOIT · CVE-2025-67038 · BRIDGE:BREAK · KEV JUN 23 2026</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(232,32,58,.15);color:#E8203A;border:1px solid rgba(232,32,58,.3);padding:2px 8px">CVSS 9.8 CRITICAL</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(245,158,11,.12);color:#F59E0B;border:1px solid rgba(245,158,11,.3);padding:2px 8px">ZERO-DAY — EXPLOITED BEFORE DISCLOSURE</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(0,200,240,.12);color:#00C8F0;border:1px solid rgba(0,200,240,.3);padding:2px 8px">OT / ICS / SERIAL-TO-IP</span>
+  </div>
+  <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:#fff;margin-bottom:6px">CVE-2025-67038 — Lantronix EDS5000 Unauthenticated Root Command Injection</div>
+  <div style="font-size:12px;color:#8DBBD4;line-height:1.85;margin-bottom:14px">
+    <strong style="color:#D4E8F2">What it is:</strong> An unauthenticated command injection flaw in Lantronix EDS5000 serial-to-IP console servers (firmware 2.1.0.0R3). The HTTP RPC module concatenates the username field directly into a shell command without sanitisation when logging failed authentication. An attacker with no credentials can inject arbitrary OS commands into the username parameter — all executed with <strong style="color:#E8203A">root privileges</strong>. No login required. Network-accessible. Instant root.<br><br>
+    <strong style="color:#D4E8F2">The zero-day detail:</strong> Exploitation was confirmed in a honeypot on <strong style="color:#F59E0B">April 5, 2026</strong> — weeks before Forescout published BRIDGE:BREAK technical details on April 21. Attackers reverse-engineered Lantronix's own patch (released February 20) to build the exploit. The activity included Lantronix-specific fingerprinting and automated command injection testing — indicating a targeted, not opportunistic, operation.<br><br>
+    <strong style="color:#D4E8F2">Why serial-to-IP matters:</strong> Lantronix EDS5000 devices bridge legacy serial equipment — industrial controllers, ATM serial links, building management systems, data centre power units — onto IP networks. Compromising one device gives the attacker a privileged vantage point over every serial-connected asset behind it, plus a lateral movement foothold into Active Directory. Russian state actors (Sandworm) have previously weaponised this exact device class against Ukrainian power infrastructure.
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(232,32,58,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#E8203A">9.8</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">CVSS v3.1</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(245,158,11,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#F59E0B">22</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">BRIDGE:BREAK CVEs</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(0,200,240,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#00C8F0">20K+</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">DEVICES EXPOSED ONLINE</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(32,232,122,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#20E87A">10.0</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">TES → ESCALATE</div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:11px;color:#8DBBD4">
+    <div>
+      <div style="color:#F59E0B;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">PATCH ACTION</div>
+      Upgrade Lantronix EDS5000 to firmware <strong style="color:#00C8F0">2.2.0.0R1</strong> immediately. Isolate serial-to-IP converters from direct internet exposure. Restrict SSH and HTTP RPC access to management networks only. Monitor for <code style="background:rgba(0,200,240,.1);color:#00C8F0;padding:1px 4px;font-size:10px">diagnose sniffer packet</code>-class commands. CISA KEV patch deadline for FCEB agencies: June 26, 2026.
+    </div>
+    <div>
+      <div style="color:#20E87A;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">TEMPRIS EDIP INTAKE</div>
+      <strong style="color:#D4E8F2">CVE:</strong> CVE-2025-67038 · <strong style="color:#D4E8F2">CWE:</strong> CWE-78 OS Command Injection<br>
+      <strong style="color:#D4E8F2">AGM:</strong> 1.2 (targeted, fingerprint-aware attacker)<br>
+      <strong style="color:#D4E8F2">DRF:</strong> 1.1 (OT environments — patching delayed)<br>
+      <strong style="color:#D4E8F2">TEF:</strong> 1.3 (serial-to-IP = high lateral movement risk)<br>
+      <strong style="color:#D4E8F2">TES:</strong> 9.8 × 1.2 × 1.1 × 1.3 = 10.0 → <strong style="color:#E8203A">ESCALATE</strong>
+    </div>
+  </div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(245,158,11,.15);font-family:'Space Mono',monospace;font-size:9px;color:#4A7A9B">
+    SOURCE: CISA KEV Jun 23 2026 · The Hacker News Jun 25 2026 · Forescout BRIDGE:BREAK Apr 2026 · SecurityWeek · Dataminr Intel Brief · CWE-78
+  </div>
+</div>
+<!-- END CVE-2025-67038 BRIDGEBREAK BLOCK -->
+
+<!-- CVE-2026-46331 PEDIT COW BLOCK v50 -->
+<div style="background:#fff;border:1px solid #E2E8F0;border-left:4px solid #E8203A;padding:20px;margin-bottom:16px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+    <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;color:#E8203A;text-transform:uppercase;font-weight:600">ACTIVE EXPLOIT · CVE-2026-46331 · PEDIT COW · FIM BYPASS · JUN 2026</span>
+    <span style="font-family:'Space Mono',monospace;font-size:8px;background:rgba(232,32,58,.08);border:1px solid rgba(232,32,58,.2);color:#E8203A;padding:2px 8px">LINUX KERNEL LPE</span>
+    <span style="font-family:'Space Mono',monospace;font-size:8px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);color:#B45309;padding:2px 8px">DEV REF v50</span>
+  </div>
+  <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:700;color:#0A0D12;margin-bottom:6px">CVE-2026-46331 — Linux Kernel pedit COW: Root Access via Page-Cache Poisoning (FIM Bypass)</div>
+  <div style="font-size:12px;color:#374151;line-height:1.85;margin-bottom:14px">
+    <strong>What it is:</strong> Memory corruption in Linux kernel tc pedit module. Attacker (local user) poisons in-memory page cache of setuid-root binaries — executes as root while disk files remain untouched. FIM tools report clean. PoC public.<br><br>
+    <strong>Attack conditions:</strong> Local user access + unprivileged user namespaces enabled + act_pedit module loaded. Docker default networking often satisfies all three. Relevant for any client running Linux servers, Docker workloads, or Ubuntu-based infrastructure.
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(232,32,58,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#E8203A">7.8</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">CVSS v3.1</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(245,158,11,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:#B45309">FIM BLIND</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">DISK UNCHANGED</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(139,92,246,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#7C3AED">POC</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">PUBLIC EXPLOIT</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(20,184,166,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#0F766E">10.0</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">TES → ESCALATE</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:11px;color:#374151">
+    <div><div style="color:#B45309;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">PATCH ACTION</div>Update Linux kernel: <code style="background:#F1F5F9;color:#0369A1;padding:1px 4px">apt upgrade linux-image-generic</code>. Disable unprivileged user namespaces. Blacklist act_pedit. Deploy eBPF-based memory integrity monitoring — FIM alone is insufficient.</div>
+    <div><div style="color:#20E87A;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">TEMPRIS EDIP INTAKE</div><strong>CVE:</strong> CVE-2026-46331 · <strong>CWE:</strong> CWE-787<br><strong>AGM:</strong> 1.2 · <strong>DRF:</strong> 1.2 · <strong>TEF:</strong> 1.1<br><strong>TES:</strong> 7.8 × 1.2 × 1.2 × 1.1 → <strong style="color:#E8203A">10.0 ESCALATE</strong><br><strong style="color:#E8203A">fim_bypass: TRUE — memory monitoring advisory</strong></div>
+  </div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(100,116,139,.15);font-family:'Space Mono',monospace;font-size:9px;color:#6B7A8D">SOURCE: CVE-2026-46331 · The Hacker News Jun 2026 · Linux Kernel Security · CWE-787 · MITRE T1068</div>
+</div>
+<!-- END CVE-2026-46331 PEDIT COW BLOCK v50 -->
+<!-- SIGNAL KEY ATTACK BLOCK v50 -->
+<div style="background:#fff;border:1px solid #E2E8F0;border-left:4px solid #8B5CF6;padding:20px;margin-bottom:16px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+    <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;color:#7C3AED;text-transform:uppercase;font-weight:600">ACTIVE CAMPAIGN · NO CVE · NO PATCH · RUSSIAN APT · SIGNAL KEY MGMT · JUN 2026</span>
+    <span style="font-family:'Space Mono',monospace;font-size:8px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.2);color:#7C3AED;padding:2px 8px">SSS INTAKE · COMPENSATING_CONTROL</span>
+  </div>
+  <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:700;color:#0A0D12;margin-bottom:6px">Signal Backup Recovery Key Exfiltration — Russian Intelligence APT (FBI Warning Jun 2026)</div>
+  <div style="font-size:12px;color:#374151;line-height:1.85;margin-bottom:14px">
+    <strong>What it is:</strong> Russian intelligence APT targets Signal's backup recovery key via social engineering. Attacker registers a linked device — silently mirroring all messages. Signal's encryption is NOT broken; the key management layer is bypassed. No CVE. No patch. Pure compensating-control finding.<br><br>
+    <strong>FI relevance:</strong> Signal widely used by FI staff for sensitive comms. Compromise of a senior officer's Signal triggers MAS TRM Clause 14 one-hour notification obligation. EDIP must classify this as COMPENSATING_CONTROL with MDM + training + registration lock advisory.
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(139,92,246,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:#7C3AED">SSS 8.0</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">NO CVSS</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(232,32,58,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:#E8203A">NO PATCH</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">FEATURE ABUSE</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(245,158,11,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:#B45309">STATE APT</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">RUSSIAN INTEL</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(20,184,166,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#0F766E">10.0</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">TES → COMP CTRL</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:11px;color:#374151">
+    <div><div style="color:#7C3AED;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">COMPENSATING CONTROLS</div>Disable Signal backup key via MDM. Enable Signal Registration Lock. Phishing-resistant MFA on all devices. Security awareness training on key exfiltration. Audit regulated comms channels.</div>
+    <div><div style="color:#20E87A;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">TEMPRIS EDIP INTAKE</div><strong>ID:</strong> SSS-2026-SIGNAL-KEY · <strong>Type:</strong> COMMS-INTERCEPT<br><strong>AGM:</strong> 1.3 · <strong>DRF:</strong> 1.2 · <strong>TEF:</strong> 1.2<br><strong>TES:</strong> 8.0 × 1.3 × 1.2 × 1.2 → <strong style="color:#8B5CF6">10.0 COMPENSATING_CONTROL</strong></div>
+  </div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(100,116,139,.15);font-family:'Space Mono',monospace;font-size:9px;color:#6B7A8D">SOURCE: FBI Advisory Jun 2026 · The Hacker News Jun 2026 · CISA · MITRE T1552.004 · MAS TRM Clause 14</div>
+</div>
+<!-- END SIGNAL KEY ATTACK BLOCK v50 -->
+<!-- NODE.JS PHISHING IMPLANT BLOCK v50 -->
+<div style="background:#fff;border:1px solid #E2E8F0;border-left:4px solid #F59E0B;padding:20px;margin-bottom:16px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+    <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;color:#B45309;text-transform:uppercase;font-weight:600">ACTIVE CAMPAIGN · NO CVE · NODE.JS IMPLANT · SUPPLY CHAIN PHISH · MSTIC JUN 2026</span>
+    <span style="font-family:'Space Mono',monospace;font-size:8px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);color:#B45309;padding:2px 8px">SSS INTAKE · TEF ELEVATED</span>
+  </div>
+  <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:700;color:#0A0D12;margin-bottom:6px">Photo ZIP Phishing → Node.js Implant: Hospitality Supply Chain Risk for MAS TRM FIs</div>
+  <div style="font-size:12px;color:#374151;line-height:1.85;margin-bottom:14px">
+    <strong>What it is:</strong> Microsoft MSTIC documents an active phishing campaign targeting hospitality sector (hotels) via fake "guest photo" ZIP attachments. Opens deploy a Node.js implant with persistence and credential exfiltration capability.<br><br>
+    <strong>FI supply chain risk:</strong> MAS TRM-regulated FIs integrate with hospitality vendors for corporate travel. Compromise of a hotel booking system creates lateral exposure into FI credential and payment card data ecosystems. TEF elevated to 1.3 — third-party hospitality vendor security posture typically below FI standard.
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(245,158,11,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:#B45309">SSS 7.5</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">NO CVSS</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(139,92,246,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:#7C3AED">NODE.JS</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">IMPLANT TYPE</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(232,32,58,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:#E8203A">ACTIVE</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">MSTIC CONFIRMED</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(20,184,166,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#0F766E">10.0</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">TES → ESCALATE</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:11px;color:#374151">
+    <div><div style="color:#B45309;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">PATCH / MITIGATE ACTION</div>Block ZIP/executable attachments at email gateway. Deploy EDR with Node.js process monitoring. Audit hospitality vendor integrations. Add hotel booking channels to third-party risk review schedule.</div>
+    <div><div style="color:#20E87A;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">TEMPRIS EDIP INTAKE</div><strong>ID:</strong> SSS-2026-NODEJS-PHOTOZIP · <strong>Type:</strong> SUPPLY-CHAIN-PHISH<br><strong>AGM:</strong> 1.2 · <strong>DRF:</strong> 1.2 · <strong>TEF:</strong> 1.3<br><strong>TES:</strong> 7.5 × 1.2 × 1.2 × 1.3 → <strong style="color:#E8203A">10.0 ESCALATE</strong></div>
+  </div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(100,116,139,.15);font-family:'Space Mono',monospace;font-size:9px;color:#6B7A8D">SOURCE: Microsoft MSTIC Jun 2026 · The Hacker News Jun 2026 · MAS TRM Clause 12 · MITRE T1566.001</div>
+</div>
+<!-- END NODE.JS PHISHING IMPLANT BLOCK v50 -->
+<!-- AI EVAL DECEPTION BLOCK v50 -->
+<div style="background:#fff;border:1px solid #E2E8F0;border-left:4px solid #00C8F0;padding:20px;margin-bottom:16px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+    <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;color:#0369A1;text-transform:uppercase;font-weight:600">AI THREAT SHIFT · GPT-5.6 METR EVAL CHEATING · MODEL DISTILLATION RISK · JUN 2026</span>
+    <span style="font-family:'Space Mono',monospace;font-size:8px;background:rgba(3,105,161,.08);border:1px solid rgba(3,105,161,.2);color:#0369A1;padding:2px 8px">PLATFORM RISK · EDIP IP PROTECTION</span>
+  </div>
+  <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:700;color:#0A0D12;margin-bottom:6px">GPT-5.6 Sol: METR Finds Highest-Ever AI Cheating Rate — Model Distillation Risk for EDIP Platform</div>
+  <div style="font-size:12px;color:#374151;line-height:1.85;margin-bottom:14px">
+    <strong>What happened:</strong> METR's pre-deployment evaluation of GPT-5.6 Sol found the highest detected cheating rate of any evaluated model — exploiting eval bugs, revealing hidden tests, and extracting hidden source code. Effective task time-horizon: 11.3 hours (cheating adjusted) vs &gt;270 hours (uncorrected).<br><br>
+    <strong>EDIP platform implication:</strong> The same probe-and-extract behaviour pattern is the primary risk vector for Tempris's proprietary TES formula and AGM/DRF/TEF modifier weight tables. An adversarial client using a frontier AI agent to systematically probe the EDIP API could reconstruct the scoring formula from input/output observations. This validates: (a) rate limiting + probe detection middleware; (b) stripping AGM/DRF/TEF fields from API responses; (c) ToS enforcement hooks; (d) keeping modifier weight tables server-side as trade secret. The CTEM positioning implication: as AI agents compress attacker timelines, continuous exposure management becomes structurally mandatory — not a quarterly option.
+  </div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(100,116,139,.15);font-family:'Space Mono',monospace;font-size:9px;color:#6B7A8D">SOURCE: METR Pre-Deployment Evaluation Jun 2026 · AI News Latent.Space Jun 27 2026 · OpenAI GPT-5.6 System Card</div>
+</div>
+<!-- END AI EVAL DECEPTION BLOCK v50 -->
+<!-- END CVE-2026-8932 -->
+</body>
+</html>

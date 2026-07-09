@@ -1,0 +1,1007 @@
+{
+  "generated_at": "2026-05-24T16:24:52.893840Z",
+  "total_findings": 50,
+  "kev_version": "2026.05.22",
+  "findings": [
+    {
+      "cve_id": "CVE-1999-0426",
+      "description": "The default permissions of /dev/kmem in Linux versions before 2.0.36 allows IP spoofing.",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-1999-1324",
+      "description": "VAXstations running Open VMS 5.3 through 5.5-2 with VMS DECwindows or MOTIF do not properly disable access to user accounts that exceed the break-in limit threshold for failed login attempts, which ma",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2000-1218",
+      "description": "The default configuration for the domain name resolver for Microsoft Windows 98, NT 4.0, 2000, and XP sets the QueryIpMatching parameter to 0, which causes Windows to accept DNS updates from hosts tha",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2000-0944",
+      "description": "CGI Script Center News Update 1.1 does not properly validate the original news administration password during a password change operation, which allows remote attackers to modify the password without ",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2001-1339",
+      "description": "Beck IPC GmbH IPC@CHIP telnet service does not delay or disconnect users from the service when bad passwords are entered, which makes it easier for remote attackers to conduct brute force password gue",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2001-0248",
+      "description": "Buffer overflow in FTP server in HPUX 11 allows remote attackers to execute arbitrary commands by creating a long pathname and calling the STAT command, which uses glob to generate long strings.",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2001-0249",
+      "description": "Heap overflow in FTP daemon in Solaris 8 allows remote attackers to execute arbitrary commands by creating a long pathname and calling the LIST command, which uses glob to generate long strings.",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2001-0395",
+      "description": "Lightwave ConsoleServer 3200 does not disconnect users after unsuccessful login attempts, which could allow remote attackers to conduct brute force password guessing.",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2001-1291",
+      "description": "The telnet server for 3Com hardware such as PS40 SuperStack II does not delay or disconnect remote attackers who provide an incorrect username or password, which makes it easier to break into the serv",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2001-0609",
+      "description": "Format string vulnerability in Infodrom cfingerd 1.4.3 and earlier allows a remote attacker to gain additional privileges via a malformed ident reply that is passed to the syslog function.",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2001-1155",
+      "description": "TCP Wrappers (tcp_wrappers) in FreeBSD 4.1.1 through 4.3 with the PARANOID ACL option enabled does not properly check the result of a reverse DNS lookup, which could allow remote attackers to bypass i",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2001-0967",
+      "description": "Knox Arkeia server 4.2, and possibly other versions, uses a constant salt when encrypting passwords using the crypt() function, which makes it easier for an attacker to conduct brute force password gu",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2001-1125",
+      "description": "Symantec LiveUpdate before 1.6 does not use cryptography to ensure the integrity of download files, which allows remote attackers to execute arbitrary code via DNS spoofing of the update.symantec.com ",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2001-0766",
+      "description": "Apache on MacOS X Client 10.0.3 with the HFS+ file system allows remote attackers to bypass access restrictions via a URL that contains some characters whose case is not matched by Apache's filters.",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2001-1481",
+      "description": "Xitami 2.4 through 2.5 b4 stores the Administrator password in plaintext in the default.aut file, whose default permissions are world-readable, which allows remote attackers to gain privileges.",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2001-1496",
+      "description": "Off-by-one buffer overflow in Basic Authentication in Acme Labs thttpd 1.95 through 2.20 allows remote attackers to cause a denial of service and possibly execute arbitrary code.",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2002-0059",
+      "description": "The decompression algorithm in zlib 1.1.3 and earlier, as used in many different utilities and packages, causes inflateEnd to release certain memory more than once (a \"double free\"), which may allow l",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2002-0083",
+      "description": "Off-by-one error in the channel code of OpenSSH 2.0 through 3.0.2 allows local users or remote malicious servers to gain privileges.",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2002-0639",
+      "description": "Integer overflow in sshd in OpenSSH 2.9.9 through 3.3 allows remote attackers to execute arbitrary code during challenge response authentication (ChallengeResponseAuthentication) when OpenSSH is using",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2002-0671",
+      "description": "Pingtel xpressa SIP-based voice-over-IP phone 1.2.5 through 1.2.7.4 downloads phone applications from a web site but can not verify the integrity of the applications, which could allow remote attacker",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2002-0391",
+      "description": "Integer overflow in xdr_array function in RPC servers for operating systems that use libc, glibc, or other code based on SunRPC including dietlibc, allows remote attackers to execute arbitrary code by",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2002-1347",
+      "description": "Multiple buffer overflows in Cyrus SASL library 2.1.9 and earlier allow remote attackers to cause a denial of service and possibly execute arbitrary code via (1) long inputs during user name canonical",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2002-1816",
+      "description": "Off-by-one buffer overflow in the sock_gets function in sockhelp.c for ATPhttpd 0.4b and earlier allows remote attackers to execute arbitrary code via a long HTTP GET request.",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2002-1820",
+      "description": "register.php in Ultimate PHP Board (UPB) 1.0 and 1.0b uses an administrative account Admin with a capital \"A,\" but allows a remote attacker to impersonate the administrator by registering an account n",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2002-2119",
+      "description": "Novell eDirectory 8.6.2 and 8.7 use case insensitive passwords, which makes it easier for remote attackers to conduct brute force password guessing.",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2002-1484",
+      "description": "DB4Web server, when configured to use verbose debug messages, allows remote attackers to use DB4Web as a proxy and attempt TCP connections to other systems (port scan) via a request for a URL that spe",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2003-0174",
+      "description": "The LDAP name service (nsd) in IRIX 6.5.19 and earlier does not properly verify if the USERPASSWORD attribute has been provided by an LDAP server, which could allow attackers to log in without a passw",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2003-0356",
+      "description": "Multiple off-by-one vulnerabilities in Ethereal 0.9.11 and earlier allow remote attackers to cause a denial of service and possibly execute arbitrary code via the (1) AIM, (2) GIOP Gryphon, (3) OSPF, ",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2003-0252",
+      "description": "Off-by-one error in the xlog function of mountd in the Linux NFS utils package (nfs-utils) before 1.0.4 allows remote attackers to cause a denial of service and possibly execute arbitrary code via cer",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2003-0466",
+      "description": "Off-by-one error in the fb_realpath() function, as derived from the realpath function in BSD, may allow attackers to execute arbitrary code, as demonstrated in wu-ftpd 2.5.0 through 2.6.2 via commands",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2003-0791",
+      "description": "The Script.prototype.freeze/thaw functionality in Mozilla 1.4 and earlier allows attackers to execute native methods by modifying the string used as input to the script.thaw JavaScript function, which",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2003-0899",
+      "description": "Buffer overflow in defang in libhttpd.c for thttpd 2.21 to 2.23b1 allows remote attackers to execute arbitrary code via requests that contain '<' or '>' characters, which trigger the overflow when the",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2003-0545",
+      "description": "Double free vulnerability in OpenSSL 0.9.7 allows remote attackers to cause a denial of service (crash) and possibly execute arbitrary code via an SSL client certificate with a certain invalid ASN.1 e",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2003-1233",
+      "description": "Pedestal Software Integrity Protection Driver (IPD) 1.3 and earlier allows privileged attackers, such as rootkits, to bypass file access restrictions to the Windows kernel by using the NtCreateSymboli",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2004-0030",
+      "description": "PHP remote file inclusion vulnerability in (1) functions.php, (2) authentication_index.php, and (3) config_gedcom.php for PHPGEDVIEW 2.61 allows remote attackers to execute arbitrary PHP code by modif",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2004-0005",
+      "description": "Multiple buffer overflows in Gaim 0.75 allow remote attackers to cause a denial of service and possibly execute arbitrary code via (1) octal encoding in yahoo_decode that causes a null byte to be writ",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2004-0434",
+      "description": "k5admind (kadmind) for Heimdal allows remote attackers to execute arbitrary code via a Kerberos 4 compatibility administration request whose framing length is less than 2, which leads to a heap-based ",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2004-2061",
+      "description": "RiSearch 1.0.01 and RiSearch Pro 3.2.06 allows remote attackers to use the show.pl script as an open proxy, or read arbitrary local files, by setting the url parameter to a (1) http://, (2) ftp://, or",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2004-1363",
+      "description": "Buffer overflow in extproc in Oracle 10g allows remote attackers to execute arbitrary code via environment variables in the library name, which are expanded after the length check is performed.",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2004-0772",
+      "description": "Double free vulnerabilities in error handling code in krb524d for MIT Kerberos 5 (krb5) 1.2.8 and earlier may allow remote attackers to execute arbitrary code.",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2004-0847",
+      "description": "The Microsoft .NET forms authentication capability for ASP.NET allows remote attackers to bypass authentication for .aspx files in restricted directories via a request containing a (1) \"\\\" (backslash)",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2004-0285",
+      "description": "PHP remote file inclusion vulnerabilities in include/footer.inc.php in (1) AllMyVisitors, (2) AllMyLinks, and (3) AllMyGuests allow remote attackers to execute arbitrary PHP code via a URL in the _AMV",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2004-2154",
+      "description": "CUPS before 1.1.21rc1 treats a Location directive in cupsd.conf as case sensitive, which allows attackers to bypass intended ACLs via a printer name containing uppercase or lowercase letters that are ",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2004-2214",
+      "description": "Mbedthis AppWeb HTTP server before 1.1.3 allows remote attackers to bypass access restrictions via a URI with mixed case characters.",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2005-0102",
+      "description": "Integer overflow in camel-lock-helper in Evolution 2.0.2 and earlier allows local users or remote malicious POP3 servers to execute arbitrary code via a length value of -1, which leads to a zero byte ",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2005-0408",
+      "description": "CitrusDB 0.3.6 and earlier generates easily predictable MD5 hashes of the user name for the id_hash cookie, which allows remote attackers to bypass authentication and gain privileges by calculating th",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2005-0496",
+      "description": "Arkeia Network Backup Client 5.x contains hard-coded credentials that effectively serve as a back door, which allows remote attackers to access the file system and possibly execute arbitrary commands.",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2005-1141",
+      "description": "Integer overflow in the readpgm function in pnm.c for GOCR 0.40, when using the netpbm library, allows remote attackers to execute arbitrary code via a PNM file with large width and height values, whi",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2005-0199",
+      "description": "Integer underflow in the Lists_MakeMask() function in lists.c in ngIRCd before 0.8.2 allows remote attackers to cause a denial of service (application crash) and possibly execute arbitrary code via a ",
+      "cvss_score": 9.8,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.73,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.196,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    },
+    {
+      "cve_id": "CVE-2002-1798",
+      "description": "MidiCart PHP, PHP Plus, and PHP Maxi allows remote attackers to (1) upload arbitrary php files via a direct request to admin/upload.php or (2) access sensitive information via a direct request to admi",
+      "cvss_score": 9.1,
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "kev_due_date": "",
+      "kev_required_action": "",
+      "tes_score": 0.69,
+      "tes_priority": "P3 \u00b7 Low",
+      "tes_breakdown": {
+        "cvss_contrib": 0.318,
+        "expl_contrib": 0.087,
+        "impact_contrib": 0.182,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.02
+      },
+      "edip_decision": null,
+      "fetched_at": "2026-05-24T16:24:52.893840Z"
+    }
+  ]
+}

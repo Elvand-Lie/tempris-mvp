@@ -1,0 +1,1177 @@
+{
+  "generated_at": "2026-05-24T17:55:23.935685Z",
+  "description": "Tempris TACF append-only audit trail \u2014 MAS TRM compliant",
+  "total_events": 75,
+  "events": [
+    {
+      "id": "acd825c1-7476-4ebd-8cfd-cb27da9375b0",
+      "sequence_num": 1,
+      "timestamp": "2026-04-24T22:53:15.932521Z",
+      "event_type": "USER_LOGOUT",
+      "actor": "analyst@tempris.sg",
+      "source_module": "Auth service",
+      "description": "Session ended",
+      "metadata": {
+        "session_id": "70d518a2-fb91-4f72-b46f-e7a78169d850",
+        "ip_address": "10.0.1.15"
+      },
+      "immutable": true,
+      "hash": "9e87587680b74af6a39763da4d0916ef"
+    },
+    {
+      "id": "9657c99e-fd06-4842-98cc-5d3facd0c650",
+      "sequence_num": 2,
+      "timestamp": "2026-04-24T22:57:15.932521Z",
+      "event_type": "SPEAK_QUERY",
+      "actor": "analyst@tempris.sg",
+      "source_module": "SPEAK chatbot",
+      "description": "AI security query processed",
+      "metadata": {
+        "session_id": "1c968676-74ae-489b-b734-1640237c2363",
+        "ip_address": "10.0.1.3"
+      },
+      "immutable": true,
+      "hash": "d8d5d965b3bf40dab5cb01c2860f2c73"
+    },
+    {
+      "id": "38e1a2d4-c93a-427c-8b01-85aef34934be",
+      "sequence_num": 3,
+      "timestamp": "2026-04-25T01:32:43.932521Z",
+      "event_type": "EDIP_DECISION_MADE",
+      "actor": "analyst@tempris.sg",
+      "source_module": "SPECTRUM EDIP",
+      "description": "Analyst decision recorded: Accept",
+      "metadata": {
+        "session_id": "4428cec3-5b7b-4cc0-8eea-6cd4b829eda9",
+        "ip_address": "10.0.1.4",
+        "decision": "Transfer",
+        "cve_id": "CVE-2024-1708",
+        "tes_score": 8.6
+      },
+      "immutable": true,
+      "hash": "793ef3c727ef44d6b0c45f1950cb6945"
+    },
+    {
+      "id": "49d3fd52-006e-4110-a791-2a10e23fe6ae",
+      "sequence_num": 4,
+      "timestamp": "2026-04-25T01:57:41.932521Z",
+      "event_type": "EDIP_DECISION_MADE",
+      "actor": "ciso@tempris.sg",
+      "source_module": "SPECTRUM EDIP",
+      "description": "CISO override: Transfer to insurance",
+      "metadata": {
+        "session_id": "5bcdf9a7-1176-42b9-a6f8-1eb698a1d85f",
+        "ip_address": "10.0.1.5",
+        "decision": "Mitigate",
+        "cve_id": "CVE-2024-3400",
+        "tes_score": 9.25
+      },
+      "immutable": true,
+      "hash": "869a7146f4644a6283cebb97a8dabe47"
+    },
+    {
+      "id": "ff13e532-5705-4ff5-b5bf-25a5cf31c3e1",
+      "sequence_num": 5,
+      "timestamp": "2026-04-25T02:44:42.932521Z",
+      "event_type": "ASSET_CREATED",
+      "actor": "admin@tempris.sg",
+      "source_module": "SYNTHESIS",
+      "description": "Asset registered in inventory",
+      "metadata": {
+        "session_id": "65565e71-649d-4c2c-ac14-95a1f8b69223",
+        "ip_address": "10.0.1.19"
+      },
+      "immutable": true,
+      "hash": "a5412cf952164e62bbeda5c764001d4a"
+    },
+    {
+      "id": "c435b670-1f1d-487c-98a0-fcb4c3059ddf",
+      "sequence_num": 6,
+      "timestamp": "2026-04-25T02:58:01.932521Z",
+      "event_type": "USER_LOGIN",
+      "actor": "viewer@tempris.sg",
+      "source_module": "Auth service",
+      "description": "Read-only user authenticated",
+      "metadata": {
+        "session_id": "91eecead-f9c3-4f6d-8c53-97a86ae03949",
+        "ip_address": "10.0.1.7"
+      },
+      "immutable": true,
+      "hash": "95b4a5e72fec458f8135c3a8cded8b36"
+    },
+    {
+      "id": "59847d76-b6a6-4670-987a-302f474f32c0",
+      "sequence_num": 7,
+      "timestamp": "2026-04-25T03:03:35.932521Z",
+      "event_type": "STRIKE_SIM_COMPLETED",
+      "actor": "system",
+      "source_module": "STRIKE module",
+      "description": "Simulation completed, results linked to SPECTRUM",
+      "metadata": {
+        "session_id": "fddf8a6b-341f-4255-a1c0-f483ddb4f21f",
+        "ip_address": "10.0.1.15"
+      },
+      "immutable": true,
+      "hash": "c5254f8ec3264e54bec511688d785b4d"
+    },
+    {
+      "id": "4fea23da-ca3f-4c52-973c-e71550bc65af",
+      "sequence_num": 8,
+      "timestamp": "2026-04-25T04:16:20.932521Z",
+      "event_type": "EDIP_DECISION_MADE",
+      "actor": "analyst@tempris.sg",
+      "source_module": "SPECTRUM EDIP",
+      "description": "Analyst decision recorded: Mitigate",
+      "metadata": {
+        "session_id": "28cf2df3-ff33-4eb9-b449-1f97e99e8e87",
+        "ip_address": "10.0.1.12",
+        "decision": "Accept",
+        "cve_id": "CVE-2024-53704",
+        "tes_score": 9.78
+      },
+      "immutable": true,
+      "hash": "09e27881f7bb43c5b7bf87d7c7ae0b8f"
+    },
+    {
+      "id": "1ad84351-5e4a-49f2-a859-d1feee6589d6",
+      "sequence_num": 9,
+      "timestamp": "2026-04-25T05:01:51.932521Z",
+      "event_type": "USER_LOGIN",
+      "actor": "admin@tempris.sg",
+      "source_module": "Auth service",
+      "description": "User authenticated successfully",
+      "metadata": {
+        "session_id": "07118f20-6750-490e-b6ca-4ed5553af2d0",
+        "ip_address": "10.0.1.17"
+      },
+      "immutable": true,
+      "hash": "c77274a3b9564efbb1b20923be600938"
+    },
+    {
+      "id": "8f74ddb5-0d17-49c6-baea-4197e0f6f323",
+      "sequence_num": 10,
+      "timestamp": "2026-04-25T06:18:43.932521Z",
+      "event_type": "STRIKE_AUTH_CREATED",
+      "actor": "ciso@tempris.sg",
+      "source_module": "STRIKE module",
+      "description": "Written scope authorisation created",
+      "metadata": {
+        "session_id": "453a76f2-6199-4d2a-8808-608ab13f3afa",
+        "ip_address": "10.0.1.18"
+      },
+      "immutable": true,
+      "hash": "20a3f5049be941359c76a4f59a9e0682"
+    },
+    {
+      "id": "d744ab98-495c-4db2-844a-7b9f8fefe375",
+      "sequence_num": 11,
+      "timestamp": "2026-04-25T07:44:42.932521Z",
+      "event_type": "SCOUT_SCAN_COMPLETED",
+      "actor": "system",
+      "source_module": "SCOUT module",
+      "description": "Scan completed, findings published to SPECTRUM",
+      "metadata": {
+        "session_id": "9407e313-2077-4cd7-8eb1-c2c131917150",
+        "ip_address": "10.0.1.2"
+      },
+      "immutable": true,
+      "hash": "7e079940c0624769b90c69b6a8722edd"
+    },
+    {
+      "id": "787aae1e-55aa-468b-ba14-9c40643ea219",
+      "sequence_num": 12,
+      "timestamp": "2026-04-25T10:24:49.932521Z",
+      "event_type": "MAS_NOTIFICATION_PREP",
+      "actor": "ciso@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "MAS 1-hour notification draft prepared",
+      "metadata": {
+        "session_id": "208c5cc2-6543-4202-a6ba-4005dac544cc",
+        "ip_address": "10.0.1.5"
+      },
+      "immutable": true,
+      "hash": "8cf932a703b74634a411d9841aa255f7"
+    },
+    {
+      "id": "d9b368a6-007d-4ba8-a557-92a3c0f1382e",
+      "sequence_num": 13,
+      "timestamp": "2026-04-25T10:27:45.932521Z",
+      "event_type": "REPORT_EXPORTED",
+      "actor": "ciso@tempris.sg",
+      "source_module": "SPOTLIGHT module",
+      "description": "PDF board report exported and logged",
+      "metadata": {
+        "session_id": "10efdd8b-76ec-44e6-a5c2-4364c8ae6b80",
+        "ip_address": "10.0.1.12",
+        "report_id": "11158BAF"
+      },
+      "immutable": true,
+      "hash": "25324353557241a7b0dae8ec6cd2b5ad"
+    },
+    {
+      "id": "df9c8f4a-fe2d-4004-b642-269bc86f945d",
+      "sequence_num": 14,
+      "timestamp": "2026-04-25T15:19:24.932521Z",
+      "event_type": "COMPLIANCE_CTRL_UPDATE",
+      "actor": "analyst@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "NIST CSF control marked Partial",
+      "metadata": {
+        "session_id": "b66fb5e5-9e36-4862-a0a7-1b9752694a15",
+        "ip_address": "10.0.1.12"
+      },
+      "immutable": true,
+      "hash": "c344c338c2554a90abcca4f038b25eb4"
+    },
+    {
+      "id": "3a149815-0675-44a9-b5a9-cc28f1f41689",
+      "sequence_num": 15,
+      "timestamp": "2026-04-25T17:12:21.932521Z",
+      "event_type": "USER_LOGOUT",
+      "actor": "analyst@tempris.sg",
+      "source_module": "Auth service",
+      "description": "Session ended",
+      "metadata": {
+        "session_id": "37762a59-952e-4854-8aa0-00fb08a2fd3a",
+        "ip_address": "10.0.1.17"
+      },
+      "immutable": true,
+      "hash": "6bc5fc5c2ed149578ecd7f292fb338a6"
+    },
+    {
+      "id": "7d3ef014-bba4-4917-a9fd-f1d6d7146ee2",
+      "sequence_num": 16,
+      "timestamp": "2026-04-25T17:25:13.932521Z",
+      "event_type": "USER_LOGIN",
+      "actor": "admin@tempris.sg",
+      "source_module": "Auth service",
+      "description": "User authenticated successfully",
+      "metadata": {
+        "session_id": "b08c44c6-4807-4c85-85b2-1db5396c872a",
+        "ip_address": "10.0.1.6"
+      },
+      "immutable": true,
+      "hash": "d43f14dd540b4399ae58c4c16c542446"
+    },
+    {
+      "id": "3cb6c1b0-5b55-47bb-8b07-e32fda361479",
+      "sequence_num": 17,
+      "timestamp": "2026-04-25T18:45:55.932521Z",
+      "event_type": "USER_LOGIN",
+      "actor": "viewer@tempris.sg",
+      "source_module": "Auth service",
+      "description": "Read-only user authenticated",
+      "metadata": {
+        "session_id": "bbb4cfd1-1e8f-4436-99b9-a72be08fb98e",
+        "ip_address": "10.0.1.8"
+      },
+      "immutable": true,
+      "hash": "722cc5f88398489bb74563791fa44777"
+    },
+    {
+      "id": "1757d045-5ef9-45b4-a8d8-c4f4eccb5545",
+      "sequence_num": 18,
+      "timestamp": "2026-04-25T21:53:06.932521Z",
+      "event_type": "EVIDENCE_UPLOADED",
+      "actor": "analyst@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "Evidence document attached to control",
+      "metadata": {
+        "session_id": "428ce309-c629-46aa-bad0-2451c9b732ce",
+        "ip_address": "10.0.1.17"
+      },
+      "immutable": true,
+      "hash": "58f3d94b41cd4b2998ff322af8256818"
+    },
+    {
+      "id": "27685bc1-7e1c-4254-8a7d-e7716f5eb986",
+      "sequence_num": 19,
+      "timestamp": "2026-04-25T22:30:59.932521Z",
+      "event_type": "EVIDENCE_UPLOADED",
+      "actor": "analyst@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "Evidence document attached to control",
+      "metadata": {
+        "session_id": "7339ae53-d484-4c51-87af-22c652288560",
+        "ip_address": "10.0.1.8"
+      },
+      "immutable": true,
+      "hash": "ec4cbd8321b642ab8cdc8047d73c1d48"
+    },
+    {
+      "id": "da20762b-cacd-4bc2-9059-c67ee4a6b746",
+      "sequence_num": 20,
+      "timestamp": "2026-04-26T00:59:56.932521Z",
+      "event_type": "STRIKE_AUTH_CREATED",
+      "actor": "ciso@tempris.sg",
+      "source_module": "STRIKE module",
+      "description": "Written scope authorisation created",
+      "metadata": {
+        "session_id": "092b4e9d-f7ea-49c8-abfa-240172484cb5",
+        "ip_address": "10.0.1.7"
+      },
+      "immutable": true,
+      "hash": "09bc1353a5c345889980b2977371830c"
+    },
+    {
+      "id": "b84ea326-b95c-47db-86e8-fd007b746cf5",
+      "sequence_num": 21,
+      "timestamp": "2026-04-26T02:58:03.932521Z",
+      "event_type": "COMPLIANCE_CTRL_UPDATE",
+      "actor": "admin@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "MAS TRM control status updated to Compliant",
+      "metadata": {
+        "session_id": "ebd27e2f-f076-4f95-987b-a53f7b7826d9",
+        "ip_address": "10.0.1.2"
+      },
+      "immutable": true,
+      "hash": "12f8326e00014983859de1816ed8bb37"
+    },
+    {
+      "id": "c0fad8f1-a8bc-4edb-b646-4edce3be484a",
+      "sequence_num": 22,
+      "timestamp": "2026-04-26T04:17:58.932521Z",
+      "event_type": "COMPLIANCE_CTRL_UPDATE",
+      "actor": "analyst@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "NIST CSF control marked Partial",
+      "metadata": {
+        "session_id": "6900fa28-0740-479d-9ab9-7f6fc42071c8",
+        "ip_address": "10.0.1.14"
+      },
+      "immutable": true,
+      "hash": "59bd8570ef384614bad5e892df1b2a71"
+    },
+    {
+      "id": "89a2075b-5105-4d97-983f-188f48686981",
+      "sequence_num": 23,
+      "timestamp": "2026-04-26T06:27:54.932521Z",
+      "event_type": "STRIKE_SIM_STARTED",
+      "actor": "analyst@tempris.sg",
+      "source_module": "STRIKE module",
+      "description": "Red team simulation initiated",
+      "metadata": {
+        "session_id": "8ff5beab-bdaf-4f93-aac1-72226ae40b38",
+        "ip_address": "10.0.1.13"
+      },
+      "immutable": true,
+      "hash": "5b9a14ee6e544f698d74054e5fda454f"
+    },
+    {
+      "id": "dc4ab414-d646-47be-be07-ca449d00cf6e",
+      "sequence_num": 24,
+      "timestamp": "2026-04-26T07:15:02.932521Z",
+      "event_type": "EVIDENCE_UPLOADED",
+      "actor": "analyst@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "Evidence document attached to control",
+      "metadata": {
+        "session_id": "4cf1bda6-a465-4f5e-94bd-09e497a99301",
+        "ip_address": "10.0.1.3"
+      },
+      "immutable": true,
+      "hash": "ad33766abf0040fe8c69275727f1efaf"
+    },
+    {
+      "id": "e921f59b-80ac-4f1a-addd-269146295dcc",
+      "sequence_num": 25,
+      "timestamp": "2026-04-26T09:39:06.932521Z",
+      "event_type": "ASSET_CREATED",
+      "actor": "admin@tempris.sg",
+      "source_module": "SYNTHESIS",
+      "description": "Asset registered in inventory",
+      "metadata": {
+        "session_id": "6dad1b89-80b5-4cd8-9ee5-877c567ec6f5",
+        "ip_address": "10.0.1.18"
+      },
+      "immutable": true,
+      "hash": "63a8f9c7e19d41bd8cd4f28c72b1357a"
+    },
+    {
+      "id": "70c608e1-f628-4fc8-92f5-3f19c18bdbef",
+      "sequence_num": 26,
+      "timestamp": "2026-04-26T11:36:42.932521Z",
+      "event_type": "USER_LOGIN",
+      "actor": "viewer@tempris.sg",
+      "source_module": "Auth service",
+      "description": "Read-only user authenticated",
+      "metadata": {
+        "session_id": "8dc2a7ce-2aff-496c-b27f-9ee18a787fe6",
+        "ip_address": "10.0.1.5"
+      },
+      "immutable": true,
+      "hash": "9f6953805e1a473db40e36fdf24392d8"
+    },
+    {
+      "id": "26b7a6e3-b2f7-4197-91c2-a4593fe28945",
+      "sequence_num": 27,
+      "timestamp": "2026-04-26T16:26:50.932521Z",
+      "event_type": "STRIKE_SIM_STARTED",
+      "actor": "analyst@tempris.sg",
+      "source_module": "STRIKE module",
+      "description": "Red team simulation initiated",
+      "metadata": {
+        "session_id": "dd091c76-d22c-495f-a158-c03d83e5e07e",
+        "ip_address": "10.0.1.4"
+      },
+      "immutable": true,
+      "hash": "c52e0b08b59041e89a66333f9b089adc"
+    },
+    {
+      "id": "5b03c8c4-a301-4375-ae84-7dd4afcae9c4",
+      "sequence_num": 28,
+      "timestamp": "2026-04-26T17:29:16.932521Z",
+      "event_type": "COMPLIANCE_CTRL_UPDATE",
+      "actor": "analyst@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "NIST CSF control marked Partial",
+      "metadata": {
+        "session_id": "eda7194e-8639-456b-863a-d13966e40ec2",
+        "ip_address": "10.0.1.16"
+      },
+      "immutable": true,
+      "hash": "3ffdc913f146454d80555aa526e35a5b"
+    },
+    {
+      "id": "ef243e35-e87c-4168-a9d9-e1162ed02be6",
+      "sequence_num": 29,
+      "timestamp": "2026-04-26T21:04:36.932521Z",
+      "event_type": "EDIP_DECISION_MADE",
+      "actor": "ciso@tempris.sg",
+      "source_module": "SPECTRUM EDIP",
+      "description": "CISO override: Transfer to insurance",
+      "metadata": {
+        "session_id": "838f96e0-4128-4322-8f19-fa8fd528efee",
+        "ip_address": "10.0.1.7",
+        "decision": "Mitigate",
+        "cve_id": "CVE-2024-3400",
+        "tes_score": 8.36
+      },
+      "immutable": true,
+      "hash": "a93b18df61084b4c91f35fa7acbce3b1"
+    },
+    {
+      "id": "9e4549e1-769a-4df1-ba83-63ed5c3d15a2",
+      "sequence_num": 30,
+      "timestamp": "2026-04-26T21:50:20.932521Z",
+      "event_type": "ASSET_CREATED",
+      "actor": "admin@tempris.sg",
+      "source_module": "SYNTHESIS",
+      "description": "Asset registered in inventory",
+      "metadata": {
+        "session_id": "668e97e5-7659-4015-93c3-cb0662f5029f",
+        "ip_address": "10.0.1.2"
+      },
+      "immutable": true,
+      "hash": "8000d6a84a49462e97166d2a0c889dd1"
+    },
+    {
+      "id": "80b05b69-13c9-48aa-b883-42ff6f25aa58",
+      "sequence_num": 31,
+      "timestamp": "2026-04-26T22:35:55.932521Z",
+      "event_type": "STRIKE_AUTH_CREATED",
+      "actor": "ciso@tempris.sg",
+      "source_module": "STRIKE module",
+      "description": "Written scope authorisation created",
+      "metadata": {
+        "session_id": "bcad598b-bdcb-4c0c-b579-25722544f13f",
+        "ip_address": "10.0.1.9"
+      },
+      "immutable": true,
+      "hash": "b1ba176590e54546a07947793ab3d959"
+    },
+    {
+      "id": "e3267b47-8814-4b47-8570-d74c049a552a",
+      "sequence_num": 32,
+      "timestamp": "2026-04-26T23:39:38.932521Z",
+      "event_type": "STRIKE_SIM_STARTED",
+      "actor": "analyst@tempris.sg",
+      "source_module": "STRIKE module",
+      "description": "Red team simulation initiated",
+      "metadata": {
+        "session_id": "b80ca261-4e00-481b-abfd-e78c3cddf003",
+        "ip_address": "10.0.1.11"
+      },
+      "immutable": true,
+      "hash": "ddb83cb6a8e744eb88187b098df210bc"
+    },
+    {
+      "id": "fea43041-8832-473d-85d1-a8a4607bf3fc",
+      "sequence_num": 33,
+      "timestamp": "2026-04-27T07:23:33.932521Z",
+      "event_type": "STRIKE_SIM_STARTED",
+      "actor": "analyst@tempris.sg",
+      "source_module": "STRIKE module",
+      "description": "Red team simulation initiated",
+      "metadata": {
+        "session_id": "8b134c87-4b75-43ec-bcea-4c16339735bf",
+        "ip_address": "10.0.1.19"
+      },
+      "immutable": true,
+      "hash": "04ea61ac7861449abc684c9e2cdd1756"
+    },
+    {
+      "id": "3617960b-47b4-40b2-a352-4df8e77d3f41",
+      "sequence_num": 34,
+      "timestamp": "2026-04-27T11:38:36.932521Z",
+      "event_type": "STRIKE_AUTH_CREATED",
+      "actor": "ciso@tempris.sg",
+      "source_module": "STRIKE module",
+      "description": "Written scope authorisation created",
+      "metadata": {
+        "session_id": "9c44ebc6-1b35-45b2-bad9-55fc9b7dd083",
+        "ip_address": "10.0.1.11"
+      },
+      "immutable": true,
+      "hash": "7c6d7b27d9ff48beb70b4535c8309917"
+    },
+    {
+      "id": "91f7d7a4-5626-486f-914a-9b155f6c5546",
+      "sequence_num": 35,
+      "timestamp": "2026-04-27T13:14:08.932521Z",
+      "event_type": "EDIP_DECISION_MADE",
+      "actor": "ciso@tempris.sg",
+      "source_module": "SPECTRUM EDIP",
+      "description": "CISO override: Transfer to insurance",
+      "metadata": {
+        "session_id": "8e5e5cd3-b0fb-4ae3-a063-b324ea97f736",
+        "ip_address": "10.0.1.13",
+        "decision": "Mitigate",
+        "cve_id": "CVE-2023-46604",
+        "tes_score": 8.3
+      },
+      "immutable": true,
+      "hash": "ba9bcde7f2ba4bc395274cbd6c701845"
+    },
+    {
+      "id": "1157706c-bec9-40be-9ded-5833dc88729a",
+      "sequence_num": 36,
+      "timestamp": "2026-04-27T20:37:57.932521Z",
+      "event_type": "SCOUT_SCAN_STARTED",
+      "actor": "analyst@tempris.sg",
+      "source_module": "SCOUT module",
+      "description": "Nuclei scan initiated against target",
+      "metadata": {
+        "session_id": "11963c42-c1dc-4ac4-8d3d-67db655fe609",
+        "ip_address": "10.0.1.17"
+      },
+      "immutable": true,
+      "hash": "780d247448df4cae8d7c74a27c03b97c"
+    },
+    {
+      "id": "160186a3-6208-4610-9b4e-1b525ed422fc",
+      "sequence_num": 37,
+      "timestamp": "2026-04-27T22:56:28.932521Z",
+      "event_type": "SCOUT_SCAN_COMPLETED",
+      "actor": "system",
+      "source_module": "SCOUT module",
+      "description": "Scan completed, findings published to SPECTRUM",
+      "metadata": {
+        "session_id": "3fcbef04-1f1b-42d6-91f5-0588790b3927",
+        "ip_address": "10.0.1.15"
+      },
+      "immutable": true,
+      "hash": "050c62f346e041b4ae357b66028eb5f5"
+    },
+    {
+      "id": "ef002005-369c-4fdf-adde-ec9e96f8d2b7",
+      "sequence_num": 38,
+      "timestamp": "2026-04-27T23:26:47.932521Z",
+      "event_type": "COMPLIANCE_CTRL_UPDATE",
+      "actor": "analyst@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "NIST CSF control marked Partial",
+      "metadata": {
+        "session_id": "a3615d6d-80da-45e0-b64b-3f06c42d6140",
+        "ip_address": "10.0.1.14"
+      },
+      "immutable": true,
+      "hash": "3dabdfd7a5ab441795bab8b4996d949e"
+    },
+    {
+      "id": "1f7efd11-d10d-4661-b0c6-6d2168584487",
+      "sequence_num": 39,
+      "timestamp": "2026-04-28T05:19:56.932521Z",
+      "event_type": "EDIP_DECISION_MADE",
+      "actor": "analyst@tempris.sg",
+      "source_module": "SPECTRUM EDIP",
+      "description": "Analyst decision recorded: Mitigate",
+      "metadata": {
+        "session_id": "74a3efac-a2da-4af7-9b53-63ed67e35c55",
+        "ip_address": "10.0.1.3",
+        "decision": "Transfer",
+        "cve_id": "CVE-2024-3400",
+        "tes_score": 9.01
+      },
+      "immutable": true,
+      "hash": "4f8846e1c78644d1a2bab7d5ce759d78"
+    },
+    {
+      "id": "19aad650-56e5-43d6-ae32-b904d2c009e7",
+      "sequence_num": 40,
+      "timestamp": "2026-04-28T11:25:09.932521Z",
+      "event_type": "EVIDENCE_UPLOADED",
+      "actor": "analyst@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "Evidence document attached to control",
+      "metadata": {
+        "session_id": "41f83d0e-59a0-4448-b8d4-5421af959d75",
+        "ip_address": "10.0.1.10"
+      },
+      "immutable": true,
+      "hash": "71d4e65beef743e79d68b2588edf1088"
+    },
+    {
+      "id": "53fb2a03-9600-45c6-889a-46c40aaae9cb",
+      "sequence_num": 41,
+      "timestamp": "2026-04-28T15:53:41.932521Z",
+      "event_type": "MAS_NOTIFICATION_PREP",
+      "actor": "ciso@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "MAS 1-hour notification draft prepared",
+      "metadata": {
+        "session_id": "1bfb8833-1f4b-4593-ade2-9091efd9697f",
+        "ip_address": "10.0.1.10"
+      },
+      "immutable": true,
+      "hash": "81ee87dfe3a34fe4a0a9f61694b55e46"
+    },
+    {
+      "id": "607bb34d-c99c-456b-8108-66b82c4e086a",
+      "sequence_num": 42,
+      "timestamp": "2026-04-28T18:23:08.932521Z",
+      "event_type": "EDIP_DECISION_MADE",
+      "actor": "analyst@tempris.sg",
+      "source_module": "SPECTRUM EDIP",
+      "description": "Analyst decision recorded: Accept",
+      "metadata": {
+        "session_id": "03a51121-40b2-43c8-a9c7-cdf12bb494ef",
+        "ip_address": "10.0.1.3",
+        "decision": "Transfer",
+        "cve_id": "CVE-2024-47575",
+        "tes_score": 6.01
+      },
+      "immutable": true,
+      "hash": "a7cb5665333a4dab8db16106ccd2533f"
+    },
+    {
+      "id": "631078d0-3906-45c8-8f0a-e0ff55a943ee",
+      "sequence_num": 43,
+      "timestamp": "2026-04-28T18:34:40.932521Z",
+      "event_type": "EDIP_DECISION_MADE",
+      "actor": "analyst@tempris.sg",
+      "source_module": "SPECTRUM EDIP",
+      "description": "Analyst decision recorded: Accept",
+      "metadata": {
+        "session_id": "bf1ddf54-ba2d-4c5a-91f0-49d4d6891a7d",
+        "ip_address": "10.0.1.4",
+        "decision": "Ignore",
+        "cve_id": "CVE-2023-46604",
+        "tes_score": 7.44
+      },
+      "immutable": true,
+      "hash": "b4c3df0fd95c499a94a026c189861a47"
+    },
+    {
+      "id": "f3eef1cd-d163-47f9-9d7f-a4204d45f285",
+      "sequence_num": 44,
+      "timestamp": "2026-04-28T19:09:40.932521Z",
+      "event_type": "STRIKE_SIM_STARTED",
+      "actor": "analyst@tempris.sg",
+      "source_module": "STRIKE module",
+      "description": "Red team simulation initiated",
+      "metadata": {
+        "session_id": "bd078e95-d9b4-4f36-a410-b3eea0c8f0ac",
+        "ip_address": "10.0.1.3"
+      },
+      "immutable": true,
+      "hash": "01458e3effc94f0cad8d85d898dfb2ef"
+    },
+    {
+      "id": "52931f75-9599-4e80-be6f-b00903336e2b",
+      "sequence_num": 45,
+      "timestamp": "2026-04-28T21:23:59.932521Z",
+      "event_type": "SCOUT_SCAN_COMPLETED",
+      "actor": "system",
+      "source_module": "SCOUT module",
+      "description": "Scan completed, findings published to SPECTRUM",
+      "metadata": {
+        "session_id": "fac41f37-a7c4-4195-91ee-64d5c2f90d0a",
+        "ip_address": "10.0.1.8"
+      },
+      "immutable": true,
+      "hash": "d02cb9203fc140e7954f91d8571948a5"
+    },
+    {
+      "id": "863beb2b-baac-4eda-91a5-4c7d1653b44d",
+      "sequence_num": 46,
+      "timestamp": "2026-04-28T21:34:00.932521Z",
+      "event_type": "SCOUT_SCAN_STARTED",
+      "actor": "analyst@tempris.sg",
+      "source_module": "SCOUT module",
+      "description": "Nuclei scan initiated against target",
+      "metadata": {
+        "session_id": "fc5f445d-dc60-49bd-ad82-0cad0eb9c999",
+        "ip_address": "10.0.1.11"
+      },
+      "immutable": true,
+      "hash": "14707bbef21c43d6a2bd934012fa2ed8"
+    },
+    {
+      "id": "cf5dbd8d-63f6-4452-868b-6481272e2ea8",
+      "sequence_num": 47,
+      "timestamp": "2026-04-29T00:48:40.932521Z",
+      "event_type": "USER_LOGOUT",
+      "actor": "analyst@tempris.sg",
+      "source_module": "Auth service",
+      "description": "Session ended",
+      "metadata": {
+        "session_id": "d014c0e2-e764-4f95-abdb-962c5274880f",
+        "ip_address": "10.0.1.9"
+      },
+      "immutable": true,
+      "hash": "6e7236962c4645e9a86ef0c4c1375f22"
+    },
+    {
+      "id": "379ff88b-074d-4e7e-a0d4-5f34239b786c",
+      "sequence_num": 48,
+      "timestamp": "2026-04-29T08:54:42.932521Z",
+      "event_type": "EDIP_DECISION_MADE",
+      "actor": "analyst@tempris.sg",
+      "source_module": "SPECTRUM EDIP",
+      "description": "Analyst decision recorded: Mitigate",
+      "metadata": {
+        "session_id": "90a56e60-3776-4e0d-a09d-fbdcfeb72e4f",
+        "ip_address": "10.0.1.12",
+        "decision": "Mitigate",
+        "cve_id": "CVE-2021-44228",
+        "tes_score": 6.76
+      },
+      "immutable": true,
+      "hash": "899fc216fe6549cc83639566d02a956a"
+    },
+    {
+      "id": "36b43858-de75-41e5-88d7-853c99837809",
+      "sequence_num": 49,
+      "timestamp": "2026-04-29T11:32:30.932521Z",
+      "event_type": "MAS_NOTIFICATION_PREP",
+      "actor": "ciso@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "MAS 1-hour notification draft prepared",
+      "metadata": {
+        "session_id": "9d4e0321-303a-46c2-bce2-3126e54dc37c",
+        "ip_address": "10.0.1.17"
+      },
+      "immutable": true,
+      "hash": "8de6b2a6e7f74548ad7170111fd6736d"
+    },
+    {
+      "id": "f8b87026-d979-4bbb-8f7e-5a06309e5aa2",
+      "sequence_num": 50,
+      "timestamp": "2026-04-29T12:32:36.932521Z",
+      "event_type": "EDIP_DECISION_MADE",
+      "actor": "ciso@tempris.sg",
+      "source_module": "SPECTRUM EDIP",
+      "description": "CISO override: Transfer to insurance",
+      "metadata": {
+        "session_id": "7a5443d2-1a20-48cb-bc63-3d33215d4c5c",
+        "ip_address": "10.0.1.15",
+        "decision": "Ignore",
+        "cve_id": "CVE-2023-46604",
+        "tes_score": 9.08
+      },
+      "immutable": true,
+      "hash": "364d86cd6f874378b44871457ae85530"
+    },
+    {
+      "id": "aa743393-ed6a-402b-8c9b-617bb9de9f5b",
+      "sequence_num": 51,
+      "timestamp": "2026-04-29T15:56:47.932521Z",
+      "event_type": "COMPLIANCE_CTRL_UPDATE",
+      "actor": "admin@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "MAS TRM control status updated to Compliant",
+      "metadata": {
+        "session_id": "3b5ad9f8-dd6c-4b75-ba7c-d4450cbd2354",
+        "ip_address": "10.0.1.19"
+      },
+      "immutable": true,
+      "hash": "0a6101f007c34be4aecd35009f6808e2"
+    },
+    {
+      "id": "bd8df382-a114-4221-98cf-6658141ca041",
+      "sequence_num": 52,
+      "timestamp": "2026-04-29T16:05:51.932521Z",
+      "event_type": "USER_LOGIN",
+      "actor": "viewer@tempris.sg",
+      "source_module": "Auth service",
+      "description": "Read-only user authenticated",
+      "metadata": {
+        "session_id": "56ff81b9-30c6-4e87-8235-aecb409c57fb",
+        "ip_address": "10.0.1.10"
+      },
+      "immutable": true,
+      "hash": "9b6ae1c856bf48c8b92ffee3a5cd84d2"
+    },
+    {
+      "id": "d828671c-ab18-4f3c-8717-f70654f61452",
+      "sequence_num": 53,
+      "timestamp": "2026-04-29T16:26:36.932521Z",
+      "event_type": "SCOUT_SCAN_COMPLETED",
+      "actor": "system",
+      "source_module": "SCOUT module",
+      "description": "Scan completed, findings published to SPECTRUM",
+      "metadata": {
+        "session_id": "3646afea-9156-4bef-aef1-0855b6eeb52c",
+        "ip_address": "10.0.1.18"
+      },
+      "immutable": true,
+      "hash": "f3fcd04c761b4cf3aad22af593574d24"
+    },
+    {
+      "id": "211279dd-22c3-4677-9b3f-21f68e671a3f",
+      "sequence_num": 54,
+      "timestamp": "2026-04-29T17:35:47.932521Z",
+      "event_type": "REPORT_EXPORTED",
+      "actor": "ciso@tempris.sg",
+      "source_module": "SPOTLIGHT module",
+      "description": "PDF board report exported and logged",
+      "metadata": {
+        "session_id": "895371a4-0fd2-4320-8ba9-87e45d1235f3",
+        "ip_address": "10.0.1.2",
+        "report_id": "0CFDF3A4"
+      },
+      "immutable": true,
+      "hash": "1d7571e4532d4f32a3ece2f6af1183bb"
+    },
+    {
+      "id": "3ee834e0-cd4e-4be9-be0b-6af771564645",
+      "sequence_num": 55,
+      "timestamp": "2026-04-29T18:29:08.932521Z",
+      "event_type": "USER_LOGOUT",
+      "actor": "analyst@tempris.sg",
+      "source_module": "Auth service",
+      "description": "Session ended",
+      "metadata": {
+        "session_id": "6582f374-01f5-4500-9e65-c1c158c5c4be",
+        "ip_address": "10.0.1.13"
+      },
+      "immutable": true,
+      "hash": "7ce6cbe8f41f4bb5910ac8277f95d90b"
+    },
+    {
+      "id": "9d3c2ebc-0131-4250-a2f2-a15613a25b4e",
+      "sequence_num": 56,
+      "timestamp": "2026-04-29T18:53:11.932521Z",
+      "event_type": "EVIDENCE_UPLOADED",
+      "actor": "analyst@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "Evidence document attached to control",
+      "metadata": {
+        "session_id": "77bb309d-f74e-4ac7-a1a8-29fcff196bb2",
+        "ip_address": "10.0.1.15"
+      },
+      "immutable": true,
+      "hash": "8ce46c6c23fc42c0bf625c9273006637"
+    },
+    {
+      "id": "34d4c291-7af8-491b-8c18-e8dc7114d51e",
+      "sequence_num": 57,
+      "timestamp": "2026-04-29T22:56:52.932521Z",
+      "event_type": "COMPLIANCE_CTRL_UPDATE",
+      "actor": "admin@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "MAS TRM control status updated to Compliant",
+      "metadata": {
+        "session_id": "c5d21382-2ce0-4355-aa98-d0e6cbc88143",
+        "ip_address": "10.0.1.8"
+      },
+      "immutable": true,
+      "hash": "e59251303678497f8c51b41958830171"
+    },
+    {
+      "id": "f2bb3b7d-ba04-4047-9bb3-c23ad16c4062",
+      "sequence_num": 58,
+      "timestamp": "2026-04-29T23:57:16.932521Z",
+      "event_type": "COMPLIANCE_CTRL_UPDATE",
+      "actor": "admin@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "MAS TRM control status updated to Compliant",
+      "metadata": {
+        "session_id": "87138a89-a5f3-46a5-925f-1dfd2ecc293d",
+        "ip_address": "10.0.1.13"
+      },
+      "immutable": true,
+      "hash": "9d1db5beb43541c59f677bea610f9b6a"
+    },
+    {
+      "id": "57df47de-1076-4eea-b33d-d53becff543f",
+      "sequence_num": 59,
+      "timestamp": "2026-04-30T00:42:21.932521Z",
+      "event_type": "REPORT_EXPORTED",
+      "actor": "ciso@tempris.sg",
+      "source_module": "SPOTLIGHT module",
+      "description": "PDF board report exported and logged",
+      "metadata": {
+        "session_id": "46d0b790-b110-41fc-ac89-903e39bcde22",
+        "ip_address": "10.0.1.14",
+        "report_id": "9ABC99D2"
+      },
+      "immutable": true,
+      "hash": "39e79a7b76814763b40e43501b962281"
+    },
+    {
+      "id": "95172937-4d4e-4517-96b4-991b0a2d7262",
+      "sequence_num": 60,
+      "timestamp": "2026-04-30T04:51:47.932521Z",
+      "event_type": "STRIKE_SIM_COMPLETED",
+      "actor": "system",
+      "source_module": "STRIKE module",
+      "description": "Simulation completed, results linked to SPECTRUM",
+      "metadata": {
+        "session_id": "e1d8b748-9f9e-4470-805e-312510358da8",
+        "ip_address": "10.0.1.4"
+      },
+      "immutable": true,
+      "hash": "ec5cb224a354452d9d8c3099c5f443d9"
+    },
+    {
+      "id": "cb3a0df2-efc0-4dd6-8d2a-1c75dc6ca1a4",
+      "sequence_num": 61,
+      "timestamp": "2026-04-30T05:11:05.932521Z",
+      "event_type": "CVE_FINDING_CREATED",
+      "actor": "system",
+      "source_module": "SPECTRUM engine",
+      "description": "TES scoring applied to new CVE finding",
+      "metadata": {
+        "session_id": "597f2f45-95d0-4a85-981b-c09620920d25",
+        "ip_address": "10.0.1.5",
+        "cve_id": "CVE-2024-53704",
+        "tes_score": 5.99
+      },
+      "immutable": true,
+      "hash": "577bbf0bb4b040f4995a02790f14e4c1"
+    },
+    {
+      "id": "62b1d4c8-4a79-4347-be06-79a066e918c5",
+      "sequence_num": 62,
+      "timestamp": "2026-04-30T06:16:03.932521Z",
+      "event_type": "CVE_FINDING_CREATED",
+      "actor": "system",
+      "source_module": "SPECTRUM engine",
+      "description": "TES scoring applied to new CVE finding",
+      "metadata": {
+        "session_id": "8f02fb52-4512-4207-9849-afe9728c4189",
+        "ip_address": "10.0.1.6",
+        "cve_id": "CVE-2024-47575",
+        "tes_score": 8.54
+      },
+      "immutable": true,
+      "hash": "fd7a94b944e04beb9346fc3080ec0e92"
+    },
+    {
+      "id": "82164530-af94-4584-a581-97bbbeb686cd",
+      "sequence_num": 63,
+      "timestamp": "2026-04-30T06:32:46.932521Z",
+      "event_type": "STRIKE_AUTH_CREATED",
+      "actor": "ciso@tempris.sg",
+      "source_module": "STRIKE module",
+      "description": "Written scope authorisation created",
+      "metadata": {
+        "session_id": "6bb0131c-a57a-46e3-8af1-8ad9fe8470b3",
+        "ip_address": "10.0.1.15"
+      },
+      "immutable": true,
+      "hash": "9d93c24f1c2a4aababdc5acbef8332a4"
+    },
+    {
+      "id": "63812c03-bf68-4254-be11-ac9b3e412e32",
+      "sequence_num": 64,
+      "timestamp": "2026-04-30T15:15:01.932521Z",
+      "event_type": "USER_LOGOUT",
+      "actor": "analyst@tempris.sg",
+      "source_module": "Auth service",
+      "description": "Session ended",
+      "metadata": {
+        "session_id": "d0ed9050-87f5-4ef0-95ac-f9f4e726ec61",
+        "ip_address": "10.0.1.15"
+      },
+      "immutable": true,
+      "hash": "f9ff72bc17334784830c8e55fa7fa92e"
+    },
+    {
+      "id": "636c4d44-0dba-408b-ab9c-222b036dd233",
+      "sequence_num": 65,
+      "timestamp": "2026-04-30T15:52:06.932521Z",
+      "event_type": "SCOUT_SCAN_STARTED",
+      "actor": "analyst@tempris.sg",
+      "source_module": "SCOUT module",
+      "description": "Nuclei scan initiated against target",
+      "metadata": {
+        "session_id": "4a77ccb9-9805-4357-aa37-fb5d0bf2b019",
+        "ip_address": "10.0.1.8"
+      },
+      "immutable": true,
+      "hash": "730771a0427c46708fa48fc217135190"
+    },
+    {
+      "id": "d11ad3b7-ba10-4504-865a-3a48664e3fc2",
+      "sequence_num": 66,
+      "timestamp": "2026-04-30T17:21:56.932521Z",
+      "event_type": "COMPLIANCE_CTRL_UPDATE",
+      "actor": "analyst@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "NIST CSF control marked Partial",
+      "metadata": {
+        "session_id": "5cba9f06-bd52-4d8c-873e-f8b59d3d0613",
+        "ip_address": "10.0.1.19"
+      },
+      "immutable": true,
+      "hash": "61818faec1f143e998a734309968a072"
+    },
+    {
+      "id": "2e1754fc-1d17-4933-81cd-bb977b3e3982",
+      "sequence_num": 67,
+      "timestamp": "2026-04-30T20:44:06.932521Z",
+      "event_type": "COMPLIANCE_CTRL_UPDATE",
+      "actor": "admin@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "MAS TRM control status updated to Compliant",
+      "metadata": {
+        "session_id": "6fa8a3de-767b-4c30-a8bd-d682a28892c4",
+        "ip_address": "10.0.1.13"
+      },
+      "immutable": true,
+      "hash": "fe501ed4e4aa4ccebf0c95dbaa885bea"
+    },
+    {
+      "id": "2a04c827-6610-4c4a-a3bd-f6964282ec58",
+      "sequence_num": 68,
+      "timestamp": "2026-04-30T21:45:57.932521Z",
+      "event_type": "REPORT_EXPORTED",
+      "actor": "ciso@tempris.sg",
+      "source_module": "SPOTLIGHT module",
+      "description": "PDF board report exported and logged",
+      "metadata": {
+        "session_id": "f9d5bb04-cde7-4e3a-a257-7164e5d939c8",
+        "ip_address": "10.0.1.13",
+        "report_id": "E577EB73"
+      },
+      "immutable": true,
+      "hash": "3fd1f050077c4bfc8ab08f2af579af2f"
+    },
+    {
+      "id": "7a795ac7-f188-4f88-87e1-666da7b88e77",
+      "sequence_num": 69,
+      "timestamp": "2026-05-01T00:53:47.932521Z",
+      "event_type": "CVE_FINDING_CREATED",
+      "actor": "system",
+      "source_module": "SPECTRUM engine",
+      "description": "TES scoring applied to new CVE finding",
+      "metadata": {
+        "session_id": "fcfbb2c0-b998-48c2-82b1-bacde570eae4",
+        "ip_address": "10.0.1.18",
+        "cve_id": "CVE-2024-53704",
+        "tes_score": 9.22
+      },
+      "immutable": true,
+      "hash": "e58fe39c97af4edd8f151ed4a329c05b"
+    },
+    {
+      "id": "a92a6c9b-3fe9-4972-9fbe-86d270b77deb",
+      "sequence_num": 70,
+      "timestamp": "2026-05-01T07:02:07.932521Z",
+      "event_type": "CVE_FINDING_CREATED",
+      "actor": "system",
+      "source_module": "SPECTRUM engine",
+      "description": "TES scoring applied to new CVE finding",
+      "metadata": {
+        "session_id": "11526267-8f91-4da4-ba15-495d1b0c531c",
+        "ip_address": "10.0.1.2",
+        "cve_id": "CVE-2024-47575",
+        "tes_score": 8.52
+      },
+      "immutable": true,
+      "hash": "58ca144199f74ce286009cdf0ae9bc32"
+    },
+    {
+      "id": "c659cc36-bc5d-44f1-b002-63bcec8e1258",
+      "sequence_num": 71,
+      "timestamp": "2026-05-01T08:27:52.932521Z",
+      "event_type": "EDIP_DECISION_MADE",
+      "actor": "analyst@tempris.sg",
+      "source_module": "SPECTRUM EDIP",
+      "description": "Analyst decision recorded: Mitigate",
+      "metadata": {
+        "session_id": "0ece580f-423e-4d18-94b3-1f9c738f7e8d",
+        "ip_address": "10.0.1.7",
+        "decision": "Transfer",
+        "cve_id": "CVE-2024-3400",
+        "tes_score": 7.11
+      },
+      "immutable": true,
+      "hash": "66e3e26759234905bc85f75d80691814"
+    },
+    {
+      "id": "a15ce0b2-bc93-4849-9a69-a2979ececf33",
+      "sequence_num": 72,
+      "timestamp": "2026-05-01T08:49:51.932521Z",
+      "event_type": "EVIDENCE_UPLOADED",
+      "actor": "analyst@tempris.sg",
+      "source_module": "STANDARD module",
+      "description": "Evidence document attached to control",
+      "metadata": {
+        "session_id": "47c3077d-f4af-418f-82f3-bb57290a70cb",
+        "ip_address": "10.0.1.13"
+      },
+      "immutable": true,
+      "hash": "1a202ebe5e9148ef91bae3b02746d4d6"
+    },
+    {
+      "id": "bc96ef2b-aeff-4003-badd-0743ec6abad0",
+      "sequence_num": 73,
+      "timestamp": "2026-05-01T10:39:52.932521Z",
+      "event_type": "STRIKE_AUTH_CREATED",
+      "actor": "ciso@tempris.sg",
+      "source_module": "STRIKE module",
+      "description": "Written scope authorisation created",
+      "metadata": {
+        "session_id": "1cc321c8-dedc-46a2-8604-36d5a9377a7e",
+        "ip_address": "10.0.1.13"
+      },
+      "immutable": true,
+      "hash": "a9a8ab67af14475ea77ed68fa95d1616"
+    },
+    {
+      "id": "4e614cdf-0cf1-4d94-9190-fc1c429d8cb0",
+      "sequence_num": 74,
+      "timestamp": "2026-05-01T15:28:06.932521Z",
+      "event_type": "SPEAK_QUERY",
+      "actor": "analyst@tempris.sg",
+      "source_module": "SPEAK chatbot",
+      "description": "AI security query processed",
+      "metadata": {
+        "session_id": "cf35add7-d360-4b27-9bf4-1085374634d9",
+        "ip_address": "10.0.1.7"
+      },
+      "immutable": true,
+      "hash": "33810318261448f4a8531a38530c42d4"
+    },
+    {
+      "id": "76481240-e106-4caa-b020-b99d17ea2caa",
+      "sequence_num": 75,
+      "timestamp": "2026-05-01T15:52:46.932521Z",
+      "event_type": "ASSET_CREATED",
+      "actor": "admin@tempris.sg",
+      "source_module": "SYNTHESIS",
+      "description": "Asset registered in inventory",
+      "metadata": {
+        "session_id": "c8d0d997-b76c-4802-9cbb-1e4f83a86273",
+        "ip_address": "10.0.1.15"
+      },
+      "immutable": true,
+      "hash": "787d8d13c870489eb89507a0157266b3"
+    }
+  ]
+}

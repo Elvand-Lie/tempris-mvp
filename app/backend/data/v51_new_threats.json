@@ -1,0 +1,60 @@
+{
+  "meta": {
+    "source_event": "v51 New Threat Intake Pack - CVE-2026-48907 Joomla JCE RCE",
+    "intake_type": "MIXED_CVE_SSS",
+    "total_findings": 1,
+    "exported_at": "2026-06-29T12:00:00Z",
+    "schema_version": "1.0.0",
+    "generator": "tempris_v51_threat_intake"
+  },
+  "findings": [
+    {
+      "finding_id": "CVE-2026-48907",
+      "type": "CVE",
+      "source": "INTERNAL_BRIEF",
+      "title": "Critical Unauthenticated RCE in Joomla Content Editor (JCE)",
+      "description": "Broken access control in Joomla JCE profile import endpoint allows unauthenticated upload and execution of a staged PHP webshell. The v51 brief describes a three-request chain: fetch public CSRF token, POST malicious .xml.php payload, then GET the staged path to trigger execution.",
+      "affected_ecosystem": "Joomla Content Editor (JCE)",
+      "attack_vectors": ["NETWORK_PREAUTH_RCE", "WEB_SHELL", "SUPPLY_CHAIN_THIRD_PARTY"],
+      "patch_available": true,
+      "recommended_action": "PATCH",
+      "scoring": {
+        "base_severity": 9.8,
+        "AGM": 1.1,
+        "DRF": 1.04,
+        "TEF": 1.05,
+        "TES_raw": 11.78,
+        "TES_effective": 10.0,
+        "controls_applied": false
+      },
+      "decision": "ESCALATE",
+      "cisa_kev": true,
+      "kev_date_added": "2026-06-16",
+      "patch_version": "JCE >= 2.9.99.6",
+      "patch_date": "2026-06-03",
+      "affected_versions": "JCE 1.0.0 - 2.9.99.4",
+      "cwe": "CWE-284",
+      "nc4_alert": "NC4-ALR-2026-000004",
+      "epss_percentile": 0.94,
+      "mas_trm_mapping": "MAS TRM Section 9 - Third-Party Risk Management",
+      "compensating_controls": [
+        "Upgrade JCE to >= 2.9.99.6",
+        "Audit editor profiles and remove unauthorized profiles",
+        "Block PHP execution in /tmp, /images, and /cache",
+        "Deploy WAF rule blocking option=com_jce and task=profiles.import",
+        "Restore from a clean pre-2026-06-03 backup if compromise is suspected"
+      ],
+      "references": [
+        "Tempris_Elvand_DevBrief_CVE-2026-48907_v51",
+        "Tempris_Elvand_DevBrief_v51_NEW_THREATS",
+        "NC4-ALR-2026-000004",
+        "CISA KEV claim from internal v51 brief",
+        "NVD claim from internal v51 brief",
+        "YesWeHack PoC claim from internal v51 brief"
+      ],
+      "source_verification": "Internal v51 brief. Public CVE/NVD/CISA confirmation was not found during local audit on 2026-06-29.",
+      "analyst": "tempris-system-v1.0",
+      "ingested_at": "2026-06-29T12:00:00Z"
+    }
+  ]
+}

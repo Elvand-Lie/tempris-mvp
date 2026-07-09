@@ -1,0 +1,98 @@
+# Tempris Rate Limiting Zones
+limit_req_zone $binary_remote_addr zone=auth:10m rate=5r/m;
+limit_req_zone $binary_remote_addr zone=api:10m rate=100r/m;
+limit_req_zone $binary_remote_addr zone=scanner:10m rate=10r/m;
+
+# NOTE: HTTP→HTTPS redirect is handled by the host-level nginx on port 80.
+# This container only handles HTTPS on port 443.
+
+# ── HTTPS Server ──────────────────────────────────────────────────────────────
+server {
+    listen 443 ssl default_server;
+    server_name _;
+
+    ssl_certificate     /etc/letsencrypt/live/sandbox.tempris.tech/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/sandbox.tempris.tech/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # H-10: Hide Nginx version from Server header
+    server_tokens off;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # H-11: Block sensitive file paths (source maps, git, env, config files)
+    location ~* /\.(git|env|svn|npmrc|DS_Store) {
+        deny all;
+        return 404;
+    }
+    location ~* \.(map)$ {
+        deny all;
+        return 404;
+    }
+    location ~* /(package\.json|package-lock\.json|yarn\.lock|composer\.(json|lock)|Gemfile\.lock|requirements\.txt|Pipfile\.lock|go\.sum|pom\.xml|build\.gradle) {
+        deny all;
+        return 404;
+    }
+
+    # H-12: Strip upstream proxy headers that leak infrastructure info
+    proxy_hide_header X-Powered-By;
+    proxy_hide_header Server;
+
+    # v54: block Joomla JCE profile-import RCE chain and uploaded PHP execution.
+    if ($arg_task ~* "^profiles\.import$") { return 403; }
+    if ($uri ~* "^/(images|cache|tmp|uploads?|files|media)/.*\.(php|phtml|phar|php[0-9])$") { return 403; }
+
+    location /api/auth/ {
+        limit_req zone=auth burst=3 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:8000/api/auth/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 30s;
+        proxy_connect_timeout 10s;
+    }
+
+    location /api/scanner/ {
+        limit_req zone=scanner burst=2 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:8000/api/scanner/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+        proxy_connect_timeout 10s;
+    }
+
+    location /api/ {
+        limit_req zone=api burst=20 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:8000/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+        proxy_connect_timeout 10s;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 30s;
+        proxy_connect_timeout 10s;
+    }
+}

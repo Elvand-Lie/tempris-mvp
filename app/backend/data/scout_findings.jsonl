@@ -1,0 +1,5 @@
+{"template-id":"CVE-2017-5638","info":{"name":"Apache Struts RCE","severity":"critical","classification":{"cve-id":["CVE-2017-5638"],"cvss-score":10.0}},"host":"http://192.168.56.101","matched-at":"http://192.168.56.101/struts"}
+{"template-id":"CVE-2021-44228","info":{"name":"Log4Shell RCE","severity":"critical","classification":{"cve-id":["CVE-2021-44228"],"cvss-score":10.0}},"host":"http://192.168.56.101","matched-at":"http://192.168.56.101/log4j"}
+{"template-id":"CVE-2019-0708","info":{"name":"BlueKeep RDP RCE","severity":"critical","classification":{"cve-id":["CVE-2019-0708"],"cvss-score":9.8}},"host":"http://192.168.56.101","matched-at":"http://192.168.56.101:3389"}
+{"template-id":"CVE-2024-53704","info":{"name":"SonicWall Auth Bypass","severity":"high","classification":{"cve-id":["CVE-2024-53704"],"cvss-score":8.2}},"host":"http://192.168.56.101","matched-at":"http://192.168.56.101/vpn"}
+{"template-id":"apache-tomcat-manager","info":{"name":"Tomcat Manager Default Creds","severity":"medium","classification":{"cvss-score":5.8}},"host":"http://192.168.56.101","matched-at":"http://192.168.56.101:8080/manager"}

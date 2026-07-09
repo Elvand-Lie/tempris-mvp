@@ -1,0 +1,43 @@
+# Secrets
+app/deploy/.env
+app/freellmapi/.env
+ssl/
+
+# Database
+*.db
+*.db-journal
+app/backend/data/chroma/
+
+# Logs
+*.log
+
+# Archives/snapshots (keep them out of git)
+*.tar.gz
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Node
+node_modules/
+
+# Build artifacts
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup dirs that aren't source
+app/deploy_backups/
+app/backend_old/
+app/frontend_old/
+app/frontend_backup_/
+vps_prod_snapshot/
+_deploy_staging/
+_py_compile_cache/
+_vps_push_*/
+_deploy_*.tar.gz
+tempris.db
