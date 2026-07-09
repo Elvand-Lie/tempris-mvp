@@ -39,5 +39,7 @@ vps_prod_snapshot/
 _deploy_staging/
 _py_compile_cache/
 _vps_push_*/
+_vps_live_extract/
+_vps_live_snapshot*
 _deploy_*.tar.gz
 tempris.db

@@ -1,0 +1,49 @@
+# Tempris Dev — Local Docker Compose
+# Simplified stack for local development (no nginx, no SSL, SQLite fallback)
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up --build
+#
+# This starts:
+#   - backend   → http://localhost:8000 (FastAPI + serves frontend SPA)
+#   - freellmapi → http://localhost:3001 (LLM proxy — optional, backend has mock fallback)
+
+services:
+  backend:
+    build:
+      context: ./app/backend
+      dockerfile: Dockerfile.dev
+    container_name: tempris_backend_dev
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./tempris.db
+      - JWT_SECRET_KEY=dev_only_secret_do_not_use_in_prod_abc123
+      - FREELLM_API_KEY=freellmapi-dev-key
+      - FREELLM_BASE_URL=http://localhost:3001/v1
+      - CORS_ORIGINS=http://localhost:5173,http://localhost:8000,http://localhost:3000
+      - ENABLE_HSTS=false
+      - ENV=development
+    volumes:
+      - ./app/backend:/app
+      - ./app/frontend:/frontend:ro
+      - backend_data:/app/data
+    restart: unless-stopped
+
+  freellmapi:
+    build:
+      context: ./app/freellmapi
+      dockerfile: Dockerfile
+    container_name: tempris_llm_dev
+    ports:
+      - "3001:3001"
+    environment:
+      - ENCRYPTION_KEY=dev_only_encryption_key_0000000000000000000000000000000000000000
+      - PORT=3001
+    volumes:
+      - freellm_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  backend_data:
+  freellm_data:
