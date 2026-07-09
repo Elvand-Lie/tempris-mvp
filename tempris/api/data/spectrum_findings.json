@@ -1,0 +1,127 @@
+{
+  "generated_at": "2026-05-24T19:40:47.943583Z",
+  "total_findings": 5,
+  "kev_version": "2026.05.22",
+  "findings": [
+    {
+      "id": 1,
+      "cve_id": "CVE-2017-5638",
+      "name": "Apache Struts RCE",
+      "severity_cvss": "CRITICAL",
+      "cvss_score": 10.0,
+      "host": "http://192.168.56.101",
+      "matched_at": "http://192.168.56.101/struts",
+      "template_id": "CVE-2017-5638",
+      "kev_flagged": true,
+      "ransomware_linked": true,
+      "tes_score": 0.96,
+      "tes_priority": "P4 \u00b7 Info",
+      "tes_breakdown": {
+        "cvss_contrib": 0.35,
+        "expl_contrib": 0.25,
+        "impact_contrib": 0.2,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.072
+      },
+      "edip_decision": null,
+      "edip_notes": "",
+      "scanned_at": "2026-05-24T19:40:47.943583Z"
+    },
+    {
+      "id": 2,
+      "cve_id": "CVE-2021-44228",
+      "name": "Log4Shell RCE",
+      "severity_cvss": "CRITICAL",
+      "cvss_score": 10.0,
+      "host": "http://192.168.56.101",
+      "matched_at": "http://192.168.56.101/log4j",
+      "template_id": "CVE-2021-44228",
+      "kev_flagged": true,
+      "ransomware_linked": true,
+      "tes_score": 0.96,
+      "tes_priority": "P4 \u00b7 Info",
+      "tes_breakdown": {
+        "cvss_contrib": 0.35,
+        "expl_contrib": 0.25,
+        "impact_contrib": 0.2,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.072
+      },
+      "edip_decision": null,
+      "edip_notes": "",
+      "scanned_at": "2026-05-24T19:40:47.943583Z"
+    },
+    {
+      "id": 3,
+      "cve_id": "CVE-2019-0708",
+      "name": "BlueKeep RDP RCE",
+      "severity_cvss": "CRITICAL",
+      "cvss_score": 9.8,
+      "host": "http://192.168.56.101",
+      "matched_at": "http://192.168.56.101:3389",
+      "template_id": "CVE-2019-0708",
+      "kev_flagged": true,
+      "ransomware_linked": true,
+      "tes_score": 0.95,
+      "tes_priority": "P4 \u00b7 Info",
+      "tes_breakdown": {
+        "cvss_contrib": 0.343,
+        "expl_contrib": 0.25,
+        "impact_contrib": 0.2,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.072
+      },
+      "edip_decision": null,
+      "edip_notes": "",
+      "scanned_at": "2026-05-24T19:40:47.943583Z"
+    },
+    {
+      "id": 4,
+      "cve_id": "CVE-2024-53704",
+      "name": "SonicWall Auth Bypass",
+      "severity_cvss": "HIGH",
+      "cvss_score": 8.2,
+      "host": "http://192.168.56.101",
+      "matched_at": "http://192.168.56.101/vpn",
+      "template_id": "CVE-2024-53704",
+      "kev_flagged": true,
+      "ransomware_linked": true,
+      "tes_score": 0.84,
+      "tes_priority": "P4 \u00b7 Info",
+      "tes_breakdown": {
+        "cvss_contrib": 0.287,
+        "expl_contrib": 0.25,
+        "impact_contrib": 0.15,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.072
+      },
+      "edip_decision": null,
+      "edip_notes": "",
+      "scanned_at": "2026-05-24T19:40:47.943583Z"
+    },
+    {
+      "id": 5,
+      "cve_id": null,
+      "name": "Tomcat Manager Default Creds",
+      "severity_cvss": "MEDIUM",
+      "cvss_score": 5.8,
+      "host": "http://192.168.56.101",
+      "matched_at": "http://192.168.56.101:8080/manager",
+      "template_id": "apache-tomcat-manager",
+      "kev_flagged": false,
+      "ransomware_linked": false,
+      "tes_score": 0.51,
+      "tes_priority": "P4 \u00b7 Info",
+      "tes_breakdown": {
+        "cvss_contrib": 0.203,
+        "expl_contrib": 0.1,
+        "impact_contrib": 0.1,
+        "crit_contrib": 0.084,
+        "threat_contrib": 0.024
+      },
+      "edip_decision": null,
+      "edip_notes": "",
+      "scanned_at": "2026-05-24T19:40:47.943583Z"
+    }
+  ]
+}

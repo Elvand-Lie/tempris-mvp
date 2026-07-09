@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tempris_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tempris
+      POSTGRES_USER: tempris
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tempris"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: tempris_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    network_mode: host
+    environment:
+      - DATABASE_URL=postgresql://tempris:${DB_PASSWORD:?DB_PASSWORD is required}@localhost:5432/tempris
+      - FREELLM_BASE_URL=http://localhost:3001/v1
+      - FREELLM_API_KEY=${FREELLM_API_KEY:?FREELLM_API_KEY is required}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
+    volumes:
+      - ../backend/data:/app/data:ro
+      - ../frontend:/frontend:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  freellmapi:
+    build:
+      context: ../freellmapi
+      dockerfile: Dockerfile
+    container_name: tempris_llm
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    network_mode: host
+    env_file:
+      - ../freellmapi/.env
+    volumes:
+      - freellm_data:/app/data
+
+volumes:
+  freellm_data:
+  pgdata:

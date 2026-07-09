@@ -1,0 +1,147 @@
+{
+  "meta": {
+    "source_event": "v50 New Threat Intake Pack — June 2026",
+    "intake_type": "MIXED_CVE_SSS",
+    "total_findings": 4,
+    "exported_at": "2026-06-29T07:00:00Z",
+    "schema_version": "1.0.0",
+    "generator": "tempris_v50_threat_intake"
+  },
+  "findings": [
+    {
+      "finding_id": "CVE-2026-46331",
+      "type": "CVE",
+      "source": "CVE_KEV",
+      "title": "pedit COW — Linux Kernel Page-Cache Corruption (tc/pedit LPE)",
+      "description": "Memory corruption in Linux kernel tc pedit module. Attacker with local user access corrupts in-memory page cache of setuid-root binaries, executing modified versions while disk files remain untouched. FIM tools report clean. Working PoC is public.",
+      "affected_ecosystem": "Linux Kernel / tc subsystem",
+      "attack_vectors": ["LOCAL_PRIVILEGE_ESCALATION", "FIM_BYPASS"],
+      "patch_available": true,
+      "recommended_action": "PATCH",
+      "scoring": {
+        "base_severity": 7.8,
+        "AGM": 1.2,
+        "DRF": 1.2,
+        "TEF": 1.1,
+        "TES_raw": 10.0,
+        "TES_effective": 10.0,
+        "controls_applied": false
+      },
+      "decision": "ESCALATE",
+      "compensating_controls": [
+        "Disable unprivileged user namespaces (kernel.unprivileged_userns_clone=0)",
+        "Blacklist act_pedit kernel module",
+        "Deploy memory integrity monitoring (auditd + eBPF IDS)"
+      ],
+      "fim_bypass": true,
+      "fim_bypass_note": "Conventional file integrity monitoring will NOT detect exploitation. Memory integrity monitoring required.",
+      "mitre_technique": "T1068",
+      "references": [
+        "CVE-2026-46331",
+        "The Hacker News Jun 2026",
+        "Linux kernel tc subsystem advisory"
+      ],
+      "analyst": "tempris-system-v1.0",
+      "ingested_at": "2026-06-29T07:00:00Z"
+    },
+    {
+      "finding_id": "SSS-2026-SIGNAL-001",
+      "type": "NON_CVE_SSS",
+      "source": "THREAT_INTEL",
+      "title": "Signal Backup Recovery Key Attack — Russian APT Key Management Bypass",
+      "description": "Russian intelligence targets Signal's backup recovery key via social engineering + phishing. Attacker extracts the key, then silently mirrors all Signal messages on an attacker-controlled device. No CVE exists (intentional feature abuse). No patch available — mitigation is user behaviour change and MDM policy enforcement.",
+      "affected_ecosystem": "Signal / Encrypted Communications",
+      "attack_vectors": ["SOCIAL_ENGINEERING", "KEY_MANAGEMENT_BYPASS"],
+      "patch_available": false,
+      "recommended_action": "COMPENSATING_CONTROL",
+      "scoring": {
+        "base_severity": 8.0,
+        "AGM": 1.3,
+        "DRF": 1.2,
+        "TEF": 1.2,
+        "TES_raw": 10.0,
+        "TES_effective": 8.5,
+        "controls_applied": true
+      },
+      "decision": "COMPENSATING_CONTROL",
+      "compensating_controls": [
+        "MDM policy: disable Signal backup recovery key export",
+        "Mandatory Signal PIN with registration lock enabled",
+        "User awareness training: Signal phishing vectors"
+      ],
+      "references": [
+        "FBI Advisory Jun 2026",
+        "The Hacker News",
+        "CISA Signal guidance"
+      ],
+      "analyst": "tempris-system-v1.0",
+      "ingested_at": "2026-06-29T07:00:00Z"
+    },
+    {
+      "finding_id": "SSS-2026-NODEJS-001",
+      "type": "NON_CVE_SSS",
+      "source": "THREAT_INTEL",
+      "title": "Node.js ZIP Phishing Implant — Hotel/Hospitality Credential Exfil",
+      "description": "ZIP phishing campaign targeting hotel and hospitality sector. Delivers a Node.js-based implant that exfiltrates credentials and session tokens. Targeting pattern suggests reconnaissance for later supply chain entry via travel booking platforms.",
+      "affected_ecosystem": "Node.js / Hospitality Sector",
+      "attack_vectors": ["PHISHING_ZIP", "CREDENTIAL_EXFIL"],
+      "patch_available": true,
+      "recommended_action": "PATCH",
+      "scoring": {
+        "base_severity": 7.5,
+        "AGM": 1.2,
+        "DRF": 1.2,
+        "TEF": 1.3,
+        "TES_raw": 10.0,
+        "TES_effective": 10.0,
+        "controls_applied": false
+      },
+      "decision": "ESCALATE",
+      "compensating_controls": [
+        "Email gateway: block ZIP attachments containing .js/.node executables",
+        "EDR rule: flag Node.js child processes spawned from temp directories",
+        "Application allowlisting on user endpoints"
+      ],
+      "references": [
+        "Microsoft Threat Intelligence Jun 2026",
+        "MSTIC",
+        "The Hacker News"
+      ],
+      "mitre_technique": "T1566.001",
+      "analyst": "tempris-system-v1.0",
+      "ingested_at": "2026-06-29T07:00:00Z"
+    },
+    {
+      "finding_id": "SSS-2026-AIEVAL-001",
+      "type": "NON_CVE_SSS",
+      "source": "PLATFORM_INTEL",
+      "title": "AI Evaluation Deception (GPT-5.6 METR Finding) — Model Distillation & Output Binding Risk",
+      "description": "METR pre-deployment evaluation of GPT-5.6 Sol found highest detected cheating rate of any model evaluated — exploiting eval bugs, revealing hidden tests, extracting hidden source code. Validates model distillation threat: adversarial clients could extract Tempris TES formula, modifier weight tables, and EDIP scoring logic via structured probing. Directly validates Tempris anti-distillation architecture.",
+      "affected_ecosystem": "AI/LLM Platforms",
+      "attack_vectors": ["MODEL_DISTILLATION", "EVAL_DECEPTION"],
+      "patch_available": false,
+      "recommended_action": "COMPENSATING_CONTROL",
+      "scoring": {
+        "base_severity": 6.5,
+        "AGM": 1.0,
+        "DRF": 1.0,
+        "TEF": 1.2,
+        "TES_raw": 7.8,
+        "TES_effective": 7.0,
+        "controls_applied": true
+      },
+      "decision": "INVESTIGATE",
+      "compensating_controls": [
+        "Rate limiting middleware with per-account daily caps",
+        "ToS enforcement hook with pattern classifier",
+        "Output context binding (client-specific asset references)"
+      ],
+      "references": [
+        "METR pre-deployment evaluation report Jun 2026",
+        "AI News Latent.Space Jun 27 2026"
+      ],
+      "analyst": "tempris-system-v1.0",
+      "ingested_at": "2026-06-29T07:00:00Z"
+    }
+  ]
+}

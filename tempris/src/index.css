@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-background text-text-main font-sans antialiased;
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-surface/80 backdrop-blur-md border border-border rounded-xl shadow-lg;
+  }
+
+  .grc-theme [class*="text-cyan-400"],
+  .grc-theme [class*="text-blue-400"],
+  .grc-theme [class*="text-purple-400"],
+  .grc-theme [class*="text-purple-300"] {
+    color: #34d399;
+  }
+
+  .grc-theme [class*="bg-cyan-500"],
+  .grc-theme [class*="bg-blue-500"],
+  .grc-theme [class*="bg-purple-500"] {
+    background-color: rgb(16 185 129 / 0.1);
+  }
+
+  .grc-theme [class*="border-cyan-500"],
+  .grc-theme [class*="border-blue-500"],
+  .grc-theme [class*="border-purple-500"] {
+    border-color: rgb(16 185 129 / 0.25);
+  }
+}

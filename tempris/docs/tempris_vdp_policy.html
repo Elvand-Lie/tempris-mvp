@@ -1,0 +1,1053 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Vulnerability Disclosure Policy — Tempris Technology</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap');
+
+  :root {
+    --bg:       #0a0d12;
+    --surface:  #111620;
+    --surface2: #161c28;
+    --border:   #1e2a3a;
+    --accent:   #00c2ff;
+    --accent2:  #7b4fff;
+    --ok:       #00e5a0;
+    --warn:     #ff9f43;
+    --danger:   #ff4d6d;
+    --text:     #d4dde8;
+    --dim:      #7a8fa3;
+    --muted:    #3a4a5c;
+    --heading:  #eaf2ff;
+    --mono:     'IBM Plex Mono', monospace;
+    --sans:     'IBM Plex Sans', sans-serif;
+    --serif:    'IBM Plex Serif', serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.75;
+  }
+
+  /* ── TOP BAR ── */
+  .topbar {
+    position: sticky; top: 0; z-index: 200;
+    background: rgba(10,13,18,0.96);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 48px;
+    height: 56px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .topbar-logo {
+    font-family: var(--mono); font-size: 14px; font-weight: 600;
+    color: var(--accent); letter-spacing: 0.08em;
+  }
+  .topbar-logo span { color: var(--dim); font-weight: 400; }
+  .topbar-nav { display: flex; gap: 28px; }
+  .topbar-nav a {
+    font-family: var(--mono); font-size: 11px; color: var(--dim);
+    text-decoration: none; letter-spacing: 0.08em; text-transform: uppercase;
+    transition: color 0.2s;
+  }
+  .topbar-nav a:hover { color: var(--accent); }
+  .status-pill {
+    font-family: var(--mono); font-size: 10px;
+    background: rgba(0,229,160,0.1); border: 1px solid rgba(0,229,160,0.3);
+    color: var(--ok); padding: 4px 12px; border-radius: 2px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .status-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--ok);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 1; } 50% { opacity: 0.3; }
+  }
+
+  /* ── LAYOUT ── */
+  .page { max-width: 820px; margin: 0 auto; padding: 0 32px; }
+
+  /* ── HERO ── */
+  .hero {
+    padding: 72px 0 56px;
+    border-bottom: 1px solid var(--border);
+  }
+  .hero-eye {
+    font-family: var(--mono); font-size: 10px; color: var(--accent);
+    letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 16px;
+  }
+  .hero h1 {
+    font-family: var(--serif); font-size: clamp(30px, 4vw, 44px);
+    color: var(--heading); font-weight: 600; line-height: 1.15;
+    margin-bottom: 20px;
+  }
+  .hero h1 em { font-style: italic; color: var(--accent); }
+  .hero-sub {
+    font-size: 16px; color: var(--dim); max-width: 600px;
+    line-height: 1.7; margin-bottom: 32px;
+  }
+  .hero-meta {
+    display: flex; gap: 0; border: 1px solid var(--border); border-radius: 4px;
+    overflow: hidden; flex-wrap: wrap;
+  }
+  .meta-cell {
+    padding: 14px 20px; border-right: 1px solid var(--border); flex: 1;
+    min-width: 130px;
+  }
+  .meta-cell:last-child { border-right: none; }
+  .meta-label { font-family: var(--mono); font-size: 9px; color: var(--dim);
+    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 4px; }
+  .meta-val { font-family: var(--mono); font-size: 12px; color: var(--text); }
+
+  /* ── SECTION ── */
+  .section {
+    padding: 52px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .section:last-of-type { border-bottom: none; }
+
+  .sec-eye {
+    font-family: var(--mono); font-size: 10px; color: var(--accent);
+    letter-spacing: 0.15em; text-transform: uppercase; margin-bottom: 10px;
+  }
+  .section h2 {
+    font-family: var(--serif); font-size: 24px; color: var(--heading);
+    font-weight: 600; margin-bottom: 16px; line-height: 1.2;
+  }
+  .section h3 {
+    font-family: var(--sans); font-size: 15px; font-weight: 600;
+    color: var(--heading); margin: 28px 0 10px;
+  }
+  .section p { color: var(--text); margin-bottom: 14px; }
+  .section p:last-child { margin-bottom: 0; }
+
+  /* ── SAFE HARBOR BOX ── */
+  .safeharbor-box {
+    background: var(--surface);
+    border: 1px solid rgba(0,194,255,0.25);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 28px 32px;
+    margin: 24px 0;
+    position: relative;
+    overflow: hidden;
+  }
+  .safeharbor-box::before {
+    content: 'SAFE HARBOR';
+    position: absolute; top: 14px; right: 20px;
+    font-family: var(--mono); font-size: 9px; color: rgba(0,194,255,0.35);
+    letter-spacing: 0.15em;
+  }
+  .safeharbor-box h3 {
+    font-family: var(--mono); font-size: 12px; color: var(--accent);
+    margin: 0 0 14px; letter-spacing: 0.08em;
+  }
+  .safeharbor-box p { font-size: 14px; color: var(--text); margin-bottom: 12px; }
+  .safeharbor-box p:last-child { margin-bottom: 0; }
+
+  /* ── TENET GRID ── */
+  .tenet-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 12px; margin: 20px 0;
+  }
+  .tenet {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 4px; padding: 18px;
+  }
+  .tenet-icon { font-size: 18px; margin-bottom: 8px; }
+  .tenet h4 { font-size: 13px; font-weight: 600; color: var(--heading); margin-bottom: 6px; }
+  .tenet p { font-size: 12px; color: var(--dim); line-height: 1.6; }
+
+  /* ── SCOPE TABLE ── */
+  .scope-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+  .scope-table th {
+    font-family: var(--mono); font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--dim); text-align: left;
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .scope-table td {
+    padding: 12px 14px; border-bottom: 1px solid var(--border);
+    font-size: 13px; background: var(--surface); vertical-align: top;
+  }
+  .scope-table tr:hover td { background: var(--surface2); }
+  .scope-table code {
+    font-family: var(--mono); font-size: 12px; color: var(--accent);
+    background: rgba(0,194,255,0.08); padding: 2px 6px; border-radius: 2px;
+  }
+
+  /* ── INLINE PILL ── */
+  .pill {
+    display: inline-flex; align-items: center;
+    font-family: var(--mono); font-size: 10px;
+    padding: 2px 8px; border-radius: 2px; white-space: nowrap;
+  }
+  .pill-ok   { background: rgba(0,229,160,0.1); color: var(--ok);    border: 1px solid rgba(0,229,160,0.25); }
+  .pill-warn { background: rgba(255,159,67,0.1); color: var(--warn); border: 1px solid rgba(255,159,67,0.25); }
+  .pill-no   { background: rgba(255,77,109,0.1); color: var(--danger);border: 1px solid rgba(255,77,109,0.25); }
+  .pill-info { background: rgba(0,194,255,0.1);  color: var(--accent);border: 1px solid rgba(0,194,255,0.25); }
+
+  /* ── LIST STYLES ── */
+  .policy-list { padding-left: 0; list-style: none; margin: 14px 0; }
+  .policy-list li {
+    padding: 8px 0 8px 20px; border-bottom: 1px solid var(--border);
+    font-size: 14px; color: var(--text); position: relative;
+  }
+  .policy-list li:last-child { border-bottom: none; }
+  .policy-list li::before {
+    content: '→'; position: absolute; left: 0;
+    color: var(--accent); font-family: var(--mono);
+  }
+  .policy-list.no-list li::before { content: '✗'; color: var(--danger); }
+  .policy-list.ok-list  li::before { content: '✓'; color: var(--ok); }
+
+  /* ── REWARD TIERS ── */
+  .reward-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr)); gap: 12px; margin: 20px 0; }
+  .reward-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 4px; padding: 20px; text-align: center;
+    transition: border-color 0.2s;
+  }
+  .reward-card:hover { border-color: rgba(0,194,255,0.3); }
+  .reward-sev {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
+    text-transform: uppercase; margin-bottom: 10px;
+  }
+  .reward-main { font-size: 13px; font-weight: 600; color: var(--heading); margin-bottom: 6px; }
+  .reward-sub  { font-size: 12px; color: var(--dim); line-height: 1.5; }
+
+  /* ── DISCLOSURE TIMELINE ── */
+  .timeline { margin: 20px 0; }
+  .tl-row {
+    display: flex; gap: 16px; padding: 16px 0;
+    border-bottom: 1px solid var(--border); align-items: flex-start;
+  }
+  .tl-row:last-child { border-bottom: none; }
+  .tl-day {
+    font-family: var(--mono); font-size: 11px; color: var(--accent);
+    background: rgba(0,194,255,0.08); border: 1px solid rgba(0,194,255,0.2);
+    padding: 4px 10px; border-radius: 2px; white-space: nowrap; min-width: 80px;
+    text-align: center; margin-top: 2px;
+  }
+  .tl-body { font-size: 13px; color: var(--text); }
+  .tl-body strong { color: var(--heading); }
+
+  /* ── HOF ── */
+  .hof-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+  .hof-table th {
+    font-family: var(--mono); font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--dim); text-align: left;
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .hof-table td {
+    padding: 14px; border-bottom: 1px solid var(--border);
+    font-size: 13px; background: var(--surface);
+  }
+  .hof-placeholder {
+    font-family: var(--mono); font-size: 12px; color: var(--dim);
+    font-style: italic; text-align: center; padding: 28px;
+  }
+
+  /* ── CONTACT BOX ── */
+  .contact-box {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 4px; padding: 28px; margin: 20px 0;
+    display: flex; gap: 40px; flex-wrap: wrap;
+  }
+  .contact-item { flex: 1; min-width: 180px; }
+  .contact-label {
+    font-family: var(--mono); font-size: 10px; color: var(--dim);
+    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;
+  }
+  .contact-val {
+    font-family: var(--mono); font-size: 13px; color: var(--accent);
+  }
+  .contact-note { font-size: 12px; color: var(--dim); margin-top: 4px; }
+
+  /* ── SECURITY.TXT BLOCK ── */
+  .securitytxt {
+    background: #070a0f; border: 1px solid var(--border);
+    border-left: 3px solid var(--ok); border-radius: 4px;
+    padding: 20px 24px; font-family: var(--mono); font-size: 12px;
+    color: #8fccee; line-height: 2; overflow-x: auto; white-space: pre;
+    margin: 16px 0;
+  }
+  .st-comment { color: #3a5a72; }
+  .st-key { color: var(--accent); }
+  .st-val { color: var(--ok); }
+
+  /* ── LEGAL NOTE ── */
+  .legal-note {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 4px; padding: 18px 20px; font-size: 12px;
+    color: var(--dim); line-height: 1.7; margin: 16px 0;
+  }
+  .legal-note strong { color: var(--text); }
+
+  /* ── FOOTER ── */
+  .footer {
+    border-top: 1px solid var(--border); padding: 36px 48px;
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 16px;
+  }
+  .footer-logo { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+  .footer-logo span { color: var(--accent); }
+  .footer-links { display: flex; gap: 20px; }
+  .footer-links a {
+    font-family: var(--mono); font-size: 11px; color: var(--dim);
+    text-decoration: none; transition: color 0.2s;
+  }
+  .footer-links a:hover { color: var(--accent); }
+
+  @media (max-width: 640px) {
+    .topbar { padding: 0 20px; }
+    .topbar-nav { display: none; }
+    .page { padding: 0 20px; }
+    .footer { padding: 28px 20px; }
+    .hero { padding: 48px 0 40px; }
+  }
+
+  /* anchor targets */
+  [id] { scroll-margin-top: 72px; }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<header class="topbar">
+  <div class="topbar-logo">TEMPRIS<span>.TECH</span></div>
+  <nav class="topbar-nav">
+    <a href="#safe-harbor">Safe Harbor</a>
+    <a href="#scope">Scope</a>
+    <a href="#rules">Rules</a>
+    <a href="#rewards">Rewards</a>
+    <a href="#disclosure">Disclosure</a>
+    <a href="#submit">Submit</a>
+    <a href="#hof">Hall of Fame</a>
+  </nav>
+  <div class="status-pill">
+    <span class="status-dot"></span>
+    PROGRAM ACTIVE
+  </div>
+</header>
+
+<div class="page">
+
+<!-- HERO -->
+<section class="hero" id="top">
+  <div class="hero-eye">Security Research Programme</div>
+  <h1>Vulnerability Disclosure<br><em>Policy</em></h1>
+  <p class="hero-sub">
+    Tempris Technology welcomes good-faith security research. This policy defines
+    how to responsibly test our platform, how we handle reports, and what we offer
+    in return. It is designed to enable communication, not control it.
+  </p>
+  <div class="hero-meta">
+    <div class="meta-cell">
+      <div class="meta-label">Organisation</div>
+      <div class="meta-val">Tempris Technology Pte. Ltd.</div>
+    </div>
+    <div class="meta-cell">
+      <div class="meta-label">UEN</div>
+      <div class="meta-val">202613990D</div>
+    </div>
+    <div class="meta-cell">
+      <div class="meta-label">Programme Type</div>
+      <div class="meta-val">VDP + Invited Testing</div>
+    </div>
+    <div class="meta-cell">
+      <div class="meta-label">Policy Version</div>
+      <div class="meta-val">v1.0 — June 2026</div>
+    </div>
+    <div class="meta-cell">
+      <div class="meta-label">Safe Harbor</div>
+      <div class="meta-val" style="color:var(--ok)">Full (disclose.io)</div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════ -->
+<!-- 1. INTRODUCTION -->
+<!-- ══════════════════════════════════════════════ -->
+<section class="section" id="intro">
+  <div class="sec-eye">01 — Introduction</div>
+  <h2>Our commitment to you</h2>
+
+  <p>
+    Tempris Technology Pte. Ltd. ("Tempris", "we", "us") builds a Continuous Threat
+    Exposure Management (CTEM) platform used by regulated financial institutions in
+    Singapore. We hold ourselves to the same security standard we provide to our clients.
+  </p>
+  <p>
+    We believe responsible security research makes the internet safer. We actively
+    welcome researchers who find vulnerabilities in our systems and choose to report
+    them to us responsibly. If you have found something that looks like a security
+    issue, please tell us.
+  </p>
+  <p>
+    This policy is our commitment to you: if you follow these guidelines, we will
+    not pursue legal action, we will acknowledge your work, and we will fix what
+    you find.
+  </p>
+  <p>
+    This policy is published in the spirit of the
+    <a href="https://disclose.io" style="color:var(--accent)">disclose.io</a> framework
+    and meets the requirements for <strong>Full Safe Harbor with Coordinated Disclosure (Level 5)</strong>.
+  </p>
+</section>
+
+
+<!-- ══════════════════════════════════════════════ -->
+<!-- 2. SAFE HARBOR -->
+<!-- ══════════════════════════════════════════════ -->
+<section class="section" id="safe-harbor">
+  <div class="sec-eye">02 — Safe Harbor</div>
+  <h2>We will not come after you</h2>
+
+  <p>
+    The following Safe Harbor terms apply to all security research conducted under
+    this policy. These terms are based on the
+    <a href="https://github.com/disclose/dioterms" style="color:var(--accent)">disclose.io
+    core VDP terms</a> and satisfy all four mandatory Safe Harbor tenets.
+  </p>
+
+  <div class="tenet-grid">
+    <div class="tenet">
+      <div class="tenet-icon">🛡️</div>
+      <h4>Authorisation Against Anti-Hacking Laws</h4>
+      <p>We authorise your security research activities and will not initiate legal action under the Computer Misuse and Cybersecurity Act (CMCA) or equivalent laws for good-faith testing within this policy's scope.</p>
+    </div>
+    <div class="tenet">
+      <div class="tenet-icon">🔓</div>
+      <h4>Exemption from Anti-Circumvention Laws</h4>
+      <p>We will not pursue claims under anti-circumvention provisions (including the Copyright Act 2021) for research conducted in good faith in accordance with this policy.</p>
+    </div>
+    <div class="tenet">
+      <div class="tenet-icon">📋</div>
+      <h4>Exemption from TOS / AUP Violations</h4>
+      <p>We exempt you from restrictions in our Terms of Service that would otherwise prohibit security testing, provided your research is conducted within scope and in good faith.</p>
+    </div>
+    <div class="tenet">
+      <div class="tenet-icon">🤝</div>
+      <h4>Good-Faith Acknowledgement</h4>
+      <p>We recognise that good-faith security research is a valuable contribution. We will treat your report fairly, acknowledge it promptly, and work with you collaboratively.</p>
+    </div>
+  </div>
+
+  <div class="safeharbor-box">
+    <h3>FORMAL SAFE HARBOR STATEMENT</h3>
+    <p>
+      We consider security research conducted under this policy to be authorised
+      activity and will not initiate or recommend legal action against you for
+      activities that comply with these terms.
+    </p>
+    <p>
+      If legal action is initiated by a third party against you in connection with
+      activities conducted under this policy, we will take steps to make it known
+      that your activities were conducted in compliance with this policy.
+    </p>
+    <p>
+      Tempris cannot bind the actions of third parties. If you are subject to legal
+      action, contact us immediately at
+      <a href="mailto:lohsherie@yahoo.com.sg" style="color:var(--accent)">lohsherie@yahoo.com.sg</a>
+      and we will provide a written statement confirming your compliance with
+      this policy.
+    </p>
+    <p>
+      This safe harbor applies only to activities conducted within the scope
+      defined in Section 04 and in accordance with the Rules of Engagement
+      defined in Section 05. Out-of-scope testing or testing that causes harm
+      to third parties is not covered.
+    </p>
+  </div>
+
+  <div class="legal-note">
+    <strong>Singapore Law Context.</strong> This policy operates within the framework
+    of Singapore law, including the Computer Misuse and Cybersecurity Act (CMCA),
+    the Personal Data Protection Act (PDPA), and the MAS Technology Risk Management
+    Guidelines (TRM). Researchers are expected to comply with all applicable laws.
+    This policy does not constitute legal advice. If you are uncertain whether a
+    specific activity is permitted, ask us before proceeding at
+    <a href="mailto:lohsherie@yahoo.com.sg" style="color:var(--accent)">lohsherie@yahoo.com.sg</a>.
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════ -->
+<!-- 3. PROGRAMME STRUCTURE -->
+<!-- ══════════════════════════════════════════════ -->
+<section class="section" id="structure">
+  <div class="sec-eye">03 — Programme Structure</div>
+  <h2>Two tiers, one policy</h2>
+
+  <p>
+    Our programme operates at two levels. Both tiers are covered by the same Safe
+    Harbor terms and rules of engagement.
+  </p>
+
+  <h3><span class="pill pill-ok" style="margin-right:8px">TIER 1</span> Public VDP — Always Open</h3>
+  <p>
+    Anyone may report a vulnerability to us at any time through
+      <a href="mailto:lohsherie@yahoo.com.sg" style="color:var(--accent)">lohsherie@yahoo.com.sg</a>
+    or via our submission form. No invitation required. No screening. This is our
+    always-on disclosure channel — it exists so no legitimate finder ever hits a dead end.
+  </p>
+  <p>
+    Tier 1 covers the entire Tempris attack surface. If you discover a
+    vulnerability in any Tempris-operated system, we want to hear about it.
+  </p>
+
+  <h3><span class="pill pill-info" style="margin-right:8px">TIER 2</span> Invited Testing Programme — sandbox.tempris.tech</h3>
+  <p>
+    A limited number of invited researchers are authorised to conduct active,
+    hands-on testing against <code style="font-family:var(--mono);color:var(--accent)">sandbox.tempris.tech</code>
+    — our dedicated testing environment. Invited researchers receive expanded scope,
+    direct communication with the Tempris security team, and eligibility for Hall of
+    Fame recognition and Letters of Recommendation.
+  </p>
+  <p>
+    To request an invitation, email
+    <a href="mailto:lohsherie@yahoo.com.sg" style="color:var(--accent)">lohsherie@yahoo.com.sg</a>
+    with a brief summary of your background, any prior responsible disclosures or
+    CVEs, and what you would like to test. We review all requests.
+  </p>
+</section>
+
+
+<!-- ══════════════════════════════════════════════ -->
+<!-- 4. SCOPE -->
+<!-- ══════════════════════════════════════════════ -->
+<section class="section" id="scope">
+  <div class="sec-eye">04 — Scope</div>
+  <h2>What you may test</h2>
+
+  <p>
+    The following assets are explicitly in scope. We encourage broad, inclusive
+    testing — the full attack surface is the right scope for a true VDP.
+  </p>
+
+  <table class="scope-table">
+    <thead>
+      <tr>
+        <th>Asset</th>
+        <th>Type</th>
+        <th>Tier</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>sandbox.tempris.tech</code></td>
+        <td>Web Application</td>
+        <td><span class="pill pill-info">Tier 2 (Invited)</span></td>
+        <td style="font-size:12px;color:var(--dim)">Primary testing target. All features in scope.</td>
+      </tr>
+      <tr>
+        <td><code>tempris.tech</code></td>
+        <td>Marketing / Public Web</td>
+        <td><span class="pill pill-ok">Tier 1 (Public)</span></td>
+        <td style="font-size:12px;color:var(--dim)">Report only — no active testing without invitation.</td>
+      </tr>
+      <tr>
+        <td><code>api.tempris.tech</code></td>
+        <td>REST API</td>
+        <td><span class="pill pill-info">Tier 2 (Invited)</span></td>
+        <td style="font-size:12px;color:var(--dim)">Authentication, authorisation, injection, business logic.</td>
+      </tr>
+      <tr>
+        <td>Tempris Mobile Apps (if published)</td>
+        <td>iOS / Android</td>
+        <td><span class="pill pill-ok">Tier 1 (Public)</span></td>
+        <td style="font-size:12px;color:var(--dim)">Report findings via lohsherie@yahoo.com.sg.</td>
+      </tr>
+      <tr>
+        <td>Tempris Open Source Code</td>
+        <td>Source Code</td>
+        <td><span class="pill pill-ok">Tier 1 (Public)</span></td>
+        <td style="font-size:12px;color:var(--dim)">Any publicly available Tempris repositories.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Out of Scope</h3>
+  <p>
+    The following systems and activities are out of scope. Testing them may cause
+    harm to others and is not authorised under this policy.
+  </p>
+
+  <ul class="policy-list no-list">
+    <li>Production client environments and any system not operated by Tempris</li>
+    <li>Third-party services and infrastructure (cloud providers, payment processors, DNS registrars)</li>
+    <li>Social engineering attacks against Tempris employees, contractors, or clients</li>
+    <li>Physical security testing (offices, data centres, hardware)</li>
+    <li>Denial of Service (DoS / DDoS) against any Tempris system</li>
+    <li>Automated scanning tools that generate excessive traffic volumes</li>
+    <li>Accessing, exfiltrating, or retaining real user data beyond what is necessary to demonstrate the vulnerability</li>
+    <li>Testing against systems of clients or partners without their explicit written permission</li>
+    <li>Email phishing, vishing, or smishing directed at Tempris personnel</li>
+  </ul>
+
+  <div class="legal-note">
+    <strong>Scope ambiguity.</strong> If you are unsure whether a particular system
+    or activity falls within scope, ask us first. We would rather clarify in advance
+    than have you stop a valuable finding or, worse, take an action that neither of
+    us intended. Email us at
+    <a href="mailto:lohsherie@yahoo.com.sg" style="color:var(--accent)">lohsherie@yahoo.com.sg</a>
+    before proceeding.
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════ -->
+<!-- 5. RULES OF ENGAGEMENT -->
+<!-- ══════════════════════════════════════════════ -->
+<section class="section" id="rules">
+  <div class="sec-eye">05 — Rules of Engagement</div>
+  <h2>How to conduct good-faith research</h2>
+
+  <p>
+    These rules protect you legally, protect our clients, and ensure we can fix
+    what you find. They are not designed to limit discovery — they are designed
+    to keep everyone safe while you do it.
+  </p>
+
+  <h3>You must</h3>
+  <ul class="policy-list ok-list">
+    <li>Report the vulnerability to us before disclosing it to anyone else</li>
+    <li>Provide sufficient detail to reproduce the vulnerability (steps, payloads, screenshots or screen recordings where applicable)</li>
+    <li>Stop testing immediately if you encounter what appears to be real production data or client data — report what you found without further access</li>
+    <li>Keep all vulnerability details confidential until we have confirmed a fix or until the coordinated disclosure period has expired, whichever is sooner (see Section 08)</li>
+    <li>Use test accounts or data you have created yourself wherever possible</li>
+    <li>Act in good faith — your goal is to improve security, not to cause harm or extract value</li>
+  </ul>
+
+  <h3>You must not</h3>
+  <ul class="policy-list no-list">
+    <li>Exploit a vulnerability beyond the minimum necessary to demonstrate its existence</li>
+    <li>Access, copy, modify, delete, or retain data beyond what is needed to prove the issue</li>
+    <li>Disrupt or degrade the availability of any Tempris system or service</li>
+    <li>Perform Denial of Service testing of any kind</li>
+    <li>Use automated scanners without prior written approval from Tempris</li>
+    <li>Test in a way that targets, involves, or harms third parties</li>
+    <li>Share details of any found vulnerability with another party before coordinated disclosure is agreed</li>
+    <li>Use the access gained through vulnerability research for any purpose other than reporting to Tempris</li>
+    <li>Conduct physical testing, social engineering, or attempt to obtain credentials through non-technical means</li>
+  </ul>
+
+  <div class="legal-note">
+    <strong>If in doubt, stop and ask.</strong> Contacting us at
+    <a href="mailto:lohsherie@yahoo.com.sg" style="color:var(--accent)">lohsherie@yahoo.com.sg</a>
+    before taking an uncertain action is always the right move and will never be
+    held against you. A researcher who asks first is a researcher we trust.
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════ -->
+<!-- 6. HOW TO REPORT -->
+<!-- ══════════════════════════════════════════════ -->
+<section class="section" id="submit">
+  <div class="sec-eye">06 — Reporting</div>
+  <h2>How to submit a finding</h2>
+
+  <p>
+    All vulnerability reports should be submitted via our official channels below.
+    We triage every submission and respond with an acknowledgement within
+    <strong>5 business days</strong>.
+  </p>
+
+  <div class="contact-box">
+    <div class="contact-item">
+      <div class="contact-label">Primary Channel</div>
+      <div class="contact-val">lohsherie@yahoo.com.sg</div>
+      <div class="contact-note">Encrypted with PGP key below. Preferred for Critical / High findings.</div>
+    </div>
+    <div class="contact-item">
+      <div class="contact-label">PGP Key</div>
+      <div class="contact-val">tempris.tech/pgp-key.txt</div>
+      <div class="contact-note">Always encrypt Critical findings before sending.</div>
+    </div>
+    <div class="contact-item">
+      <div class="contact-label">Response SLA</div>
+      <div class="contact-val">5 business days</div>
+      <div class="contact-note">Acknowledgement. Triage within 10 days.</div>
+    </div>
+    <div class="contact-item">
+      <div class="contact-label">Language</div>
+      <div class="contact-val">English</div>
+      <div class="contact-note">Reports in other languages welcomed; English preferred for clarity.</div>
+    </div>
+  </div>
+
+  <h3>What to include in your report</h3>
+  <ul class="policy-list">
+    <li><strong>Vulnerability type</strong> — e.g. SQLi, XSS, IDOR, SSRF, auth bypass, logic flaw</li>
+    <li><strong>Affected asset</strong> — URL, endpoint, API route, or component</li>
+    <li><strong>Steps to reproduce</strong> — numbered, with enough detail for our team to reproduce independently</li>
+    <li><strong>Proof of concept</strong> — screenshots, screen recording, or code snippet demonstrating the issue</li>
+    <li><strong>Impact assessment</strong> — what could an attacker do with this? What data or systems are at risk?</li>
+    <li><strong>Suggested remediation</strong> — optional but appreciated, especially for complex findings</li>
+    <li><strong>Your contact details</strong> — so we can reach you for follow-up and recognition</li>
+  </ul>
+
+  <p>
+    You do not need to calculate a CVSS score. We will score the finding internally
+    and share our assessment with you. If you disagree with our severity rating,
+    we welcome a discussion — we may be missing context you have.
+  </p>
+</section>
+
+
+<!-- ══════════════════════════════════════════════ -->
+<!-- 7. SEVERITY & REWARDS -->
+<!-- ══════════════════════════════════════════════ -->
+<section class="section" id="rewards">
+  <div class="sec-eye">07 — Severity &amp; Rewards</div>
+  <h2>What we offer in return</h2>
+
+  <p>
+    Tempris does not currently offer cash rewards. Instead, we offer meaningful
+    professional recognition that signals your skill to employers, clients, and the
+    security community. For talented researchers building a portfolio, these are
+    often more valuable than a one-time payment.
+  </p>
+
+  <div class="reward-grid">
+    <div class="reward-card" style="border-color:rgba(255,77,109,0.3)">
+      <div class="reward-sev" style="color:var(--danger)">CRITICAL</div>
+      <div class="reward-main">Hall of Fame + Letter of Recommendation</div>
+      <div class="reward-sub">Named public listing + formal signed LoR on Tempris letterhead detailing the finding and your skill.</div>
+    </div>
+    <div class="reward-card" style="border-color:rgba(255,159,67,0.3)">
+      <div class="reward-sev" style="color:var(--warn)">HIGH</div>
+      <div class="reward-main">Hall of Fame + Certificate</div>
+      <div class="reward-sub">Named public listing + Certificate of Responsible Disclosure with finding summary.</div>
+    </div>
+    <div class="reward-card" style="border-color:rgba(0,194,255,0.25)">
+      <div class="reward-sev" style="color:var(--accent)">MEDIUM</div>
+      <div class="reward-main">Hall of Fame Listing</div>
+      <div class="reward-sub">Named public listing on this page. Written acknowledgement from Tempris.</div>
+    </div>
+    <div class="reward-card">
+      <div class="reward-sev" style="color:var(--dim)">LOW / INFO</div>
+      <div class="reward-main">Written Acknowledgement</div>
+      <div class="reward-sub">Personal thank-you from the Tempris security team. Listed in our programme acknowledgements.</div>
+    </div>
+  </div>
+
+  <h3>Severity definitions</h3>
+  <table class="scope-table">
+    <thead>
+      <tr><th>Severity</th><th>CVSS Range</th><th>Example findings</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="pill pill-no">CRITICAL</span></td>
+        <td style="font-family:var(--mono);font-size:12px;">9.0 – 10.0</td>
+        <td style="font-size:13px;color:var(--dim)">RCE, authentication bypass granting admin access, mass data exfiltration, account takeover at scale</td>
+      </tr>
+      <tr>
+        <td><span class="pill pill-warn">HIGH</span></td>
+        <td style="font-family:var(--mono);font-size:12px;">7.0 – 8.9</td>
+        <td style="font-size:13px;color:var(--dim)">SQLi, stored XSS, SSRF with internal access, IDOR to sensitive data, privilege escalation</td>
+      </tr>
+      <tr>
+        <td><span class="pill pill-info">MEDIUM</span></td>
+        <td style="font-family:var(--mono);font-size:12px;">4.0 – 6.9</td>
+        <td style="font-size:13px;color:var(--dim)">Reflected XSS, CSRF on sensitive actions, insecure direct object reference (limited impact), information disclosure</td>
+      </tr>
+      <tr>
+        <td><span class="pill" style="background:rgba(122,143,163,0.1);color:var(--dim);border:1px solid rgba(122,143,163,0.2)">LOW</span></td>
+        <td style="font-family:var(--mono);font-size:12px;">0.1 – 3.9</td>
+        <td style="font-size:13px;color:var(--dim)">Missing security headers, verbose error messages, low-risk misconfigurations, best-practice deviations</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Out-of-scope finding types</h3>
+  <p>The following finding types are generally not eligible for recognition unless paired with a demonstrated, realistic attack path:</p>
+  <ul class="policy-list no-list">
+    <li>Missing rate limiting (without demonstrated account enumeration or brute-force feasibility)</li>
+    <li>Self-XSS (requires victim to execute code in their own browser)</li>
+    <li>Clickjacking without demonstrated sensitive action</li>
+    <li>Password or account policy (complexity requirements, lockout thresholds)</li>
+    <li>Unconfirmed reports from automated scanners without manual validation</li>
+    <li>Theoretical vulnerabilities without evidence of exploitability</li>
+    <li>Version disclosure of libraries or frameworks without demonstrated vulnerability</li>
+    <li>SPF, DMARC, DKIM issues without demonstrated email spoofing impact</li>
+  </ul>
+</section>
+
+
+<!-- ══════════════════════════════════════════════ -->
+<!-- 8. DISCLOSURE POLICY -->
+<!-- ══════════════════════════════════════════════ -->
+<section class="section" id="disclosure">
+  <div class="sec-eye">08 — Coordinated Disclosure</div>
+  <h2>How we handle your report over time</h2>
+
+  <p>
+    We follow a Coordinated Disclosure model. We will work with you to confirm,
+    remediate, and publicly disclose findings on an agreed timeline. We will never
+    ask you to suppress a valid finding indefinitely.
+  </p>
+
+  <div class="timeline">
+    <div class="tl-row">
+      <div class="tl-day">Day 0</div>
+      <div class="tl-body"><strong>Submission received.</strong> Automated acknowledgement sent immediately. Human acknowledgement within 5 business days.</div>
+    </div>
+    <div class="tl-row">
+      <div class="tl-day">Day 1–10</div>
+      <div class="tl-body"><strong>Triage.</strong> We confirm reproducibility, assign internal severity, and contact you if we need additional information. We share our severity rating with you and invite your input.</div>
+    </div>
+    <div class="tl-row">
+      <div class="tl-day">Day 10–30</div>
+      <div class="tl-body"><strong>Remediation.</strong> Critical and High findings are prioritised for immediate patching. We provide status updates at least every 14 days during active remediation.</div>
+    </div>
+    <div class="tl-row">
+      <div class="tl-day">Day 30–90</div>
+      <div class="tl-body"><strong>Complex findings.</strong> For findings requiring significant architectural changes, we will agree a remediation timeline with you. We commit to a maximum of 90 days from submission to fix or public disclosure, whichever is sooner.</div>
+    </div>
+    <div class="tl-row">
+      <div class="tl-day">Day 90</div>
+      <div class="tl-body"><strong>Disclosure deadline.</strong> If a fix has not been applied within 90 days of submission, you are free to disclose the finding publicly, regardless of our fix status. We will notify you of this proactively if we anticipate it. We will never use legal threats to prevent disclosure of a legitimate finding after this period.</div>
+    </div>
+    <div class="tl-row">
+      <div class="tl-day">Post-fix</div>
+      <div class="tl-body"><strong>Coordinated public disclosure.</strong> Once a fix is deployed, we will coordinate with you on public disclosure timing, credit language, and Hall of Fame listing. Default: 7-day notice period before public disclosure.</div>
+    </div>
+  </div>
+
+  <div class="legal-note">
+    <strong>We will always give you credit.</strong> We will never publish details of
+    your finding publicly without your knowledge and without naming you (unless you
+    explicitly request anonymity). Your report belongs to you; we are grateful you
+    shared it with us.
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════ -->
+<!-- 9. REGULATORY CONTEXT -->
+<!-- ══════════════════════════════════════════════ -->
+<section class="section" id="regulatory">
+  <div class="sec-eye">09 — Regulatory Context</div>
+  <h2>Singapore law and our client obligations</h2>
+
+  <p>
+    Because Tempris serves regulated financial institutions, the following context
+    is important for researchers to understand before testing.
+  </p>
+
+  <h3>Personal Data Protection Act (PDPA)</h3>
+  <p>
+    Singapore's PDPA applies to any personal data you may encounter during testing.
+    If you encounter what appears to be personal data belonging to Tempris clients
+    or their end users, <strong>stop immediately</strong>, do not access further,
+    and report what you observed via
+    <a href="mailto:lohsherie@yahoo.com.sg" style="color:var(--accent)">lohsherie@yahoo.com.sg</a>.
+    Do not copy, retain, or transmit personal data under any circumstances.
+    Doing so may constitute a PDPA breach independent of this policy's safe harbor.
+  </p>
+
+  <h3>MAS Technology Risk Management (TRM) Guidelines</h3>
+  <p>
+    Tempris's platform is designed for use by MAS-regulated financial institutions.
+    Our sandbox environment contains only synthetic test data and has no connection
+    to any client production environment or real financial data. Testing in the
+    sandbox poses no risk to client data.
+  </p>
+
+  <h3>Computer Misuse and Cybersecurity Act (CMCA)</h3>
+  <p>
+    The CMCA criminalises unauthorised access to computer systems in Singapore.
+    This policy constitutes explicit authorisation for testing within scope. Testing
+    outside scope is not authorised and may constitute a CMCA offence. If you are
+    uncertain whether a particular action is within scope, ask us first.
+  </p>
+
+  <h3>ISO/IEC 42001:2023 — AI Governance</h3>
+  <p>
+    Tempris's platform incorporates AI decision-making components. Reports relating
+    to AI governance risks — including model manipulation, prompt injection, or
+    AI-driven access control bypass — are in scope and treated as high-priority
+    findings.
+  </p>
+</section>
+
+
+<!-- ══════════════════════════════════════════════ -->
+<!-- 10. HALL OF FAME -->
+<!-- ══════════════════════════════════════════════ -->
+<section class="section" id="hof">
+  <div class="sec-eye">10 — Hall of Fame</div>
+  <h2>Researchers who made Tempris more secure</h2>
+
+  <p>
+    The following researchers have submitted valid security findings to Tempris
+    under this programme. We are grateful for their contribution.
+  </p>
+
+  <table class="hof-table">
+    <thead>
+      <tr>
+        <th>Researcher</th>
+        <th>Finding Type</th>
+        <th>Severity</th>
+        <th>Date</th>
+        <th>Recognition</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td colspan="5" class="hof-placeholder">
+          Programme launched June 2026. First finding listed here.
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p style="margin-top:20px;font-size:13px;color:var(--dim)">
+    Researchers may request anonymity. Listings include researcher handle or name
+    as they prefer, finding category (not technical details), and date of submission.
+    Full technical writeups may be published by the researcher post-disclosure with
+    our written consent.
+  </p>
+</section>
+
+
+<!-- ══════════════════════════════════════════════ -->
+<!-- 11. SECURITY.TXT -->
+<!-- ══════════════════════════════════════════════ -->
+<section class="section" id="securitytxt">
+  <div class="sec-eye">11 — security.txt</div>
+  <h2>Machine-readable programme metadata</h2>
+
+  <p>
+    The following <code style="font-family:var(--mono);color:var(--accent)">security.txt</code>
+    file is deployed at
+    <a href="https://tempris.tech/.well-known/security.txt" style="color:var(--accent)">
+      tempris.tech/.well-known/security.txt
+    </a>
+    in compliance with <a href="https://www.rfc-editor.org/rfc/rfc9116" style="color:var(--accent)">RFC 9116</a>.
+    This file enables automated indexing by FireBounty, disclose.io, and other
+    vulnerability disclosure directories.
+  </p>
+
+  <div class="securitytxt"><span class="st-comment"># Tempris Technology Pte. Ltd. — security.txt
+# RFC 9116 compliant | disclose.io Level 5 — Full Safe Harbor with CVD
+# Generated: June 2026 | Review annually</span>
+
+<span class="st-key">Contact:</span>         <span class="st-val">mailto:lohsherie@yahoo.com.sg</span>
+<span class="st-key">Contact:</span>         <span class="st-val">https://tempris.tech/security</span>
+<span class="st-key">Encryption:</span>      <span class="st-val">https://tempris.tech/.well-known/pgp-key.txt</span>
+<span class="st-key">Acknowledgments:</span> <span class="st-val">https://tempris.tech/security#hof</span>
+<span class="st-key">Policy:</span>          <span class="st-val">https://tempris.tech/security</span>
+<span class="st-key">Canonical:</span>       <span class="st-val">https://tempris.tech/.well-known/security.txt</span>
+<span class="st-key">Expires:</span>         <span class="st-val">2027-06-30T00:00:00Z</span>
+<span class="st-key">Preferred-Languages:</span> <span class="st-val">en</span>
+
+<span class="st-comment"># Hiring: If you found something, we'd love to talk.
+# security-careers@tempris.tech</span></div>
+
+  <div class="legal-note">
+    <strong>Deployment instruction.</strong> Save the above content to
+    <code style="font-family:var(--mono);font-size:12px;color:var(--accent)">
+      /var/www/tempris.tech/.well-known/security.txt
+    </code>
+    on your nginx server. Ensure the
+    <code style="font-family:var(--mono);font-size:12px;color:var(--accent)">.well-known/</code>
+    path is accessible without authentication. Update the
+    <code style="font-family:var(--mono);font-size:12px;color:var(--accent)">Expires</code>
+    field annually. FireBounty will index Tempris automatically once this file is live.
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════ -->
+<!-- 12. PROGRAMME SUBMISSIONS & LISTING -->
+<!-- ══════════════════════════════════════════════ -->
+<section class="section" id="listing">
+  <div class="sec-eye">12 — Directory Listings</div>
+  <h2>Where this programme is listed</h2>
+
+  <ul class="policy-list">
+    <li>
+      <strong>disclose.io Programme Database (diodb)</strong> — submit a pull request to
+      <a href="https://github.com/disclose/diodb" style="color:var(--accent)">github.com/disclose/diodb</a>
+      once this policy page is published. Target: Level 5 (Full Safe Harbor with CVD).
+    </li>
+    <li>
+      <strong>FireBounty</strong> — auto-indexed via
+      <code style="font-family:var(--mono);color:var(--accent)">security.txt</code>
+      at <code style="font-family:var(--mono);color:var(--accent)">tempris.tech/.well-known/security.txt</code>.
+      No manual submission required once the file is deployed.
+    </li>
+    <li>
+      <strong>CTFtime / Reddit r/netsec</strong> — programme announcement post once
+      Tier 2 invitations open.
+    </li>
+  </ul>
+
+  <div class="legal-note" style="border-color:rgba(0,229,160,0.2);border-left-color:var(--ok)">
+    <strong>Next step.</strong> After publishing this page and deploying security.txt,
+    run the
+    <a href="https://policymaker.disclose.io" style="color:var(--accent)">disclose.io Policymaker</a>
+    tool to generate your official policy artefacts and submit to diodb. This gets
+    Tempris the Level 5 seal, which is a meaningful trust signal to researchers.
+  </div>
+</section>
+
+
+<!-- ══════════════════════════════════════════════ -->
+<!-- 13. POLICY GOVERNANCE -->
+<!-- ══════════════════════════════════════════════ -->
+<section class="section" id="governance">
+  <div class="sec-eye">13 — Policy Governance</div>
+  <h2>How this policy is maintained</h2>
+
+  <ul class="policy-list">
+    <li>This policy is reviewed and updated at least annually, or following a material change to our product, infrastructure, or regulatory environment.</li>
+    <li>Changes to scope, safe harbor terms, or reward tiers will be announced with at least 14 days notice before taking effect.</li>
+    <li>Researchers who have open submissions at the time of a policy change are governed by the terms in effect at the time of submission.</li>
+    <li>Policy disputes should be directed to <a href="mailto:lohsherie@yahoo.com.sg" style="color:var(--accent)">lohsherie@yahoo.com.sg</a> with the subject line "Policy Dispute".</li>
+    <li>We will never retroactively apply more restrictive terms to a finding already in triage.</li>
+  </ul>
+
+  <div class="legal-note">
+    <strong>Governing law.</strong> This policy is governed by the laws of Singapore.
+    Any disputes arising from or in connection with this policy are subject to the
+    non-exclusive jurisdiction of the Singapore courts. This policy does not waive
+    any rights or remedies Tempris has under applicable law in the event of
+    malicious or bad-faith activity.
+  </div>
+</section>
+
+</div><!-- /page -->
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="footer-logo">TEMPRIS<span>.TECH</span> — Vulnerability Disclosure Policy v1.0</div>
+  <div class="footer-links">
+    <a href="#top">Back to top</a>
+    <a href="mailto:lohsherie@yahoo.com.sg">lohsherie@yahoo.com.sg</a>
+    <a href="https://disclose.io" target="_blank" rel="noopener">disclose.io</a>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TEMPRIS — Elvand Developer Brief · v51 · New Threat Intake Pack</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Inter:wght@300;400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#03060A;--panel:#080F1A;--panel2:#0B1622;--panel3:#0F1E30;
+  --border:#0F2035;--border2:#1A3050;--border3:#243D5C;
+  --cyan:#00C8F0;--gold:#F59E0B;--purple:#8B5CF6;
+  --orange:#FF7A30;--red:#E8203A;--green:#20E87A;--teal:#0EA5A0;
+  --pink:#F472B6;--lime:#84CC16;
+  --text:#D4E8F2;--text2:#8DBBD4;--muted:#4A7A9B;
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;font-size:13px;line-height:1.7;overflow-x:hidden}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:var(--border2)}
+nav{position:sticky;top:0;z-index:100;background:rgba(3,6,10,.97);backdrop-filter:blur(10px);border-bottom:1px solid var(--border2)}
+.nav-inner{max-width:1200px;margin:0 auto;padding:0 20px;display:flex;align-items:center;height:48px;gap:0}
+.nav-logo{font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:#fff;letter-spacing:2px;margin-right:20px;white-space:nowrap}
+.nav-logo span{color:var(--cyan)}
+.nav-links{display:flex;gap:0;flex:1;overflow-x:auto}
+.nav-links::-webkit-scrollbar{display:none}
+.nl{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:.5px;color:var(--muted);padding:0 12px;height:48px;display:flex;align-items:center;text-decoration:none;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap}
+.nl:hover{color:var(--cyan);border-bottom-color:var(--cyan)}
+.nav-badge{margin-left:auto;font-family:'Space Mono',monospace;font-size:8px;background:rgba(232,32,58,.12);border:1px solid rgba(232,32,58,.3);color:var(--red);padding:4px 10px;white-space:nowrap;letter-spacing:.5px}
+.amb{position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:radial-gradient(ellipse 60% 40% at 50% -5%,rgba(0,200,240,.05) 0%,transparent 70%),
+             radial-gradient(ellipse 30% 30% at 95% 80%,rgba(232,32,58,.04) 0%,transparent 60%)}
+.page{position:relative;z-index:1}
+.section{padding:52px 20px;border-bottom:1px solid var(--border);max-width:1200px;margin:0 auto}
+.eyebrow{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:4px;color:var(--muted);text-transform:uppercase;margin-bottom:8px}
+.h1{font-family:'Syne',sans-serif;font-size:clamp(22px,3.5vw,34px);font-weight:800;color:#fff;line-height:1.15;margin-bottom:12px}
+.h1 .acc{color:var(--cyan)}
+.h2{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#fff;margin-bottom:14px}
+.h2 .acc{color:var(--cyan)}
+.lead{font-size:13px;color:var(--text2);line-height:1.8;max-width:820px;margin-bottom:20px}
+.threat-card{background:var(--panel);border:1px solid var(--border2);padding:28px;margin-bottom:24px;position:relative}
+.threat-card::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%}
+.tc-red::before{background:var(--red)}
+.tc-orange::before{background:var(--orange)}
+.tc-purple::before{background:var(--purple)}
+.tc-teal::before{background:var(--teal)}
+.threat-tag{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:2px;text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.threat-title{font-family:'Syne',sans-serif;font-size:16px;font-weight:800;color:#fff;margin-bottom:12px}
+.tes-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;margin:14px 0}
+.tes-cell{background:rgba(0,0,0,.25);border:1px solid var(--border2);padding:10px;text-align:center}
+.tes-val{font-family:'Syne',sans-serif;font-size:18px;font-weight:800}
+.tes-lbl{font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);margin-top:3px}
+.task-block{background:var(--panel2);border:1px solid var(--border2);margin-top:16px}
+.task-header{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;padding:10px 14px;border-bottom:1px solid var(--border2);display:flex;align-items:center;gap:8px}
+.task-body{padding:14px}
+.task-item{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12px;color:var(--text2);line-height:1.6}
+.task-item:last-child{border-bottom:none}
+.task-num{font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);min-width:22px;padding-top:2px}
+.task-text{flex:1}
+.task-text strong{color:var(--text)}
+.code-block{background:#000;border:1px solid var(--border2);padding:14px;margin:10px 0;font-family:'Space Mono',monospace;font-size:10px;line-height:1.8;color:#A8D8EA;overflow-x:auto}
+.code-block .cm{color:#4A7A9B}
+.code-block .kw{color:var(--cyan)}
+.code-block .st{color:var(--green)}
+.code-block .num{color:var(--gold)}
+.pill{display:inline-block;font-family:'Space Mono',monospace;font-size:8px;padding:3px 8px;border-radius:2px;margin:2px 3px 2px 0}
+.pill-red{background:rgba(232,32,58,.12);border:1px solid rgba(232,32,58,.25);color:var(--red)}
+.pill-orange{background:rgba(255,122,48,.12);border:1px solid rgba(255,122,48,.25);color:var(--orange)}
+.pill-purple{background:rgba(139,92,246,.12);border:1px solid rgba(139,92,246,.25);color:var(--purple)}
+.pill-teal{background:rgba(14,165,160,.12);border:1px solid rgba(14,165,160,.25);color:var(--teal)}
+.pill-cyan{background:rgba(0,200,240,.1);border:1px solid rgba(0,200,240,.25);color:var(--cyan)}
+.pill-green{background:rgba(32,232,122,.1);border:1px solid rgba(32,232,122,.25);color:var(--green)}
+.pill-gold{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);color:var(--gold)}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.label-row{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.info-box{background:rgba(0,0,0,.2);border:1px solid var(--border2);padding:12px;font-size:11px;color:var(--text2);line-height:1.7}
+.priority-badge{font-family:'Space Mono',monospace;font-size:8px;padding:3px 10px;border-radius:2px;font-weight:700;letter-spacing:1px}
+.p1{background:rgba(232,32,58,.15);border:1px solid rgba(232,32,58,.3);color:var(--red)}
+.p2{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.25);color:var(--gold)}
+.p3{background:rgba(0,200,240,.1);border:1px solid rgba(0,200,240,.2);color:var(--cyan)}
+.sum-table{width:100%;border-collapse:collapse;font-size:11px;margin-top:14px}
+.sum-table th{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);padding:8px 10px;text-align:left;border-bottom:1px solid var(--border2)}
+.sum-table td{padding:9px 10px;border-bottom:1px solid rgba(255,255,255,.04);color:var(--text2);vertical-align:top}
+.sum-table td:first-child{color:var(--text);font-weight:500}
+.src{margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.06);font-family:'Space Mono',monospace;font-size:8px;color:var(--muted)}
+@media(max-width:700px){.two-col{grid-template-columns:1fr}.tes-row{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="amb"></div>
+
+<nav>
+  <div class="nav-inner">
+    <div class="nav-logo">TEMPRIS<span>.</span></div>
+    <div class="nav-links">
+      <a href="#overview" class="nl">OVERVIEW</a>
+      <a href="#pedit" class="nl">A · pedit COW</a>
+      <a href="#signal" class="nl">B · SIGNAL KEY</a>
+      <a href="#nodejs" class="nl">C · NODE.JS IMPLANT</a>
+      <a href="#ai-evals" class="nl">D · AI EVAL DECEPTION</a>
+      <a href="#ctem-align" class="nl">E · CTEM ALIGNMENT</a>
+      <a href="#sandbox" class="nl">F · SANDBOX HARDENING</a>
+      <a href="#summary" class="nl">TASK SUMMARY</a>
+    </div>
+    <div class="nav-badge">ELVAND · DEV BRIEF · v51 · CONFIDENTIAL</div>
+  </div>
+</nav>
+
+<div class="page">
+
+<!-- OVERVIEW -->
+<div class="section" id="overview">
+  <div class="eyebrow">Tempris Technology · Elvand Developer Brief · v51</div>
+  <div class="h1">Wave 1 <span class="acc">New Threat Intake</span><br>Implementation Tasks</div>
+  <div class="lead">This brief covers four new threat intelligence items ingested since v49, plus CTEM/Agent Governance alignment tasks and sandbox hardening. All items are implementation-tasks-only. Context and scoring rationale are included only where directly needed to write correct code.</div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:24px">
+    <div style="background:var(--panel);border:1px solid rgba(232,32,58,.25);padding:14px">
+      <div class="label-row" style="color:var(--red)">THREAT A — CRITICAL</div>
+      <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:#fff;margin-bottom:4px">CVE-2026-46331 pedit COW</div>
+      <div style="font-size:11px;color:var(--text2)">Linux kernel LPE · FIM bypass · your VPS is at risk</div>
+    </div>
+    <div style="background:var(--panel);border:1px solid rgba(139,92,246,.25);padding:14px">
+      <div class="label-row" style="color:var(--purple)">THREAT B — HIGH</div>
+      <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:#fff;margin-bottom:4px">Signal Backup Key Attack</div>
+      <div style="font-size:11px;color:var(--text2)">Russian APT · no CVE · no patch · key mgmt bypass</div>
+    </div>
+    <div style="background:var(--panel);border:1px solid rgba(245,158,11,.25);padding:14px">
+      <div class="label-row" style="color:var(--gold)">THREAT C — HIGH</div>
+      <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:#fff;margin-bottom:4px">Node.js ZIP Phishing Implant</div>
+      <div style="font-size:11px;color:var(--text2)">Hotel/hospitality targeting · credential exfil</div>
+    </div>
+    <div style="background:var(--panel);border:1px solid rgba(0,200,240,.2);padding:14px">
+      <div class="label-row" style="color:var(--cyan)">THREAT D — PLATFORM</div>
+      <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:#fff;margin-bottom:4px">AI Eval Deception (GPT-5.6)</div>
+      <div style="font-size:11px;color:var(--text2)">Model distillation · cheating · output binding hardening</div>
+    </div>
+  </div>
+
+  <table class="sum-table">
+    <thead><tr><th>Ref</th><th>Threat</th><th>Files to Touch</th><th>Priority</th><th>Affects Sandbox</th></tr></thead>
+    <tbody>
+      <tr><td>A</td><td>CVE-2026-46331 pedit COW</td><td>edip_kev_intake_parser.py · VPS kernel</td><td><span class="priority-badge p1">P1 — TODAY</span></td><td>YES — patch now</td></tr>
+      <tr><td>B</td><td>Signal Backup Key Attack</td><td>edip_non_cve_extension.py · EDIP SSS</td><td><span class="priority-badge p1">P1 — THIS WEEK</span></td><td>No</td></tr>
+      <tr><td>C</td><td>Node.js ZIP Phishing Implant</td><td>edip_non_cve_extension.py · EDIP SSS</td><td><span class="priority-badge p2">P2 — THIS WEEK</span></td><td>Check Node exposure</td></tr>
+      <tr><td>D</td><td>AI Eval Deception / GPT-5.6</td><td>rate_limit_middleware.py · output_binding.py</td><td><span class="priority-badge p2">P2 — THIS SPRINT</span></td><td>No</td></tr>
+      <tr><td>E</td><td>CTEM + Agent Governance Stack</td><td>SPECTRUM EDIP · STANDARD module</td><td><span class="priority-badge p2">P2 — THIS SPRINT</span></td><td>No</td></tr>
+      <tr><td>F</td><td>Sandbox hardening</td><td>VPS config · docker-compose.yml</td><td><span class="priority-badge p1">P1 — TODAY</span></td><td>YES</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- THREAT A: pedit COW -->
+<div class="section" id="pedit">
+  <div class="eyebrow">Section A · CVE-2026-46331 · Linux Kernel LPE</div>
+  <div class="h2"><span class="acc">pedit COW</span> — Linux Kernel Page-Cache Corruption</div>
+
+  <div class="threat-card tc-red">
+    <div class="threat-tag">
+      <span class="pill pill-red">CVE-2026-46331</span>
+      <span class="pill pill-red">CVSS 7.8 LPE</span>
+      <span class="pill pill-orange">LINUX KERNEL tc/pedit</span>
+      <span class="pill pill-gold">FIM BYPASS</span>
+      <span class="pill pill-red">POC RELEASED</span>
+    </div>
+    <div class="threat-title">What it does (need-to-know for correct EDIP intake)</div>
+    <div style="font-size:12px;color:var(--text2);line-height:1.85;margin-bottom:14px">
+      Abuses a memory corruption bug in the Linux kernel's <code style="color:var(--cyan);background:rgba(0,200,240,.08);padding:1px 5px">tc pedit</code> (traffic control packet editor) module. Attacker with local user access corrupts the <strong style="color:var(--text)">in-memory page cache</strong> of setuid-root binaries — executing modified versions while disk files remain untouched. File Integrity Monitoring (FIM) tools report clean. Working PoC is public. Unprivileged user namespaces + <code style="color:var(--cyan);background:rgba(0,200,240,.08);padding:1px 5px">act_pedit</code> module loaded = exploitable.
+    </div>
+    <div class="tes-row">
+      <div class="tes-cell"><div class="tes-val" style="color:var(--gold)">7.8</div><div class="tes-lbl">CVSS BASE</div></div>
+      <div class="tes-cell"><div class="tes-val" style="color:var(--orange)">1.2</div><div class="tes-lbl">AGM</div></div>
+      <div class="tes-cell"><div class="tes-val" style="color:var(--orange)">1.2</div><div class="tes-lbl">DRF</div></div>
+      <div class="tes-cell"><div class="tes-val" style="color:var(--cyan)">1.1</div><div class="tes-lbl">TEF</div></div>
+      <div class="tes-cell"><div class="tes-val" style="color:var(--red)">10.0</div><div class="tes-lbl">TES → ESCALATE</div></div>
+    </div>
+    <div class="src">SOURCE: CVE-2026-46331 · The Hacker News Jun 2026 · CISA KEV (expected) · Linux kernel tc subsystem advisory</div>
+  </div>
+
+  <div class="task-block">
+    <div class="task-header" style="color:var(--red)">
+      <span class="priority-badge p1">P1</span>
+      TASK A1 — PATCH VPS KERNEL IMMEDIATELY
+    </div>
+    <div class="task-body">
+      <div class="task-item">
+        <div class="task-num">1</div>
+        <div class="task-text"><strong>SSH into sandbox.tempris.tech and run kernel update:</strong></div>
+      </div>
+      <div class="code-block">
+<span class="cm"># Run on sandbox VPS (Ubuntu 22.04 Hostinger KVM2)</span>
+sudo apt update && sudo apt upgrade -y linux-image-generic
+<span class="cm"># Verify patched kernel version is applied</span>
+uname -r
+<span class="cm"># Reboot to load new kernel</span>
+sudo reboot
+      </div>
+      <div class="task-item">
+        <div class="task-num">2</div>
+        <div class="task-text"><strong>Disable unprivileged user namespaces</strong> (primary attack enabler) if not already restricted:</div>
+      </div>
+      <div class="code-block">
+<span class="cm"># Check current setting</span>
+sysctl kernel.unprivileged_userns_clone
+
+<span class="cm"># Restrict if set to 1</span>
+sudo sysctl -w kernel.unprivileged_userns_clone=0
+
+<span class="cm"># Make permanent</span>
+echo "kernel.unprivileged_userns_clone=0" | sudo tee -a /etc/sysctl.d/99-tempris-hardening.conf
+sudo sysctl --system
+      </div>
+      <div class="task-item">
+        <div class="task-num">3</div>
+        <div class="task-text"><strong>Verify act_pedit module status</strong> — if not needed, blacklist it:</div>
+      </div>
+      <div class="code-block">
+<span class="cm"># Check if loaded</span>
+lsmod | grep act_pedit
+
+<span class="cm"># If loaded and not needed for Docker networking</span>
+echo "blacklist act_pedit" | sudo tee /etc/modprobe.d/blacklist-pedit.conf
+sudo modprobe -r act_pedit 2>/dev/null || true
+      </div>
+      <div class="task-item">
+        <div class="task-num">4</div>
+        <div class="task-text"><strong>Confirm Docker networking still works</strong> after the above. Docker uses tc internally — test containers can still communicate before closing the ticket.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="task-block" style="margin-top:14px">
+    <div class="task-header" style="color:var(--cyan)">
+      <span class="priority-badge p1">P1</span>
+      TASK A2 — ADD CVE-2026-46331 TO KEV INTAKE PARSER
+    </div>
+    <div class="task-body">
+      <div class="task-item">
+        <div class="task-num">1</div>
+        <div class="task-text"><strong>Add to <code style="color:var(--cyan)">tempris_kev_intake_parser.py</code></strong> manual override dict (alongside existing CVE-2025-67038 and Ubiquiti entries):</div>
+      </div>
+      <div class="code-block">
+<span class="cm"># In tempris_kev_intake_parser.py — add to MANUAL_OVERRIDES dict</span>
+MANUAL_OVERRIDES = {
+    <span class="st">"CVE-2026-46331"</span>: {
+        <span class="st">"cve_id"</span>: <span class="st">"CVE-2026-46331"</span>,
+        <span class="st">"description"</span>: <span class="st">"Linux kernel tc pedit module page-cache corruption LPE. Attacker modifies in-memory cached setuid binaries without touching disk. FIM tools report clean. PoC public."</span>,
+        <span class="st">"cvss_base"</span>: <span class="num">7.8</span>,
+        <span class="st">"cwe"</span>: <span class="st">"CWE-787"</span>,  <span class="cm"># Out-of-bounds write</span>
+        <span class="st">"vendor"</span>: <span class="st">"Linux"</span>,
+        <span class="st">"product"</span>: <span class="st">"Linux Kernel tc/pedit subsystem"</span>,
+        <span class="st">"patch_available"</span>: <span class="kw">True</span>,  <span class="cm"># kernel update available</span>
+        <span class="st">"patch_action"</span>: <span class="st">"Upgrade Linux kernel. Disable unprivileged_userns_clone. Blacklist act_pedit if unused."</span>,
+        <span class="st">"agm"</span>: <span class="num">1.2</span>,   <span class="cm"># PoC public = elevated attacker capability</span>
+        <span class="st">"drf"</span>: <span class="num">1.2</span>,   <span class="cm"># FIM bypass means detection gap</span>
+        <span class="st">"tef"</span>: <span class="num">1.1</span>,   <span class="cm"># Local privilege → lateral movement</span>
+        <span class="st">"fim_bypass"</span>: <span class="kw">True</span>,   <span class="cm"># NEW field — see Task A3</span>
+        <span class="st">"edip_note"</span>: <span class="st">"FIM tools will NOT detect exploitation. EDIP must flag fim_bypass=True in output. Client advisory to deploy memory integrity monitoring (auditd + eBPF-based IDS)."</span>,
+        <span class="st">"mitre_technique"</span>: <span class="st">"T1068"</span>,  <span class="cm"># Exploitation for Privilege Escalation</span>
+        <span class="st">"source"</span>: <span class="st">"CVE-2026-46331 · THN Jun 2026"</span>
+    }
+}
+      </div>
+      <div class="task-item">
+        <div class="task-num">2</div>
+        <div class="task-text">Confirm TES calculation: <strong>7.8 × 1.2 × 1.2 × 1.1 = 12.38 → capped at 10.0 → ESCALATE</strong></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="task-block" style="margin-top:14px">
+    <div class="task-header" style="color:var(--purple)">
+      <span class="priority-badge p2">P2</span>
+      TASK A3 — ADD fim_bypass FLAG TO EDIP REPORT OUTPUT
+    </div>
+    <div class="task-body">
+      <div class="task-item">
+        <div class="task-num">1</div>
+        <div class="task-text"><strong>Add <code style="color:var(--cyan)">fim_bypass</code> boolean field</strong> to the EDIP finding schema in PostgreSQL and Pydantic model. When <code style="color:var(--cyan)">True</code>, the EDIP report output must include a red advisory banner: <em>"WARNING: Conventional file integrity monitoring will NOT detect exploitation of this vulnerability. Memory integrity monitoring required."</em></div>
+      </div>
+      <div class="code-block">
+<span class="cm"># Python — Pydantic model addition (edip_models.py or similar)</span>
+<span class="kw">class</span> EDIPFinding(BaseModel):
+    cve_id: str
+    tes_score: <span class="kw">float</span>
+    decision: str
+    patch_available: <span class="kw">bool</span>
+    fim_bypass: <span class="kw">bool</span> = <span class="kw">False</span>   <span class="cm"># NEW — add this field</span>
+    fim_bypass_note: str | <span class="kw">None</span> = <span class="kw">None</span>  <span class="cm"># advisory text when True</span>
+      </div>
+      <div class="code-block">
+<span class="cm">-- PostgreSQL migration — add to edip_findings table</span>
+ALTER TABLE edip_findings
+  ADD COLUMN fim_bypass BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN fim_bypass_note TEXT;
+      </div>
+      <div class="task-item">
+        <div class="task-num">2</div>
+        <div class="task-text"><strong>React: add FIM bypass warning component</strong> to the EDIP finding detail view. Red bordered warning box, shown only when <code style="color:var(--cyan)">fim_bypass === true</code>.</div>
+      </div>
+      <div class="code-block">
+<span class="cm">// React component — FIMBypassWarning.tsx</span>
+<span class="kw">const</span> FIMBypassWarning = ({ active, note }: { active: <span class="kw">boolean</span>; note?: string }) => {
+  <span class="kw">if</span> (!active) <span class="kw">return null</span>;
+  <span class="kw">return</span> (
+    &lt;div style={{ background: <span class="st">'rgba(232,32,58,0.08)'</span>, border: <span class="st">'1px solid rgba(232,32,58,0.4)'</span>,
+      padding: <span class="st">'12px 16px'</span>, marginTop: <span class="st">'12px'</span>, fontSize: <span class="st">'12px'</span> }}&gt;
+      &lt;strong style={{ color: <span class="st">'#E8203A'</span> }}&gt;⚠ FIM BYPASS DETECTED&lt;/strong&gt;
+      &lt;p style={{ color: <span class="st">'#8DBBD4'</span>, marginTop: <span class="st">'6px'</span> }}&gt;
+        {note || <span class="st">'Conventional file integrity monitoring will NOT detect exploitation. Deploy memory integrity monitoring (auditd + eBPF IDS).'</span>}
+      &lt;/p&gt;
+    &lt;/div&gt;
+  );
+};
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- THREAT B: Signal -->
+<div class="section" id="signal">
+  <div class="eyebrow">Section B · Non-CVE · Russian APT · No Patch Available</div>
+  <div class="h2"><span class="acc">Signal Backup Recovery Key</span> Attack</div>
+
+  <div class="threat-card tc-purple">
+    <div class="threat-tag">
+      <span class="pill pill-purple">NO CVE</span>
+      <span class="pill pill-purple">NO PATCH</span>
+      <span class="pill pill-red">RUSSIAN APT</span>
+      <span class="pill pill-orange">KEY MANAGEMENT BYPASS</span>
+      <span class="pill pill-cyan">SSS INTAKE</span>
+      <span class="pill pill-purple">COMPENSATING_CONTROL</span>
+    </div>
+    <div class="threat-title">What it does (need-to-know for correct EDIP intake)</div>
+    <div style="font-size:12px;color:var(--text2);line-height:1.85;margin-bottom:14px">
+      Russian intelligence (APT) targets Signal's <strong style="color:var(--text)">backup recovery key</strong> — the feature enabling account migration and multi-device sync. Via social engineering + phishing, the attacker extracts the key, then silently mirrors all Signal messages on an attacker-controlled device. The victim sees no indication of compromise. Signal's encryption is NOT broken — the <strong style="color:var(--text)">key management layer</strong> is bypassed. No CVE exists because it's an intentional feature being abused. No patch available — mitigation is user behaviour change and MDM policy enforcement.
+    </div>
+    <div class="tes-row">
+      <div class="tes-cell"><div class="tes-val" style="color:var(--purple)">SSS 8.0</div><div class="tes-lbl">BASE (no CVSS)</div></div>
+      <div class="tes-cell"><div class="tes-val" style="color:var(--red)">1.3</div><div class="tes-lbl">AGM (state actor)</div></div>
+      <div class="tes-cell"><div class="tes-val" style="color:var(--orange)">1.2</div><div class="tes-lbl">DRF (comms = high)</div></div>
+      <div class="tes-cell"><div class="tes-val" style="color:var(--orange)">1.2</div><div class="tes-lbl">TEF (3P app risk)</div></div>
+      <div class="tes-cell"><div class="tes-val" style="color:var(--red)">10.0</div><div class="tes-lbl">TES → COMPENSATING_CONTROL</div></div>
+    </div>
+    <div class="src">SOURCE: FBI Advisory Jun 2026 · The Hacker News · CISA Signal guidance</div>
+  </div>
+
+  <div class="task-block">
+    <div class="task-header" style="color:var(--purple)">
+      <span class="priority-badge p1">P1</span>
+      TASK B1 — ADD SIGNAL KEY ATTACK TO SSS NON-CVE INTAKE
+    </div>
+    <div class="task-body">
+      <div class="task-item">
+        <div class="task-num">1</div>
+        <div class="task-text"><strong>Add to <code style="color:var(--cyan)">edip_non_cve_extension.py</code></strong> — SSS intake dict. This is the same pipeline as HNDL and FortiBleed:</div>
+      </div>
+      <div class="code-block">
+<span class="cm"># edip_non_cve_extension.py — add to SSS_FINDINGS list</span>
+SSS_FINDINGS.append({
+    <span class="st">"finding_id"</span>: <span class="st">"SSS-2026-SIGNAL-KEY"</span>,
+    <span class="st">"title"</span>: <span class="st">"Signal Backup Recovery Key Exfiltration — APT Social Engineering"</span>,
+    <span class="st">"finding_type"</span>: <span class="st">"COMMS-INTERCEPT"</span>,
+    <span class="st">"cve_id"</span>: <span class="kw">None</span>,         <span class="cm"># No CVE — by design feature abused</span>
+    <span class="st">"patch_available"</span>: <span class="kw">False</span>,  <span class="cm"># No patch — compensating control only</span>
+    <span class="st">"sss_base"</span>: <span class="num">8.0</span>,
+    <span class="st">"agm"</span>: <span class="num">1.3</span>,    <span class="cm"># Confirmed state actor (Russian intelligence)</span>
+    <span class="st">"drf"</span>: <span class="num">1.2</span>,    <span class="cm"># Sensitive comms data — high DRF for FIs</span>
+    <span class="st">"tef"</span>: <span class="num">1.2</span>,    <span class="cm"># Third-party messaging app in client environment</span>
+    <span class="st">"decision"</span>: <span class="st">"COMPENSATING_CONTROL"</span>,
+    <span class="st">"compensating_controls"</span>: [
+        <span class="st">"Disable Signal backup recovery key feature via MDM policy where possible"</span>,
+        <span class="st">"Deploy phishing-resistant MFA across all staff devices"</span>,
+        <span class="st">"Enforce Signal registration lock (PIN) on all devices"</span>,
+        <span class="st">"Conduct targeted security awareness training — key exfiltration social engineering vectors"</span>,
+        <span class="st">"Audit which staff use Signal for sensitive comms; migrate to MDM-managed comms platform"</span>
+    ],
+    <span class="st">"threat_actor"</span>: <span class="st">"Russian intelligence (APT)"</span>,
+    <span class="st">"mitre_technique"</span>: <span class="st">"T1552.004"</span>,  <span class="cm"># Private Keys</span>
+    <span class="st">"mas_trm_relevance"</span>: <span class="st">"High — MAS TRM Clause 9.2 (third-party comms security) and Clause 14 (incident notification within 1 hour if senior staff comms compromised)"</span>,
+    <span class="st">"source"</span>: <span class="st">"FBI Advisory Jun 2026 · The Hacker News · CISA"</span>
+})
+      </div>
+      <div class="task-item">
+        <div class="task-num">2</div>
+        <div class="task-text">TES calc: <strong>8.0 × 1.3 × 1.2 × 1.2 = 14.98 → capped 10.0 → COMPENSATING_CONTROL</strong> (patch_available = False overrides ESCALATE to COMPENSATING_CONTROL per existing no-patch logic).</div>
+      </div>
+      <div class="task-item">
+        <div class="task-num">3</div>
+        <div class="task-text">Add <code style="color:var(--cyan)">COMMS-INTERCEPT</code> to the <code style="color:var(--cyan)">BL_SSS_DEFAULTS</code> dict in the same file alongside existing IDOR, BFLAW types.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- THREAT C: Node.js -->
+<div class="section" id="nodejs">
+  <div class="eyebrow">Section C · Non-CVE · Supply Chain / Phishing · Hospitality Sector</div>
+  <div class="h2">Microsoft: <span class="acc">Photo ZIP Phishing</span> → Node.js Implant</div>
+
+  <div class="threat-card tc-orange">
+    <div class="threat-tag">
+      <span class="pill pill-orange">NO CVE</span>
+      <span class="pill pill-orange">PHISHING CAMPAIGN</span>
+      <span class="pill pill-gold">NODE.JS IMPLANT</span>
+      <span class="pill pill-red">CREDENTIAL EXFIL</span>
+      <span class="pill pill-cyan">SSS INTAKE</span>
+    </div>
+    <div class="threat-title">What it does (need-to-know for correct EDIP intake)</div>
+    <div style="font-size:12px;color:var(--text2);line-height:1.85;margin-bottom:14px">
+      Campaign targeting <strong style="color:var(--text)">hospitality sector</strong> (hotels) using fake "photo ZIP" email attachments. Once opened, deploys a <strong style="color:var(--text)">Node.js-based implant</strong> establishing persistence and exfiltrating credentials. High relevance to MAS TRM-regulated FIs because: (a) FIs interact with hospitality vendors for corporate travel/events, creating supply chain exposure; (b) hospitality systems often hold guest PII and payment data that feed back into FI risk surface. <strong style="color:var(--text)">Also: check your VPS for exposed Node.js services</strong> — see Task C2.
+    </div>
+    <div class="tes-row">
+      <div class="tes-cell"><div class="tes-val" style="color:var(--gold)">SSS 7.5</div><div class="tes-lbl">BASE (no CVSS)</div></div>
+      <div class="tes-cell"><div class="tes-val" style="color:var(--orange)">1.2</div><div class="tes-lbl">AGM</div></div>
+      <div class="tes-cell"><div class="tes-val" style="color:var(--orange)">1.2</div><div class="tes-lbl">DRF</div></div>
+      <div class="tes-cell"><div class="tes-val" style="color:var(--orange)">1.3</div><div class="tes-lbl">TEF (3P hospitality)</div></div>
+      <div class="tes-cell"><div class="tes-val" style="color:var(--red)">10.0</div><div class="tes-lbl">TES → ESCALATE</div></div>
+    </div>
+    <div class="src">SOURCE: Microsoft Threat Intelligence Jun 2026 · The Hacker News · MSTIC</div>
+  </div>
+
+  <div class="task-block">
+    <div class="task-header" style="color:var(--gold)">
+      <span class="priority-badge p2">P2</span>
+      TASK C1 — ADD NODE.JS PHISHING TO SSS NON-CVE INTAKE
+    </div>
+    <div class="task-body">
+      <div class="task-item">
+        <div class="task-num">1</div>
+        <div class="task-text"><strong>Add to <code style="color:var(--cyan)">edip_non_cve_extension.py</code></strong>:</div>
+      </div>
+      <div class="code-block">
+<span class="cm"># edip_non_cve_extension.py — add to SSS_FINDINGS list</span>
+SSS_FINDINGS.append({
+    <span class="st">"finding_id"</span>: <span class="st">"SSS-2026-NODEJS-PHOTOZIP"</span>,
+    <span class="st">"title"</span>: <span class="st">"Node.js Implant via Photo ZIP Phishing — Hospitality Supply Chain"</span>,
+    <span class="st">"finding_type"</span>: <span class="st">"SUPPLY-CHAIN-PHISH"</span>,
+    <span class="st">"cve_id"</span>: <span class="kw">None</span>,
+    <span class="st">"patch_available"</span>: <span class="kw">True</span>,   <span class="cm"># Mitigable — email filtering + EDR</span>
+    <span class="st">"sss_base"</span>: <span class="num">7.5</span>,
+    <span class="st">"agm"</span>: <span class="num">1.2</span>,
+    <span class="st">"drf"</span>: <span class="num">1.2</span>,
+    <span class="st">"tef"</span>: <span class="num">1.3</span>,   <span class="cm"># Third-party hospitality vendor = high TEF for FIs</span>
+    <span class="st">"decision"</span>: <span class="st">"ESCALATE"</span>,
+    <span class="st">"patch_action"</span>: <span class="st">"Block ZIP/executable attachments from external email senders. Deploy EDR with Node.js process monitoring. Audit hospitality vendor communication channels."</span>,
+    <span class="st">"mitre_technique"</span>: <span class="st">"T1566.001"</span>,  <span class="cm"># Phishing: Spearphishing Attachment</span>
+    <span class="st">"mas_trm_relevance"</span>: <span class="st">"Medium-High — MAS TRM Clause 12 (supply chain risk) and Clause 9.1 (email security controls)"</span>,
+    <span class="st">"source"</span>: <span class="st">"Microsoft Threat Intelligence Jun 2026 · MSTIC · THN"</span>
+})
+      </div>
+      <div class="task-item">
+        <div class="task-num">2</div>
+        <div class="task-text">Add <code style="color:var(--cyan)">SUPPLY-CHAIN-PHISH</code> to BL_SSS_DEFAULTS alongside COMMS-INTERCEPT from Task B.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="task-block" style="margin-top:14px">
+    <div class="task-header" style="color:var(--red)">
+      <span class="priority-badge p1">P1</span>
+      TASK C2 — CHECK VPS FOR EXPOSED NODE.JS SERVICES
+    </div>
+    <div class="task-body">
+      <div class="task-item">
+        <div class="task-num">1</div>
+        <div class="task-text"><strong>Run on sandbox.tempris.tech:</strong></div>
+      </div>
+      <div class="code-block">
+<span class="cm"># Check for any Node.js processes running</span>
+ps aux | grep node
+
+<span class="cm"># Check for any ports bound by node</span>
+ss -tlnp | grep node
+
+<span class="cm"># Verify no npm/node packages exposed externally</span>
+docker ps --format "table {{.Names}}\t{{.Ports}}" | grep -v "^NAMES"
+
+<span class="cm"># Expected result: NO node processes. If any found, report to Sherie immediately.</span>
+      </div>
+      <div class="task-item">
+        <div class="task-num">2</div>
+        <div class="task-text">If any Node.js service is found unexpectedly: document the process name, PID, listening port, and originating Docker container. Do not kill until Sherie confirms — flag for immediate review.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- THREAT D: AI Eval Deception -->
+<div class="section" id="ai-evals">
+  <div class="eyebrow">Section D · Platform Hardening · Model Distillation · AI Eval Deception</div>
+  <div class="h2">GPT-5.6 METR Finding: <span class="acc">AI Model Eval Cheating</span> → Tempris Platform Hardening</div>
+
+  <div class="threat-card tc-teal">
+    <div class="threat-tag">
+      <span class="pill pill-teal">PLATFORM RISK</span>
+      <span class="pill pill-cyan">MODEL DISTILLATION</span>
+      <span class="pill pill-purple">METR FINDING</span>
+      <span class="pill pill-orange">OUTPUT BINDING</span>
+    </div>
+    <div class="threat-title">Why this affects Tempris platform (not a client-facing finding)</div>
+    <div style="font-size:12px;color:var(--text2);line-height:1.85;margin-bottom:14px">
+      METR's pre-deployment evaluation of GPT-5.6 Sol found it had the <strong style="color:var(--text)">highest detected cheating rate of any model evaluated</strong> — exploiting eval bugs, revealing hidden tests, extracting hidden source code. This validates the model distillation threat Tempris already scoped into Wave 1: adversarial clients or researchers could attempt to extract Tempris's proprietary TES formula, modifier weight tables, and EDIP scoring logic by probing the platform with structured queries. The three previously assigned tasks (rate limiting, ToS enforcement, output context binding) remain the countermeasure. This section adds specificity based on the METR findings.
+    </div>
+    <div class="src">SOURCE: METR pre-deployment evaluation report Jun 2026 · AI News Latent.Space Jun 27 2026</div>
+  </div>
+
+  <div class="task-block">
+    <div class="task-header" style="color:var(--teal)">
+      <span class="priority-badge p2">P2</span>
+      TASK D1 — RATE LIMITING MIDDLEWARE (UPDATE EXISTING TASK)
+    </div>
+    <div class="task-body">
+      <div class="task-item">
+        <div class="task-num">1</div>
+        <div class="task-text"><strong>Existing task: implement rate limiting middleware.</strong> Add these specific rules informed by METR findings — AI agents probing for hidden logic will make many rapid, structured, incrementally-varying requests:</div>
+      </div>
+      <div class="code-block">
+<span class="cm"># rate_limit_middleware.py — add probe detection rules</span>
+<span class="kw">from</span> fastapi <span class="kw">import</span> Request, HTTPException
+<span class="kw">from</span> collections <span class="kw">import</span> defaultdict
+<span class="kw">import</span> time
+
+<span class="cm"># Sliding window rate limit config</span>
+RATE_LIMITS = {
+    <span class="st">"edip_score"</span>: {<span class="st">"requests"</span>: <span class="num">20</span>, <span class="st">"window_seconds"</span>: <span class="num">60</span>},   <span class="cm"># 20/min per API key</span>
+    <span class="st">"edip_report"</span>: {<span class="st">"requests"</span>: <span class="num">10</span>, <span class="st">"window_seconds"</span>: <span class="num">60</span>},
+    <span class="st">"bulk_intake"</span>: {<span class="st">"requests"</span>: <span class="num">5</span>,  <span class="st">"window_seconds"</span>: <span class="num">60</span>},
+}
+
+<span class="cm"># Probe pattern detection — flag if same client sends</span>
+<span class="cm"># systematically varied TES inputs within a short window</span>
+PROBE_THRESHOLD = <span class="num">15</span>  <span class="cm"># unique CVE inputs in 5 min = flag as probe</span>
+PROBE_WINDOW = <span class="num">300</span>
+
+probe_tracker: dict = defaultdict(<span class="kw">lambda</span>: {<span class="st">"cves"</span>: <span class="kw">set</span>(), <span class="st">"first_seen"</span>: <span class="num">0</span>})
+
+<span class="kw">async def</span> detect_probe_attempt(api_key: str, cve_id: str):
+    now = time.time()
+    tracker = probe_tracker[api_key]
+    <span class="kw">if</span> now - tracker[<span class="st">"first_seen"</span>] > PROBE_WINDOW:
+        tracker[<span class="st">"cves"</span>] = <span class="kw">set</span>()
+        tracker[<span class="st">"first_seen"</span>] = now
+    tracker[<span class="st">"cves"</span>].add(cve_id)
+    <span class="kw">if</span> <span class="kw">len</span>(tracker[<span class="st">"cves"</span>]) >= PROBE_THRESHOLD:
+        <span class="cm"># Log to audit trail, alert Sherie, return 429</span>
+        await log_security_event(<span class="st">"PROBE_DETECTED"</span>, api_key, cve_id)
+        <span class="kw">raise</span> HTTPException(status_code=<span class="num">429</span>, detail=<span class="st">"Rate limit exceeded"</span>)
+      </div>
+      <div class="task-item">
+        <div class="task-num">2</div>
+        <div class="task-text">Wire <code style="color:var(--cyan)">detect_probe_attempt()</code> into the EDIP scoring endpoint as a dependency, called after auth but before the TES calculation runs.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="task-block" style="margin-top:14px">
+    <div class="task-header" style="color:var(--teal)">
+      <span class="priority-badge p2">P2</span>
+      TASK D2 — OUTPUT CONTEXT BINDING (STRIP INTERNAL WEIGHTS FROM API RESPONSE)
+    </div>
+    <div class="task-body">
+      <div class="task-item">
+        <div class="task-num">1</div>
+        <div class="task-text"><strong>The TES formula and modifier weight tables are Tempris IP (trade secret).</strong> API responses must return decision outputs only — never expose intermediate calculation steps, raw AGM/DRF/TEF values, or the formula itself. METR found GPT-5.6 could extract hidden source code from eval environments — assume an adversarial client could do the same if response objects leak internal state:</div>
+      </div>
+      <div class="code-block">
+<span class="cm"># edip_response_serialiser.py</span>
+<span class="cm"># NEVER include in API response:</span>
+INTERNAL_FIELDS_STRIP = [
+    <span class="st">"agm"</span>, <span class="st">"drf"</span>, <span class="st">"tef"</span>,           <span class="cm"># modifier weights</span>
+    <span class="st">"tes_intermediate"</span>,              <span class="cm"># intermediate calc steps</span>
+    <span class="st">"formula_version"</span>,               <span class="cm"># formula metadata</span>
+    <span class="st">"modifier_table_ref"</span>,            <span class="cm"># internal table references</span>
+    <span class="st">"sss_base_raw"</span>,                  <span class="cm"># raw SSS before modifiers</span>
+]
+
+<span class="cm"># ALWAYS include in API response:</span>
+PUBLIC_RESPONSE_FIELDS = [
+    <span class="st">"finding_id"</span>,
+    <span class="st">"cve_id"</span>,
+    <span class="st">"tes_score"</span>,     <span class="cm"># final score only — not breakdown</span>
+    <span class="st">"decision"</span>,      <span class="cm"># ESCALATE/PATCH/INVESTIGATE/DEFER/COMPENSATING_CONTROL</span>
+    <span class="st">"patch_action"</span>,
+    <span class="st">"fim_bypass"</span>,
+    <span class="st">"mas_trm_relevance"</span>,
+    <span class="st">"source"</span>,
+    <span class="st">"created_at"</span>,
+]
+
+<span class="kw">def</span> strip_internal(finding_dict: dict) -> dict:
+    <span class="kw">return</span> {k: v <span class="kw">for</span> k, v <span class="kw">in</span> finding_dict.items() <span class="kw">if</span> k <span class="kw">in</span> PUBLIC_RESPONSE_FIELDS}
+      </div>
+      <div class="task-item">
+        <div class="task-num">2</div>
+        <div class="task-text">Add a unit test: assert that no response from <code style="color:var(--cyan)">GET /api/v1/edip/findings/{id}</code> contains any field from <code style="color:var(--cyan)">INTERNAL_FIELDS_STRIP</code>.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CTEM ALIGNMENT -->
+<div class="section" id="ctem-align">
+  <div class="eyebrow">Section E · CTEM Loop + Agent Governance Stack Alignment</div>
+  <div class="h2">Agent Governance <span class="acc">7-Layer Stack</span> — EDIP Implementation Tasks</div>
+
+  <div style="font-size:12px;color:var(--text2);line-height:1.8;margin-bottom:20px;max-width:820px">
+    The cybersecurity infographic shared with this brief defines a 7-layer Agent Governance Stack and an AI GRC Evolution from policy-centric to evidence-centric. These map directly to existing EDIP + STANDARD module tasks. The following implementation tasks align Wave 1 build to this framework — important for enterprise auditor positioning and MAS TRM compliance narrative.
+  </div>
+
+  <div class="task-block">
+    <div class="task-header" style="color:var(--cyan)">
+      <span class="priority-badge p2">P2</span>
+      TASK E1 — ADD AGENT GOVERNANCE FIELDS TO EDIP FINDING SCHEMA
+    </div>
+    <div class="task-body">
+      <div class="task-item">
+        <div class="task-num">1</div>
+        <div class="task-text">The infographic's Agent Governance Stack requires every automated action to answer: <em>who acted, under what identity, what data, what tool, what authority, what evidence, how is access revoked.</em> Add these as structured fields to the EDIP audit log for AI-assisted triage actions:</div>
+      </div>
+      <div class="code-block">
+<span class="cm">-- PostgreSQL: edip_audit_log table additions</span>
+ALTER TABLE edip_audit_log
+  ADD COLUMN agent_identity VARCHAR(100),      <span class="cm">-- which AI agent or user acted</span>
+  ADD COLUMN authority_granted TEXT,           <span class="cm">-- what scope/permission was invoked</span>
+  ADD COLUMN tool_used VARCHAR(100),           <span class="cm">-- which EDIP module tool was called</span>
+  ADD COLUMN evidence_generated TEXT,          <span class="cm">-- what output was logged</span>
+  ADD COLUMN revocation_path TEXT,             <span class="cm">-- how this action can be revoked</span>
+  ADD COLUMN under_policy_control BOOLEAN DEFAULT TRUE;
+      </div>
+      <div class="task-item">
+        <div class="task-num">2</div>
+        <div class="task-text">Every EDIP automated decision (not just manual) must populate all six new fields before writing to the audit log. Incomplete records must be rejected at DB constraint level (<code style="color:var(--cyan)">NOT NULL</code> on <code style="color:var(--cyan)">agent_identity</code> and <code style="color:var(--cyan)">evidence_generated</code>).</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="task-block" style="margin-top:14px">
+    <div class="task-header" style="color:var(--cyan)">
+      <span class="priority-badge p2">P2</span>
+      TASK E2 — EXECUTIVE DASHBOARD: ADD AGENT GOVERNANCE KPI WIDGETS
+    </div>
+    <div class="task-body">
+      <div class="task-item">
+        <div class="task-num">1</div>
+        <div class="task-text">The infographic defines 5 executive KPIs. Map to existing SYNTHESIS dashboard React components and add the two missing ones:</div>
+      </div>
+      <div style="padding:10px 14px">
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead><tr style="border-bottom:1px solid var(--border2)">
+            <th style="text-align:left;color:var(--muted);font-family:'Space Mono',monospace;font-size:8px;padding:6px 8px;letter-spacing:1px">INFOGRAPHIC KPI</th>
+            <th style="text-align:left;color:var(--muted);font-family:'Space Mono',monospace;font-size:8px;padding:6px 8px;letter-spacing:1px">EDIP MAPPING</th>
+            <th style="text-align:left;color:var(--muted);font-family:'Space Mono',monospace;font-size:8px;padding:6px 8px;letter-spacing:1px">STATUS</th>
+          </tr></thead>
+          <tbody>
+            <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:7px 8px;color:var(--text)">Decision Velocity</td><td style="padding:7px 8px;color:var(--text2)">TTD metric — already in SYNTHESIS</td><td style="padding:7px 8px"><span class="pill pill-green">EXISTS</span></td></tr>
+            <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:7px 8px;color:var(--text)">Exposure Reduction</td><td style="padding:7px 8px;color:var(--text2)">Validated risk removed — SPECTRUM</td><td style="padding:7px 8px"><span class="pill pill-green">EXISTS</span></td></tr>
+            <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:7px 8px;color:var(--text)">Mean Time to Revoke Agent Credentials</td><td style="padding:7px 8px;color:var(--text2)">NEW — add to STANDARD module dashboard</td><td style="padding:7px 8px"><span class="pill pill-red">BUILD</span></td></tr>
+            <tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:7px 8px;color:var(--text)">Autonomous Actions Under Policy Control</td><td style="padding:7px 8px;color:var(--text2)">NEW — use audit_log.under_policy_control field</td><td style="padding:7px 8px"><span class="pill pill-red">BUILD</span></td></tr>
+            <tr><td style="padding:7px 8px;color:var(--text)">Agent Inventory Coverage</td><td style="padding:7px 8px;color:var(--text2)">SYNTHESIS asset inventory — extend for AI agents</td><td style="padding:7px 8px"><span class="pill pill-gold">EXTEND</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="code-block" style="margin:10px 14px">
+<span class="cm">// React — two new KPI widgets for SYNTHESIS dashboard</span>
+
+<span class="cm">// Widget 1: Mean Time to Revoke Agent Credentials</span>
+<span class="kw">const</span> CredentialRevokeKPI = ({ avgMinutes }: { avgMinutes: <span class="kw">number</span> }) => (
+  &lt;div className=<span class="st">"kpi-card"</span>&gt;
+    &lt;div className=<span class="st">"kpi-label"</span>&gt;MEAN TIME TO REVOKE CREDENTIALS&lt;/div&gt;
+    &lt;div className=<span class="st">"kpi-value"</span> style={{ color: avgMinutes &lt; <span class="num">5</span> ? <span class="st">'#20E87A'</span> : <span class="st">'#E8203A'</span> }}&gt;
+      {avgMinutes}m
+    &lt;/div&gt;
+    &lt;div className=<span class="st">"kpi-target"</span>&gt;Target: &lt;strong&gt;&lt; 5 minutes&lt;/strong&gt;&lt;/div&gt;
+  &lt;/div&gt;
+);
+
+<span class="cm">// Widget 2: Autonomous Actions Under Policy Control (%)</span>
+<span class="kw">const</span> PolicyControlKPI = ({ pct }: { pct: <span class="kw">number</span> }) => (
+  &lt;div className=<span class="st">"kpi-card"</span>&gt;
+    &lt;div className=<span class="st">"kpi-label"</span>&gt;AUTONOMOUS ACTIONS UNDER POLICY CONTROL&lt;/div&gt;
+    &lt;div className=<span class="st">"kpi-value"</span> style={{ color: pct &gt;= <span class="num">95</span> ? <span class="st">'#20E87A'</span> : <span class="st">'#F59E0B'</span> }}&gt;
+      {pct}%
+    &lt;/div&gt;
+    &lt;div className=<span class="st">"kpi-target"</span>&gt;Target: &lt;strong&gt;&gt; 95%&lt;/strong&gt;&lt;/div&gt;
+  &lt;/div&gt;
+);
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SANDBOX HARDENING -->
+<div class="section" id="sandbox">
+  <div class="eyebrow">Section F · Sandbox Hardening · sandbox.tempris.tech</div>
+  <div class="h2">VPS Hardening <span class="acc">Checklist</span> — All New Threats Combined</div>
+
+  <div class="task-block">
+    <div class="task-header" style="color:var(--red)">
+      <span class="priority-badge p1">P1 — RUN TODAY</span>
+      TASK F1 — COMBINED VPS HARDENING SCRIPT
+    </div>
+    <div class="task-body">
+      <div class="task-item">
+        <div class="task-num">1</div>
+        <div class="task-text">Run this hardening script on sandbox.tempris.tech. Covers all new threat items from this brief:</div>
+      </div>
+      <div class="code-block">
+#!/bin/bash
+<span class="cm"># Tempris VPS Hardening Script v51</span>
+<span class="cm"># Run as: sudo bash tempris_harden_v51.sh</span>
+<span class="cm"># Tested: Ubuntu 22.04 LTS</span>
+
+echo <span class="st">"[1/6] Updating kernel (pedit COW CVE-2026-46331)..."</span>
+apt update && apt upgrade -y linux-image-generic
+
+echo <span class="st">"[2/6] Restricting unprivileged user namespaces..."</span>
+sysctl -w kernel.unprivileged_userns_clone=0
+echo <span class="st">"kernel.unprivileged_userns_clone=0"</span> >> /etc/sysctl.d/99-tempris-hardening.conf
+
+echo <span class="st">"[3/6] Checking act_pedit module..."</span>
+<span class="kw">if</span> lsmod | grep -q act_pedit; then
+  echo <span class="st">"WARNING: act_pedit loaded — blacklisting"</span>
+  echo <span class="st">"blacklist act_pedit"</span> > /etc/modprobe.d/blacklist-pedit.conf
+<span class="kw">else</span>
+  echo <span class="st">"OK: act_pedit not loaded"</span>
+<span class="kw">fi</span>
+
+echo <span class="st">"[4/6] Checking for unexpected Node.js services..."</span>
+NODE_PROCS=$(ps aux | grep -v grep | grep node | wc -l)
+<span class="kw">if</span> [ "$NODE_PROCS" -gt 0 ]; then
+  echo <span class="st">"WARNING: $NODE_PROCS Node.js process(es) found — REVIEW IMMEDIATELY"</span>
+  ps aux | grep node | grep -v grep
+<span class="kw">else</span>
+  echo <span class="st">"OK: No unexpected Node.js processes"</span>
+<span class="kw">fi</span>
+
+echo <span class="st">"[5/6] Applying sysctl hardening..."</span>
+sysctl --system
+
+echo <span class="st">"[6/6] Reboot required to load new kernel. Schedule at next maintenance window."</span>
+echo <span class="st">"Run: sudo reboot"</span>
+echo <span class="st">"After reboot verify: uname -r"</span>
+      </div>
+      <div class="task-item">
+        <div class="task-num">2</div>
+        <div class="task-text">After reboot: run <code style="color:var(--cyan)">uname -r</code> and confirm kernel version is newer than pre-patch. Send Sherie the before/after kernel version in your completion note.</div>
+      </div>
+      <div class="task-item">
+        <div class="task-num">3</div>
+        <div class="task-text">Confirm all Docker containers (Kafka, PostgreSQL, Redis, Zookeeper) are still running after reboot: <code style="color:var(--cyan)">docker ps</code></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TASK SUMMARY -->
+<div class="section" id="summary">
+  <div class="eyebrow">Summary · All v51 Implementation Tasks</div>
+  <div class="h2">Complete <span class="acc">Task List</span> for Elvand</div>
+
+  <table class="sum-table">
+    <thead>
+      <tr>
+        <th>Task</th>
+        <th>Action</th>
+        <th>File / Target</th>
+        <th>Priority</th>
+        <th>Done?</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>A1</td><td>Patch VPS kernel — pedit COW CVE-2026-46331</td><td>sandbox.tempris.tech VPS</td><td><span class="priority-badge p1">P1 TODAY</span></td><td>☐</td></tr>
+      <tr><td>A2</td><td>Add CVE-2026-46331 to KEV intake parser manual overrides</td><td>tempris_kev_intake_parser.py</td><td><span class="priority-badge p1">P1 TODAY</span></td><td>☐</td></tr>
+      <tr><td>A3</td><td>Add fim_bypass field to EDIP schema + React warning component</td><td>edip_models.py · DB migration · FIMBypassWarning.tsx</td><td><span class="priority-badge p2">P2</span></td><td>☐</td></tr>
+      <tr><td>B1</td><td>Add Signal key attack to SSS non-CVE intake</td><td>edip_non_cve_extension.py</td><td><span class="priority-badge p1">P1 THIS WEEK</span></td><td>☐</td></tr>
+      <tr><td>C1</td><td>Add Node.js phishing to SSS non-CVE intake</td><td>edip_non_cve_extension.py</td><td><span class="priority-badge p2">P2</span></td><td>☐</td></tr>
+      <tr><td>C2</td><td>Check VPS for exposed Node.js services</td><td>sandbox.tempris.tech</td><td><span class="priority-badge p1">P1 TODAY</span></td><td>☐</td></tr>
+      <tr><td>D1</td><td>Add probe detection to rate limiting middleware</td><td>rate_limit_middleware.py</td><td><span class="priority-badge p2">P2</span></td><td>☐</td></tr>
+      <tr><td>D2</td><td>Strip internal TES fields from API response serialiser</td><td>edip_response_serialiser.py</td><td><span class="priority-badge p2">P2</span></td><td>☐</td></tr>
+      <tr><td>E1</td><td>Add agent governance fields to EDIP audit log schema</td><td>DB migration · audit_log model</td><td><span class="priority-badge p2">P2</span></td><td>☐</td></tr>
+      <tr><td>E2</td><td>Add 2 new KPI widgets to SYNTHESIS executive dashboard</td><td>React dashboard components</td><td><span class="priority-badge p2">P2</span></td><td>☐</td></tr>
+      <tr><td>F1</td><td>Run combined VPS hardening script</td><td>sandbox.tempris.tech</td><td><span class="priority-badge p1">P1 TODAY</span></td><td>☐</td></tr>
+    </tbody>
+  </table>
+
+  <div style="margin-top:20px;background:var(--panel);border:1px solid var(--border2);padding:16px;font-size:11px;color:var(--text2);line-height:1.8">
+    <div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:8px">COMPLETION PROTOCOL</div>
+    For each task marked complete: update your progress log with task ID, date completed, and any deviations from this spec. Flag any tasks where the implementation differs from the spec before closing — Sherie needs to approve deviations that affect EDIP scoring output or API response structure.
+  </div>
+
+  <div class="src" style="margin-top:16px">
+    THREAT SOURCES THIS BRIEF: CVE-2026-46331 (THN Jun 2026) · FBI Signal Advisory Jun 2026 · Microsoft MSTIC Node.js Campaign Jun 2026 · METR GPT-5.6 Pre-Deployment Evaluation Jun 2026 · AI Cybersecurity Infographic (LinkedIn) · AI News Latent.Space Jun 27 2026<br>
+    DOCUMENT: Tempris_Elvand_DevBrief_v51_NEW_THREATS.html · Confidential · Tempris Technology Pte. Ltd. (UEN 202613990D)
+  </div>
+</div>
+
+</div>
+
+<!-- BEGIN CVE-2026-48907 JOOMLA JCE RCE BLOCK v51 -->
+<div style="background:linear-gradient(135deg,#0f172a 0%,#1e1b4b 100%);border:1px solid #dc2626;border-left:4px solid #dc2626;border-radius:8px;padding:20px 24px;margin:16px 0;font-family:'Space Mono',monospace;">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
+    <span style="background:#dc2626;color:#fff;font-size:9px;font-weight:700;padding:3px 8px;border-radius:3px;letter-spacing:.08em;">ESCALATE</span>
+    <span style="background:#7f1d1d;color:#fca5a5;font-size:9px;font-weight:700;padding:3px 8px;border-radius:3px;letter-spacing:.08em;">CISA KEV &#10003;</span>
+    <span style="background:#1e293b;color:#94a3b8;font-size:9px;padding:3px 8px;border-radius:3px;">CVE-2026-48907</span>
+    <span style="background:#1e293b;color:#94a3b8;font-size:9px;padding:3px 8px;border-radius:3px;">CVSS 9.8 &middot; TES 10.0</span>
+    <span style="background:#1e293b;color:#94a3b8;font-size:9px;padding:3px 8px;border-radius:3px;">CWE-284</span>
+    <span style="background:#7c3aed;color:#e9d5ff;font-size:9px;padding:3px 8px;border-radius:3px;">NC4-ALR-2026-000004</span>
+    <span style="background:#064e3b;color:#6ee7b7;font-size:9px;padding:3px 8px;border-radius:3px;">MAS TRM SUPPLY CHAIN</span>
+  </div>
+  <div style="color:#f1f5f9;font-size:13px;font-weight:700;margin-bottom:6px;letter-spacing:.04em;">
+    CRITICAL UNAUTHENTICATED RCE &mdash; JOOMLA CONTENT EDITOR (JCE) CVE-2026-48907
+  </div>
+  <div style="color:#94a3b8;font-size:11px;line-height:1.75;margin-bottom:12px;">
+    <strong style="color:#fca5a5;">Root cause:</strong> Broken access control (CWE-284) in JCE profile import endpoint. Three controls failed simultaneously: no auth check, no file extension whitelist, upload safety disabled. Attacker fetches CSRF token from public homepage (1 request), POSTs a malicious <code style="color:#7dd3fc;background:#0f172a;padding:1px 4px;border-radius:2px;">.xml.php</code> webshell (1 request), GETs the staged file to trigger execution (1 request). Full PHP RCE in 3 HTTP requests. Zero credentials. Fully automatable. Active exploitation confirmed &mdash; CISA KEV added 16 Jun 2026.
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-bottom:12px;">
+    <div style="background:#0f172a;border:1px solid #1e293b;border-radius:4px;padding:10px;">
+      <div style="color:#64748b;font-size:9px;margin-bottom:4px;letter-spacing:.06em;">AFFECTED VERSIONS</div>
+      <div style="color:#f1f5f9;font-size:11px;">JCE 1.0.0 &ndash; 2.9.99.4<br><span style="color:#4ade80;">&#10003; Fixed: 2.9.99.6</span></div>
+    </div>
+    <div style="background:#0f172a;border:1px solid #1e293b;border-radius:4px;padding:10px;">
+      <div style="color:#64748b;font-size:9px;margin-bottom:4px;letter-spacing:.06em;">ATTACK VECTOR</div>
+      <div style="color:#f1f5f9;font-size:11px;">Network / Pre-Auth<br><span style="color:#fca5a5;">3 HTTP requests</span></div>
+    </div>
+    <div style="background:#0f172a;border:1px solid #1e293b;border-radius:4px;padding:10px;">
+      <div style="color:#64748b;font-size:9px;margin-bottom:4px;letter-spacing:.06em;">EXPLOITATION</div>
+      <div style="color:#f1f5f9;font-size:11px;">Active &amp; automated<br><span style="color:#fca5a5;">Webshell persistence</span></div>
+    </div>
+    <div style="background:#0f172a;border:1px solid #dc2626;border-radius:4px;padding:10px;">
+      <div style="color:#64748b;font-size:9px;margin-bottom:4px;letter-spacing:.06em;">TES SCORE</div>
+      <div style="color:#dc2626;font-size:16px;font-weight:700;font-family:'Space Mono',monospace;">10.0 <span style="color:#64748b;font-size:9px;">CAPPED</span></div>
+    </div>
+  </div>
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:4px;padding:12px;margin-bottom:12px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:6px;letter-spacing:.06em;">MAS TRM SUPPLY CHAIN IMPLICATION</div>
+    <div style="color:#94a3b8;font-size:11px;line-height:1.7;">
+      Joomla+JCE is deployed across Singapore SME supplier web presences, partner extranets, and third-party vendor portals used by MAS TRM-regulated FIs. A compromised supplier portal becomes an initial access vector into the FI supply chain. EDIP flags this as a <strong style="color:#fca5a5;">TEF-elevated third-party exposure finding</strong> requiring immediate supplier notification and web presence audit under MAS TRM &sect;9 (Third-Party Risk Management). Tempris SCOUT connector can enumerate Joomla-based supplier assets for client exposure mapping.
+    </div>
+  </div>
+  <div style="background:#0f172a;border:1px solid #dc2626;border-radius:4px;padding:12px;margin-bottom:12px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">IMMEDIATE ACTIONS</div>
+    <div style="color:#94a3b8;font-size:11px;line-height:1.9;">
+      1. <strong style="color:#f1f5f9;">Upgrade JCE to &ge; 2.9.99.6</strong> immediately (2.9.99.5 = initial fix; .6 = full 6-layer hardening)<br>
+      2. <strong style="color:#f1f5f9;">Audit editor profiles</strong> &mdash; delete any not created by admins, especially those with PHP upload permissions<br>
+      3. <strong style="color:#f1f5f9;">Block PHP execution</strong> in <code style="color:#7dd3fc;background:#1e293b;padding:1px 4px;border-radius:2px;">/tmp/</code> <code style="color:#7dd3fc;background:#1e293b;padding:1px 4px;border-radius:2px;">/images/</code> <code style="color:#7dd3fc;background:#1e293b;padding:1px 4px;border-radius:2px;">/cache/</code> at web server level<br>
+      4. <strong style="color:#f1f5f9;">Deploy WAF rule</strong> blocking <code style="color:#7dd3fc;background:#1e293b;padding:1px 4px;border-radius:2px;">com_jce&amp;task=profiles.import</code><br>
+      5. <strong style="color:#f1f5f9;">If already compromised:</strong> restore from clean backup pre-3 Jun 2026 &mdash; scrubbing live webshells is unreliable<br>
+      6. <strong style="color:#f1f5f9;">Supplier audit:</strong> notify all third-party partners running Joomla; mandate patch confirmation under MAS TRM &sect;9
+    </div>
+  </div>
+  <div style="padding-top:8px;border-top:1px solid rgba(100,116,139,.15);font-size:9px;color:#475569;font-family:'Space Mono',monospace;">
+    SOURCE: NC4-ALR-2026-000004 (NACSA Singapore) &middot; CISA KEV added 16 Jun 2026 &middot; NVD CVE-2026-48907 CVSS 9.8/10.0 &middot; YesWeHack PoC &middot; Patch: JCE 2.9.99.5 (3 Jun 2026), hardened: 2.9.99.6 &middot; EPSS 0.94 percentile
+  </div>
+</div>
+<!-- END CVE-2026-48907 JOOMLA JCE RCE BLOCK v51 -->
+
+</body>
+</html>

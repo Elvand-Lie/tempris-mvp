@@ -1,0 +1,2481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>TEMPRIS — Business Logic Flaw SSS Intake · Developer Spec · v54</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --bg: #03060A;
+  --panel: #080F1A;
+  --panel2: #0B1622;
+  --border: #0F2035;
+  --border2: #1A3050;
+  --cyan: #00C8F0;
+  --orange: #FF7A30;
+  --red: #E8203A;
+  --green: #20E87A;
+  --purple: #8B5CF6;
+  --gold: #F59E0B;
+  --text: #D4E8F2;
+  --text2: #8BA8BE;
+  --muted: #4A7A9B;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; line-height: 1.6; }
+.page { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+
+/* HEADER */
+.hdr { border-bottom: 2px solid var(--orange); padding-bottom: 20px; margin-bottom: 28px; }
+.hdr-top { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.hdr-title { font-family: 'Space Mono', monospace; font-size: 18px; font-weight: 700; color: #fff; }
+.hdr-sub { font-family: 'Space Mono', monospace; font-size: 10px; color: var(--muted); margin-top: 4px; }
+.badge-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+.badge { font-family: 'Space Mono', monospace; font-size: 9px; padding: 3px 8px; letter-spacing: 1px; text-transform: uppercase; }
+.badge-o { background: rgba(255,122,48,.12); color: var(--orange); border: 1px solid rgba(255,122,48,.3); }
+.badge-c { background: rgba(0,200,240,.1); color: var(--cyan); border: 1px solid rgba(0,200,240,.2); }
+.badge-p { background: rgba(139,92,246,.1); color: var(--purple); border: 1px solid rgba(139,92,246,.2); }
+.badge-g { background: rgba(32,232,122,.1); color: var(--green); border: 1px solid rgba(32,232,122,.2); }
+.badge-r { background: rgba(232,32,58,.1); color: var(--red); border: 1px solid rgba(232,32,58,.2); }
+
+/* SECTION */
+.sec { margin-bottom: 28px; }
+.sec-label { font-family: 'Space Mono', monospace; font-size: 8px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; padding: 10px 0 8px; border-top: 1px solid var(--border2); margin: 24px 0 14px; }
+.panel { background: var(--panel); border: 1px solid var(--border2); padding: 18px 20px; margin-bottom: 14px; }
+.panel.orange { border-left: 3px solid var(--orange); }
+.panel.cyan { border-left: 3px solid var(--cyan); }
+.panel.purple { border-left: 3px solid var(--purple); }
+.panel.green { border-left: 3px solid var(--green); }
+
+/* GRIDS */
+.g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.g3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; }
+.g5 { display: grid; grid-template-columns: repeat(5,1fr); gap: 0; border: 1px solid var(--border2); }
+
+/* PIPELINE STEP */
+.pipe-step { padding: 16px 12px; text-align: center; border-right: 1px solid var(--border2); }
+.pipe-step:last-child { border-right: none; }
+.pipe-num { font-family: 'Space Mono', monospace; font-size: 22px; font-weight: 700; }
+.pipe-title { font-size: 11px; font-weight: 600; color: #fff; margin: 6px 0 4px; }
+.pipe-desc { font-size: 10px; color: var(--muted); }
+
+/* TABLE */
+.dt { width: 100%; border-collapse: collapse; }
+.dt th { font-family: 'Space Mono', monospace; font-size: 8px; letter-spacing: 2px; color: var(--muted); padding: 8px 12px; text-align: left; background: var(--panel2); border-bottom: 1px solid var(--border2); }
+.dt td { padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 11px; vertical-align: top; line-height: 1.6; }
+.dt tr:last-child td { border-bottom: none; }
+
+/* CODE BLOCK */
+.code { background: #03060A; border: 1px solid var(--border2); padding: 14px; font-family: 'Space Mono', monospace; font-size: 10px; color: var(--text); line-height: 1.8; overflow-x: auto; white-space: pre; margin-bottom: 14px; }
+.cm { color: var(--muted); }
+.ck { color: var(--cyan); }
+.co { color: var(--orange); }
+.cg { color: var(--green); }
+.cp { color: var(--purple); }
+
+/* API ROWS */
+.api-row { display: flex; align-items: baseline; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 11px; }
+.api-row:last-child { border-bottom: none; }
+.method { font-family: 'Space Mono', monospace; font-size: 8px; padding: 2px 6px; flex-shrink: 0; }
+.get { background: rgba(32,232,122,.12); color: var(--green); }
+.post { background: rgba(0,200,240,.12); color: var(--cyan); }
+.put { background: rgba(245,158,11,.12); color: var(--gold); }
+.api-path { font-family: 'Space Mono', monospace; font-size: 9px; color: #fff; }
+.api-desc { font-size: 10px; color: var(--muted); }
+
+/* FINDING TYPE PILL */
+.ft { font-family: 'Space Mono', monospace; font-size: 10px; padding: 2px 8px; background: rgba(255,122,48,.1); color: var(--orange); border: 1px solid rgba(255,122,48,.2); }
+
+/* FLOW PIPELINE */
+.flow { display: flex; align-items: stretch; gap: 0; margin: 14px 0; }
+.flow-item { flex: 1; background: var(--panel2); border: 1px solid var(--border2); padding: 10px 8px; text-align: center; position: relative; }
+.flow-item::after { content: '→'; position: absolute; right: -10px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 14px; z-index: 1; }
+.flow-item:last-child::after { display: none; }
+.flow-num { font-family: 'Space Mono', monospace; font-size: 16px; font-weight: 700; }
+.flow-label { font-size: 9px; color: var(--muted); margin-top: 4px; }
+
+/* DECISION BAND TABLE */
+.band-critical { color: var(--red); }
+.band-high { color: var(--orange); }
+.band-medium { color: var(--gold); }
+.band-low { color: var(--green); }
+
+/* FOOTER */
+.footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border2); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.footer-l { font-family: 'Space Mono', monospace; font-size: 9px; color: var(--muted); }
+
+/* RESPONSIVE */
+@media (max-width: 768px) {
+  .g2 { grid-template-columns: 1fr; }
+  .g3 { grid-template-columns: 1fr; }
+  .g5 { grid-template-columns: 1fr 1fr; }
+  .hdr-top { flex-direction: column; }
+  .pipe-step { border-right: none; border-bottom: 1px solid var(--border2); }
+  .flow { flex-direction: column; }
+  .flow-item::after { content: '↓'; right: auto; top: auto; bottom: -14px; left: 50%; transform: translateX(-50%); }
+  body { font-size: 12px; }
+}
+@media (max-width: 480px) {
+  .page { padding: 16px 12px; }
+  .g5 { grid-template-columns: 1fr; }
+  .code { font-size: 9px; }
+  .dt th, .dt td { padding: 6px 8px; }
+}
+
+/* ═══════════════════════════════════════════
+   TEMPRIS v52 — GLOBAL RESPONSIVE PATCH
+   ═══════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { overflow-x: hidden; max-width: 100vw; }
+table { width: 100%; border-collapse: collapse; word-break: break-word; }
+.tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+.tab-nav, .tab-bar, .nav-links {
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  flex-wrap: nowrap; scrollbar-width: thin;
+}
+.tab-nav::-webkit-scrollbar, .tab-bar::-webkit-scrollbar { height: 3px; }
+.tab-nav::-webkit-scrollbar-thumb, .tab-bar::-webkit-scrollbar-thumb { background: rgba(0,200,240,0.3); }
+pre, code, .code-block { overflow-x: auto; white-space: pre-wrap; word-break: break-word; max-width: 100%; }
+body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+.cti-strip-v54 {
+  border:.5px solid rgba(0,200,240,.18); border-radius:6px;
+  padding:9px 14px; margin-bottom:12px;
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:10px;
+}
+.cti-strip-v54 .cti-label {
+  font-family:'Space Mono','IBM Plex Mono',monospace;
+  font-size:9px; letter-spacing:2px; font-weight:600;
+  text-transform:uppercase; flex-shrink:0;
+}
+.cti-strip-v54 span { font-family:'Space Mono','IBM Plex Mono',monospace; font-size:9px; white-space:nowrap; }
+@media (max-width:768px) {
+  .g2,.g3,.g4,.engine-grid,.edip-grid,.hero-grid,.mod-grid,
+  .detail-row,.fin-grid,.btl-row,.loop-grid,.cards,.card-row {
+    grid-template-columns:1fr !important; display:grid !important;
+  }
+  .ctem-flow { grid-template-columns:repeat(3,1fr) !important; }
+  .compare-table,.dt { font-size:11px !important; }
+  .page,.wrap,.inner,.wrapper,.app-wrapper {
+    padding-left:14px !important; padding-right:14px !important; max-width:100% !important;
+  }
+  .hero,section,.section { padding-left:16px !important; padding-right:16px !important; }
+  nav,.hdr-inner { padding:0 12px !important; }
+  .h1,.pg-title { font-size:clamp(22px,6vw,34px) !important; }
+  .h2 { font-size:clamp(18px,5vw,26px) !important; }
+  .hstat-val,.clock-num { font-size:clamp(28px,7vw,46px) !important; }
+  .ticker { flex-direction:column; align-items:flex-start; gap:6px; }
+  .tstats { margin-left:0 !important; flex-wrap:wrap; }
+  .pill { font-size:10px !important; padding:3px 8px !important; }
+  .tab { padding:0 10px !important; font-size:9px !important; }
+  .hero-kpis { flex-wrap:wrap !important; gap:8px !important; }
+  .rung-hdr { flex-direction:column !important; }
+  .hdr-top { flex-direction:column !important; }
+}
+@media (max-width:480px) {
+  .ctem-flow { grid-template-columns:repeat(2,1fr) !important; }
+  .edip-grid,.hero-grid,.fin-grid { grid-template-columns:1fr !important; }
+  pre { font-size:10px !important; }
+}
+nav,.hdr { z-index:100; }
+/* END v52 PATCH */
+
+</style>
+<style id="v52-responsive-patch">
+/* === v52 RESPONSIVE / ALIGNMENT PATCH === */
+*{box-sizing:border-box;}
+html,body{max-width:100%;overflow-x:hidden;}
+.tab-bar,.tab-nav,.nav-links{
+  display:flex !important;
+  flex-wrap:nowrap !important;
+  overflow-x:auto !important;
+  overflow-y:hidden !important;
+  -webkit-overflow-scrolling:touch !important;
+  scrollbar-width:thin;
+  align-items:center;
+  gap:6px;
+  max-width:100%;
+}
+.tab-bar::-webkit-scrollbar,.tab-nav::-webkit-scrollbar,.nav-links::-webkit-scrollbar{height:3px;}
+.tab-bar::-webkit-scrollbar-thumb,.tab-nav::-webkit-scrollbar-thumb,.nav-links::-webkit-scrollbar-thumb{background:rgba(0,200,240,0.3);border-radius:3px;}
+.tab,.tab-nav>*,.nav-links>*{
+  flex-shrink:0 !important;
+  white-space:nowrap !important;
+}
+table{max-width:100%;display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+img,svg,video,canvas{max-width:100%;height:auto;}
+.card,.section,.container,.wrap{max-width:100%;}
+@media (max-width:768px){
+  .tab-bar,.tab-nav,.nav-links{gap:4px;padding-bottom:4px;}
+  .tab,.tab-nav>*,.nav-links>*{font-size:10px !important;padding:6px 10px !important;}
+  body{padding-left:12px !important;padding-right:12px !important;}
+  .card,.section{padding:14px !important;}
+  table{font-size:11px;}
+}
+@media (max-width:480px){
+  .tab,.tab-nav>*,.nav-links>*{font-size:9px !important;padding:5px 8px !important;}
+}
+/* === END v52 PATCH === */
+</style>
+<style id="v53-standardization-patch">
+/* === v53 STANDARDIZATION PATCH — fonts + responsive alignment === */
+*{box-sizing:border-box;}
+html,body{max-width:100vw;overflow-x:hidden;-webkit-text-size-adjust:100%;}
+body{font-family:'Inter',system-ui,-apple-system,sans-serif !important;font-size:13px;line-height:1.75;}
+h1,h2,h3,.pg-title,.cr-title,.sec-title{font-family:'Syne','Inter',sans-serif !important;line-height:1.2;overflow-wrap:break-word;}
+pre,code,kbd,.mono,.eyebrow,.hstat-label,.clock-unit{font-family:'Space Mono','Courier New',monospace !important;}
+p,li,td,th{overflow-wrap:break-word;word-break:break-word;}
+pre{white-space:pre-wrap;overflow-x:auto;max-width:100%;-webkit-overflow-scrolling:touch;}
+table{max-width:100%;display:block;overflow-x:auto;border-collapse:collapse;-webkit-overflow-scrolling:touch;}
+img,svg,video,canvas,iframe{max-width:100%;height:auto;}
+.card,.section,.container,.wrap,div[style*="max-width"]{max-width:100% !important;}
+div[style*="display:flex"]{flex-wrap:wrap;}
+.tab-bar,.tab-nav,.nav-links{flex-wrap:nowrap !important;overflow-x:auto !important;-webkit-overflow-scrolling:touch !important;scrollbar-width:thin;}
+@media(max-width:768px){
+  body{font-size:12.5px;}
+  div[style*="grid-template-columns"]{grid-template-columns:1fr !important;}
+  div[style*="padding:22px"],div[style*="padding: 22px"]{padding:16px !important;}
+  .pg-title{font-size:clamp(22px,7vw,32px) !important;}
+}
+@media(max-width:480px){
+  body{font-size:12px;}
+  pre{font-size:9.5px !important;}
+  div[style*="justify-content:space-between"]{flex-direction:column;gap:8px;align-items:flex-start !important;}
+}
+/* === END v53 PATCH === */
+</style>
+
+
+<style id="v54-tab-responsive-patch">
+/* === v54 TAB + LAYOUT RESPONSIVE HARDENING (bug-bounty handoff) === */
+/* Any horizontal tab/nav strip: never wrap, always scrollable on narrow screens */
+[class*="tab"],[class*="Tab"],[role="tablist"],.nav,.nav-links,.pill-row,.filter-row{
+  display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;
+  scrollbar-width:thin;scroll-snap-type:x proximity;gap:6px;
+}
+[class*="tab"]::-webkit-scrollbar,[role="tablist"]::-webkit-scrollbar{height:4px;}
+[class*="tab"]::-webkit-scrollbar-thumb{background:#334155;border-radius:2px;}
+[class*="tab"] > *,[role="tablist"] > *{flex:0 0 auto;scroll-snap-align:start;white-space:nowrap;}
+/* Grids collapse cleanly on mobile */
+@media(max-width:820px){
+  [style*="grid-template-columns"]{grid-template-columns:1fr !important;}
+  [style*="display:flex"][style*="space-between"]{flex-wrap:wrap;gap:10px;}
+}
+/* Tables scroll instead of overflowing the viewport */
+table{display:block;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+/* Code blocks never break layout */
+pre{white-space:pre-wrap;word-break:break-word;overflow-x:auto;max-width:100%;}
+/* Cards keep consistent internal alignment */
+.card,[class*="card"]{max-width:100%;box-sizing:border-box;}
+/* === END v54 TAB PATCH === */
+</style>
+
+</head>
+<body>
+<!-- V53 CHANGELOG BANNER -->
+<div style="background:#0f172a;border:1px solid #34d399;border-radius:6px;padding:14px 18px;margin:20px 0;font-family:'Space Mono',monospace;font-size:10px;color:#6ee7b7;">
+  v53 CYCLE &middot; Adds CVE-2026-45659 Microsoft SharePoint Server RCE (KEV added Jul 1 2026, FCEB due Jul 4 2026, CVSS 8.8, deserialization CWE-502) &middot; Confirms SimpleHelp OIDC bypass KEV entry as CVE-2026-48558 &middot; Adds Software Factory NHI Authority Compromise finding subtypes (NHI-TRIAGE / NHI-IMPLEMENT / NHI-REVIEW / NHI-DEPLOY / NHI-MONITOR) via SSS pipeline &middot; Adds market-signal watch items (XBOW exploit-proof validation trend; MAS TRM 12.3.3 competitor messaging) &middot; v53 font standardization + responsive alignment patch applied suite-wide
+</div>
+<!-- END V53 CHANGELOG -->
+
+<!-- V54 CHANGELOG BANNER -->
+<div style="background:#0f172a;border:1px solid #f472b6;border-radius:6px;padding:14px 18px;margin:20px 0;font-family:'Space Mono',monospace;font-size:10px;color:#f9a8d4;">
+  v54 CYCLE &middot; Adds Fable Cyber Jailbreak Severity framework as market-signal watch item (Anthropic scoring rubric = TES-convergence proof for investor deck) &middot; Adds Tiiny AI edge-AI validation watch item (offline on-device LLM category validates air-gap EDIP thesis) &middot; Propagates CISO KPI board + 8-layer positioning map references suite-wide &middot; Version bump + markup revalidation across all 16 docs
+</div>
+<!-- END V54 CHANGELOG -->
+
+<!-- V54 SIGNAL: DEV ENDPOINT SECRET SPRAWL -->
+<div style="background:#1e293b;border:1px solid #fb7185;border-radius:8px;padding:22px;margin-bottom:20px;">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+    <div style="font-family:'Space Mono',monospace;font-size:13px;color:#fda4af;font-weight:700;">SIGNAL &middot; Dev Endpoint Secret Sprawl (SCOUT connector candidate)</div>
+    <div style="font-family:'Space Mono',monospace;font-size:9px;padding:4px 10px;border-radius:4px;border:1px solid #fb7185;color:#fda4af;background:#0f172a;">SSS &middot; cred-exposure</div>
+  </div>
+  <div style="font-size:12px;color:#94a3b8;line-height:1.7;margin-bottom:14px;">
+    A dev laptop holds ~150 secrets on average &mdash; in .env files, shell history, cloud profile folders, and critically <strong style="color:#e2e8f0;">MCP configs and AI agent logs</strong> &mdash; none of which reach a commit, so repo scanners miss them (GitGuardian ggshield scans endpoints locally). <strong style="color:#e2e8f0;">Impact:</strong> &ldquo;MCP configs + AI agent logs as a credential surface&rdquo; is exactly the NHI software-factory finding class. External confirmation that agentic credential sprawl is a real, product-worthy problem &mdash; validates the SCOUT connector to ingest endpoint secret-exposure findings as EDIP cred-exposure / NHI-authority findings.
+  </div>
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">PYTHON &mdash; SCOUT: ENDPOINT SECRET -> EDIP CRED-EXPOSURE FINDING</div>
+    <pre style="color:#a5f3fc;font-size:10px;line-height:1.7;overflow-x:auto;margin:0;white-space:pre-wrap;">SECRET_SURFACES = {
+    ".env": 8.0, "shell_history": 6.5, "cloud_profile": 8.5,
+    "mcp_config": 9.0, "ai_agent_log": 9.2,   # agentic surfaces score highest
+}
+
+def to_edip_finding(surface: str, secret_type: str, host: str) -> dict:
+    sss = SECRET_SURFACES.get(surface, 6.0)
+    tags = ["cred-exposure"]
+    if surface in ("mcp_config", "ai_agent_log"):
+        tags.append("NHI-authority")
+    decision = "ESCALATE" if sss >= 9.0 else "INVESTIGATE"
+    return {"surface": surface, "secret_type": secret_type, "host": host,
+            "sss": sss, "pipeline": "SSS", "edip_tags": tags,
+            "decision": decision, "control": "Rotate + scope least-privilege; "
+            "treat agent config/log surfaces as untrusted"}
+
+if __name__ == "__main__":
+    print(to_edip_finding("mcp_config", "github_pat", "dev-laptop-07"))</pre>
+  </div>
+  <div style="font-size:9px;color:#475569;font-family:'Space Mono',monospace;padding-top:10px;margin-top:10px;border-top:1px solid rgba(100,116,139,.15);">SOURCE: GitGuardian Developer Endpoint Protection announcement (Jul 2026) &middot; Wave 2 SCOUT connector candidate &middot; gate behind IP-counsel + client consent (endpoint scanning is invasive)</div>
+</div>
+<!-- END V54 ENDPOINT SIGNAL -->
+
+
+
+<!-- V54 SPEC: SCOUT agentskills.io ENRICHMENT SOURCE (Wave 2) -->
+<div style="background:#1e293b;border:1px solid #38bdf8;border-radius:8px;padding:22px;margin-bottom:20px;">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+    <div style="font-family:'Space Mono',monospace;font-size:13px;color:#7dd3fc;font-weight:700;">SCOUT CONNECTOR &middot; agentskills.io Enrichment Source (Wave 2 candidate)</div>
+    <div style="font-family:'Space Mono',monospace;font-size:9px;padding:4px 10px;border-radius:4px;border:1px solid #38bdf8;color:#7dd3fc;background:#0f172a;">READ-ONLY &middot; NO EXEC</div>
+  </div>
+
+  <div style="font-size:12px;color:#94a3b8;line-height:1.7;margin-bottom:14px;">
+    <strong style="color:#e2e8f0;">Scope:</strong> ingest the Apache-2.0 <code style="color:#a5f3fc;">Anthropic-Cybersecurity-Skills</code> index (817 skills, agentskills.io standard, <em>not Anthropic-affiliated</em>) as <strong style="color:#e2e8f0;">finding-context enrichment</strong> &mdash; not as executable playbooks. Skill metadata maps to existing EDIP finding subtypes (NHI-authority, BLFLAW, CVE-RCE, cred-exposure, TES-context) so an analyst reviewing a finding sees the relevant remediation workflow reference inline.
+    <br><br>
+    <strong style="color:#e2e8f0;">Boundaries:</strong> (1) metadata only &mdash; never auto-run skill scripts; (2) enrichment tags never alter TES score, only annotate; (3) IP counsel must confirm Apache-2.0 attribution requirements before external client exposure; (4) progressive-disclosure pattern (scan 30-token frontmatter &rarr; load full skill on demand) is the reference model for EDIP corpus retrieval pre-SLM.
+  </div>
+
+  <!-- PYTHON -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">PYTHON &mdash; SCOUT ENRICHMENT INGESTER (v54)</div>
+    <pre style="color:#a5f3fc;font-size:10px;line-height:1.7;overflow-x:auto;margin:0;white-space:pre-wrap;">import json, urllib.request
+
+# Read-only. Pulls skill INDEX metadata, maps to EDIP finding subtypes.
+# Never fetches or executes skill scripts. Enrichment tags annotate only.
+INDEX_URL = ("https://raw.githubusercontent.com/mukul975/"
+             "Anthropic-Cybersecurity-Skills/main/index.json")
+
+EDIP_MAP = {
+    "prompt-injection":"NHI-authority", "oauth-token":"NHI-authority",
+    "agentic":"NHI-authority",          "mcp":"NHI-authority",
+    "business-logic":"BLFLAW",          "sqli":"BLFLAW",
+    "deserialization":"CVE-RCE",        "credential":"cred-exposure",
+    "patch-prioriti":"TES-context",     "cvss":"TES-context",
+}
+
+def fetch_index(url=INDEX_URL):
+    with urllib.request.urlopen(url, timeout=15) as r:
+        return json.loads(r.read()).get("skills", [])
+
+def enrich(skills):
+    out = []
+    for s in skills:
+        blob = (s["name"] + " " + s.get("description","")).lower()
+        tags = sorted({v for k,v in EDIP_MAP.items() if k in blob})
+        if tags:
+            out.append({"skill":s["name"], "edip_tags":tags,
+                        "path":s["path"],
+                        "source":"agentskills.io/apache-2.0",
+                        "affiliation":"NOT Anthropic PBC"})
+    return out
+
+if __name__ == "__main__":
+    matched = enrich(fetch_index())
+    print(f"{len(matched)} skills mapped to EDIP finding context")
+    with open("edip_skill_enrichment.json","w") as f:
+        json.dump(matched, f, indent=2)</pre>
+  </div>
+
+  <!-- REACT -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">REACT &mdash; SPOTLIGHT: SKILL ENRICHMENT BROWSER (v54)</div>
+    <pre style="color:#a5f3fc;font-size:10px;line-height:1.7;overflow-x:auto;margin:0;white-space:pre-wrap;">import { useState, useMemo } from "react";
+
+const TAG_COLOR = {
+  "NHI-authority":"#a78bfa", "BLFLAW":"#f59e0b", "CVE-RCE":"#ef4444",
+  "cred-exposure":"#fb7185", "TES-context":"#38bdf8",
+};
+
+export default function SkillEnrichmentBrowser({ skills }) {
+  const [tag, setTag] = useState("all");
+  const tags = useMemo(
+    () => ["all", ...new Set(skills.flatMap((s) =&gt; s.edip_tags))], [skills]);
+  const shown = tag === "all"
+    ? skills : skills.filter((s) =&gt; s.edip_tags.includes(tag));
+
+  return (
+    &lt;div style={{ background:"#0f172a", padding:16, borderRadius:8 }}&gt;
+      &lt;div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:12 }}&gt;
+        {tags.map((t) =&gt; (
+          &lt;button key={t} onClick={() =&gt; setTag(t)}
+            style={{ fontFamily:"Space Mono, monospace", fontSize:10,
+                     padding:"4px 10px", borderRadius:4, cursor:"pointer",
+                     background: tag===t ? (TAG_COLOR[t] ?? "#334155") : "transparent",
+                     color: tag===t ? "#0f172a" : "#94a3b8",
+                     border:`1px solid ${TAG_COLOR[t] ?? "#334155"}` }}&gt;
+            {t}
+          &lt;/button&gt;
+        ))}
+      &lt;/div&gt;
+      &lt;div style={{ fontFamily:"Space Mono, monospace", fontSize:9,
+                    color:"#64748b", marginBottom:8 }}&gt;
+        {shown.length} skills &middot; agentskills.io (Apache-2.0, NOT Anthropic-affiliated)
+      &lt;/div&gt;
+      {shown.map((s) =&gt; (
+        &lt;div key={s.skill} style={{ borderBottom:"1px solid #1e293b", padding:"8px 0" }}&gt;
+          &lt;span style={{ color:"#e2e8f0", fontSize:12 }}&gt;{s.skill}&lt;/span&gt;
+          &lt;div style={{ marginTop:4, display:"flex", gap:4, flexWrap:"wrap" }}&gt;
+            {s.edip_tags.map((t) =&gt; (
+              &lt;span key={t} style={{ fontFamily:"Space Mono, monospace", fontSize:9,
+                       color:TAG_COLOR[t], border:`1px solid ${TAG_COLOR[t]}`,
+                       borderRadius:3, padding:"1px 6px" }}&gt;{t}&lt;/span&gt;
+            ))}
+          &lt;/div&gt;
+        &lt;/div&gt;
+      ))}
+    &lt;/div&gt;
+  );
+}</pre>
+  </div>
+  <div style="font-size:9px;color:#475569;font-family:'Space Mono',monospace;padding-top:10px;margin-top:12px;border-top:1px solid rgba(100,116,139,.15);">SOURCE: github.com/mukul975/Anthropic-Cybersecurity-Skills (Apache-2.0, community project, NOT Anthropic PBC) &middot; 817 skills / 29 domains / 6 framework mappings &middot; Wave 2 SCOUT enrichment candidate &middot; Elvand: gate behind IP-counsel attribution sign-off before client-facing use</div>
+</div>
+<!-- END V54 SCOUT ENRICHMENT SPEC -->
+
+<!-- V54 SCOUT: SKILLCLOAK RUNTIME GUARD -->
+<div style="background:#1e293b;border:1px solid #ef4444;border-radius:8px;padding:22px;margin-bottom:20px;">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+    <div style="font-family:'Space Mono',monospace;font-size:13px;color:#fca5a5;font-weight:700;">SCOUT HARDENING &middot; SkillCloak Runtime Guard (mandatory before client exposure)</div>
+    <div style="font-family:'Space Mono',monospace;font-size:9px;padding:4px 10px;border-radius:4px;border:1px solid #ef4444;color:#fca5a5;background:#0f172a;">SSS &middot; cloaked-skill</div>
+  </div>
+  <div style="font-size:12px;color:#94a3b8;line-height:1.7;margin-bottom:14px;">
+    <strong style="color:#e2e8f0;">Design change:</strong> SkillCloak hides payloads in scanner-skipped folders and reassembles them only at runtime &mdash; it bypassed all 8 static scanners &gt;90% of the time. The SCOUT agentskills.io connector reads skill metadata <em>statically</em>, so it is defeated by exactly this technique. <strong style="color:#e2e8f0;">Rule:</strong> static skill metadata is never trusted on its own. Every ingested skill is flagged for cloaking indicators and must pass a behavioral/runtime detonation check (SkillDetonate-style, in sandbox) before it is enabled. Cloaked-skill risk has no static-patch path &rarr; scores via SSS, decision = COMPENSATING_CONTROL.
+  </div>
+
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">PYTHON &mdash; SKILLCLOAK-AWARE GUARD (v54)</div>
+    <pre style="color:#a5f3fc;font-size:10px;line-height:1.7;overflow-x:auto;margin:0;white-space:pre-wrap;">from pathlib import Path
+
+# Static skill metadata is NOT trustworthy (SkillCloak bypasses static scanners).
+SCANNER_SKIPPED_DIRS = {".cache", "__pycache__", ".git", "node_modules",
+                        "test/fixtures", "assets", ".hidden"}
+CLOAK_INDICATORS = ("base64.b64decode", "exec(", "eval(", "marshal.loads",
+                    "__import__", "getattr(", "compile(")
+
+def audit_skill(skill_dir: str) -> dict:
+    p = Path(skill_dir)
+    flags = []
+    for f in p.rglob("*"):
+        if not f.is_file():
+            continue
+        rel = str(f.relative_to(p))
+        # payload hidden in a folder scanners usually skip
+        if any(d in rel for d in SCANNER_SKIPPED_DIRS) and f.suffix in (".py", ".js", ".bin"):
+            flags.append(f"payload-in-skipped-dir:{rel}")
+        try:
+            text = f.read_text(errors="ignore")
+        except Exception:
+            continue
+        for ind in CLOAK_INDICATORS:
+            if ind in text:
+                flags.append(f"runtime-reassembly:{ind}@{rel}")
+    trusted = not flags
+    return {"skill": p.name, "static_trusted": trusted, "flags": flags,
+            "edip_tags": ["NHI-authority", "cloaked-skill"] if flags else [],
+            "pipeline": "SSS",
+            "decision": "COMPENSATING_CONTROL" if flags else "ALLOW",
+            "required_control": None if trusted else
+                "Runtime detonation in sandbox before enabling; "
+                "never trust static metadata alone"}
+
+if __name__ == "__main__":
+    import json
+    print(json.dumps(audit_skill("./example_skill"), indent=2))</pre>
+  </div>
+
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">REACT &mdash; SKILL TRUST BADGE (SPOTLIGHT, v54)</div>
+    <pre style="color:#a5f3fc;font-size:10px;line-height:1.7;overflow-x:auto;margin:0;white-space:pre-wrap;">import { useState } from "react";
+
+export default function SkillTrustBadge({ result }) {
+  const [open, setOpen] = useState(false);
+  const safe = result.static_trusted;
+  const color = safe ? "#22c55e" : "#ef4444";
+  return (
+    &lt;div style={{ background:"#1e293b", border:`1px solid ${color}`,
+                   borderRadius:8, padding:16 }}&gt;
+      &lt;div style={{ display:"flex", justifyContent:"space-between",
+                     flexWrap:"wrap", gap:8 }}&gt;
+        &lt;strong style={{ color, fontFamily:"Space Mono, monospace" }}&gt;
+          {result.skill}
+        &lt;/strong&gt;
+        &lt;span style={{ fontFamily:"Space Mono, monospace", fontSize:10, color }}&gt;
+          {safe ? "STATIC OK · still needs runtime check"
+                : "CLOAK RISK · behavioral required"}
+        &lt;/span&gt;
+      &lt;/div&gt;
+      {result.flags.length &gt; 0 &amp;&amp; (
+        &lt;&gt;
+          &lt;button onClick={() =&gt; setOpen(!open)}
+            style={{ marginTop:10, background:"none", border:`1px solid ${color}`,
+                     color, fontSize:10, padding:"4px 10px",
+                     borderRadius:4, cursor:"pointer" }}&gt;
+            {open ? "Hide" : `${result.flags.length} cloak flags`}
+          &lt;/button&gt;
+          {open &amp;&amp; (
+            &lt;ul style={{ color:"#94a3b8", fontSize:11, marginTop:8,
+                         paddingLeft:18, lineHeight:1.7 }}&gt;
+              {result.flags.map((f) =&gt; &lt;li key={f}&gt;{f}&lt;/li&gt;)}
+            &lt;/ul&gt;
+          )}
+          &lt;p style={{ color:"#f87171", fontSize:11, marginTop:8 }}&gt;
+            {result.required_control}
+          &lt;/p&gt;
+        &lt;/&gt;
+      )}
+    &lt;/div&gt;
+  );
+}</pre>
+  </div>
+  <div style="font-size:9px;color:#475569;font-family:'Space Mono',monospace;padding-top:10px;margin-top:10px;border-top:1px solid rgba(100,116,139,.15);">SOURCE: SkillCloak/SkillDetonate research (Jul 2026) &middot; bypassed 8/8 static scanners &gt;90% &middot; SCOUT connector Wave 2 design gate: runtime validation REQUIRED before any client-facing skill enablement</div>
+</div>
+<!-- END V54 SKILLCLOAK GUARD -->
+
+
+
+<!-- V54 SECTION: SOFTWARE FACTORY NHI AUTHORITY COMPROMISE -->
+<div style="background:#1e293b;border:1px solid #a78bfa;border-radius:8px;padding:22px;margin-bottom:20px;">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
+    <div style="font-family:'Space Mono',monospace;font-size:13px;color:#c4b5fd;font-weight:700;">NON-CVE &middot; Software Factory NHI Authority Compromise &middot; SSS Pipeline (v54)</div>
+    <div style="font-family:'Space Mono',monospace;font-size:9px;padding:4px 10px;border-radius:4px;border:1px solid #a78bfa;color:#c4b5fd;background:#0f172a;">SSS &middot; COMPENSATING_CONTROL</div>
+  </div>
+  <div style="font-size:12px;color:#94a3b8;line-height:1.7;margin-bottom:16px;">
+    Agentic software factories (triage &rarr; implement &rarr; review &rarr; deploy &rarr; monitor loops) put real credentials in the hands of agents that obey whatever instructions they read &mdash; EchoLeak-class (CVE-2025-32711) structural risk applied to the SDLC. A poisoned Jira ticket reaches an agent with repo write; a poisoned PR comment reaches merge + CI/CD trigger rights; a planted config file reaches production deploy keys. <strong style="color:#e2e8f0;">No patch path exists</strong> &mdash; interpreting untrusted input is the agent's core function &mdash; so these score via <strong style="color:#e2e8f0;">SSS, not CVSS+AGM</strong>, and COMPENSATING_CONTROL is the only available decision. Five new finding subtypes below.
+  </div>
+
+  <!-- SUBTYPE TABLE -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;overflow-x:auto;">
+    <table style="width:100%;border-collapse:collapse;font-size:11px;color:#cbd5e1;">
+      <tr style="font-family:'Space Mono',monospace;font-size:9px;color:#64748b;letter-spacing:1px;">
+        <th style="text-align:left;padding:6px;border-bottom:1px solid #1e293b;">SUBTYPE</th>
+        <th style="text-align:left;padding:6px;border-bottom:1px solid #1e293b;">COMPONENT</th>
+        <th style="text-align:left;padding:6px;border-bottom:1px solid #1e293b;">CREDENTIALS AT RISK</th>
+        <th style="text-align:center;padding:6px;border-bottom:1px solid #1e293b;">SSS</th>
+        <th style="text-align:center;padding:6px;border-bottom:1px solid #1e293b;">DECISION</th>
+      </tr>
+      <tr><td style="padding:6px;font-family:'Space Mono',monospace;color:#fbbf24;">NHI-TRIAGE</td><td style="padding:6px;">Issue triage agent</td><td style="padding:6px;">Jira/Linear API tokens</td><td style="padding:6px;text-align:center;color:#fbbf24;font-weight:700;font-family:'Space Mono',monospace;">7.5</td><td style="padding:6px;text-align:center;"><span style="color:#fbbf24;border:1px solid #f59e0b;border-radius:3px;padding:2px 6px;font-size:9px;font-family:'Space Mono',monospace;">INVESTIGATE</span></td></tr>
+      <tr><td style="padding:6px;font-family:'Space Mono',monospace;color:#ef4444;">NHI-IMPLEMENT</td><td style="padding:6px;">Code implementation agent</td><td style="padding:6px;">GitHub repo write, SSH keys</td><td style="padding:6px;text-align:center;color:#ef4444;font-weight:700;font-family:'Space Mono',monospace;">9.2</td><td style="padding:6px;text-align:center;"><span style="color:#ef4444;border:1px solid #ef4444;border-radius:3px;padding:2px 6px;font-size:9px;font-family:'Space Mono',monospace;">ESCALATE</span></td></tr>
+      <tr><td style="padding:6px;font-family:'Space Mono',monospace;color:#ef4444;">NHI-REVIEW</td><td style="padding:6px;">Automated code review agent</td><td style="padding:6px;">GitHub PR approve/merge tokens</td><td style="padding:6px;text-align:center;color:#ef4444;font-weight:700;font-family:'Space Mono',monospace;">9.8</td><td style="padding:6px;text-align:center;"><span style="color:#ef4444;border:1px solid #ef4444;border-radius:3px;padding:2px 6px;font-size:9px;font-family:'Space Mono',monospace;">ESCALATE</span></td></tr>
+      <tr><td style="padding:6px;font-family:'Space Mono',monospace;color:#ef4444;">NHI-DEPLOY</td><td style="padding:6px;">CI/CD pipeline agent</td><td style="padding:6px;">AWS/GCP deploy keys, Docker registry, prod env vars</td><td style="padding:6px;text-align:center;color:#ef4444;font-weight:700;font-family:'Space Mono',monospace;">10.0</td><td style="padding:6px;text-align:center;"><span style="color:#ef4444;border:1px solid #ef4444;border-radius:3px;padding:2px 6px;font-size:9px;font-family:'Space Mono',monospace;">ESCALATE</span></td></tr>
+      <tr><td style="padding:6px;font-family:'Space Mono',monospace;color:#fbbf24;">NHI-MONITOR</td><td style="padding:6px;">Monitoring agent</td><td style="padding:6px;">Datadog API, PagerDuty, log read access</td><td style="padding:6px;text-align:center;color:#fbbf24;font-weight:700;font-family:'Space Mono',monospace;">6.5</td><td style="padding:6px;text-align:center;"><span style="color:#fbbf24;border:1px solid #f59e0b;border-radius:3px;padding:2px 6px;font-size:9px;font-family:'Space Mono',monospace;">INVESTIGATE</span></td></tr>
+    </table>
+  </div>
+
+  <!-- PYTHON CODE -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">PYTHON — SSS INTAKE: NHI SOFTWARE FACTORY SUBTYPES (v54)</div>
+    <pre style="color:#a5f3fc;font-size:10px;line-height:1.7;overflow-x:auto;margin:0;white-space:pre-wrap;">import json
+
+# v54: Software Factory NHI Authority Compromise — SSS pipeline (non-CVE).
+# EchoLeak-class structural risk. No patch path -> COMPENSATING_CONTROL only.
+NHI_FINDINGS = [
+    {"subtype":"NHI-TRIAGE",    "component":"Issue triage agent",
+     "credentials":["Jira/Linear API tokens"],                          "sss":7.5},
+    {"subtype":"NHI-IMPLEMENT", "component":"Code implementation agent",
+     "credentials":["GitHub repo write","SSH keys"],                    "sss":9.2},
+    {"subtype":"NHI-REVIEW",    "component":"Automated code review agent",
+     "credentials":["GitHub PR approve/merge tokens"],                  "sss":9.8},
+    {"subtype":"NHI-DEPLOY",    "component":"CI/CD pipeline agent",
+     "credentials":["AWS/GCP deploy keys","Docker registry","prod env vars"],"sss":10.0},
+    {"subtype":"NHI-MONITOR",   "component":"Monitoring agent",
+     "credentials":["Datadog API","PagerDuty","log read access"],       "sss":6.5},
+]
+
+COMPENSATING_CONTROLS = [
+    "Restrict agent merge permissions — human gate at deploy stage minimum",
+    "Scope agent credentials least-privilege per task — no standing prod access",
+    "Treat Jira/Linear/Slack agent instruction sources as untrusted input",
+    "Append-only audit trail for all agent actions (TACF D2 pattern)",
+    "Human review gate for any agent action touching production",
+]
+
+def route(f):
+    # SSS pipeline: severity drives urgency tier. Decision is always
+    # COMPENSATING_CONTROL — no patch resolves structural authority risk,
+    # so the PATCH tier is intentionally absent from this subtype family.
+    tier = ("ESCALATE" if f["sss"] >= 9.0
+            else "INVESTIGATE" if f["sss"] >= 4.0
+            else "DEFER")
+    return {**f, "pipeline":"SSS", "urgency_tier":tier,
+            "decision":"COMPENSATING_CONTROL",
+            "controls":COMPENSATING_CONTROLS}
+
+results = [route(f) for f in NHI_FINDINGS]
+for r in results:
+    print(f"{r['subtype']:<14} SSS:{r['sss']:>4}  {r['urgency_tier']:<12} -> {r['decision']}")
+with open("nhi_software_factory_sss.json","w") as f:
+    json.dump(results, f, indent=2)
+print("Saved: nhi_software_factory_sss.json")</pre>
+  </div>
+
+  <!-- REACT CODE -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">REACT — NHI SUBTYPE FINDING CARD (SPOTLIGHT UI, v54)</div>
+    <pre style="color:#a5f3fc;font-size:10px;line-height:1.7;overflow-x:auto;margin:0;white-space:pre-wrap;">import { useState } from "react";
+
+const TIER = {
+  ESCALATE:    { border: "#ef4444", text: "#fca5a5" },
+  INVESTIGATE: { border: "#f59e0b", text: "#fbbf24" },
+};
+
+export default function NhiFindingCard({ finding }) {
+  const [open, setOpen] = useState(false);
+  const c = TIER[finding.urgency_tier] ?? TIER.INVESTIGATE;
+  return (
+    &lt;div style={{ background: "#1e293b", border: `1px solid ${c.border}`,
+                   borderRadius: 8, padding: 18, marginBottom: 14 }}&gt;
+      &lt;div style={{ display: "flex", justifyContent: "space-between",
+                     flexWrap: "wrap", gap: 8 }}&gt;
+        &lt;span style={{ fontFamily: "Space Mono, monospace",
+                        color: c.text, fontWeight: 700 }}&gt;
+          {finding.subtype} &middot; {finding.component}
+        &lt;/span&gt;
+        &lt;span style={{ fontFamily: "Space Mono, monospace", fontSize: 10,
+                        border: `1px solid ${c.border}`, color: c.text,
+                        padding: "3px 9px", borderRadius: 4 }}&gt;
+          SSS {finding.sss.toFixed(1)} &middot; COMPENSATING_CONTROL
+        &lt;/span&gt;
+      &lt;/div&gt;
+      &lt;div style={{ color: "#94a3b8", fontSize: 12, margin: "10px 0" }}&gt;
+        Credentials at risk: {finding.credentials.join(", ")}
+      &lt;/div&gt;
+      &lt;button onClick={() =&gt; setOpen(!open)}
+        style={{ background: "none", border: `1px solid ${c.border}`,
+                 color: c.text, fontSize: 10, padding: "4px 10px",
+                 borderRadius: 4, cursor: "pointer" }}&gt;
+        {open ? "Hide" : "Show"} compensating controls ({finding.controls.length})
+      &lt;/button&gt;
+      {open &amp;&amp; (
+        &lt;ul style={{ color: "#cbd5e1", fontSize: 11, marginTop: 10,
+                      paddingLeft: 18, lineHeight: 1.8 }}&gt;
+          {finding.controls.map((ctrl) =&gt; &lt;li key={ctrl}&gt;{ctrl}&lt;/li&gt;)}
+        &lt;/ul&gt;
+      )}
+    &lt;/div&gt;
+  );
+}</pre>
+  </div>
+  <div style="font-size:9px;color:#475569;font-family:'Space Mono',monospace;padding-top:10px;border-top:1px solid rgba(100,116,139,.15);">SOURCE: Tempris Roadmap Note — NHI/Agentic Identity v1 (Jul 2026) &middot; EchoLeak CVE-2025-32711 precedent &middot; OWASP Agentic AI Top 10 / NHI Top 10 &middot; Wave 2 SCOUT connector candidate: agent audit logs (Oz, GitHub Actions, CI/CD) as structured NHI finding events</div>
+</div>
+<!-- END V54 NHI SECTION -->
+
+
+<div class="page">
+
+  <!-- HEADER -->
+  <div class="hdr">
+    <div class="hdr-top">
+      <div>
+        <div class="hdr-title">TEMPRIS · EDIP · Business Logic Flaw SSS Intake</div>
+        <div class="hdr-sub">Developer Implementation Spec · Wave 1 · v54 · June 2026</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--orange);">WAVE 1 REQUIRED</div>
+        <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);margin-top:4px;">For: Elvand / Codingo Assignments</div>
+      </div>
+    </div>
+    <div class="badge-row">
+      <span class="badge badge-o">IDOR · BLFLAW</span>
+      <span class="badge badge-c">SSS Non-CVE Pipeline</span>
+      <span class="badge badge-p">Python + FastAPI</span>
+      <span class="badge badge-g">React JSX</span>
+      <span class="badge badge-c">PostgreSQL</span>
+      <span class="badge badge-r">Wave 1 · Aug 2026</span>
+    </div>
+  </div>
+
+  <!-- WHY -->
+  <div class="sec">
+    <div class="sec-label">01 · Why This Exists — v48 Gap Closure</div>
+    <div class="panel orange">
+      <p style="font-size:12px;color:var(--text);line-height:1.8;margin-bottom:10px;">
+        Business logic flaws — IDORs, broken access control, horizontal privilege escalation, business flow bypasses, and multi-step logic chains — are <strong style="color:var(--orange);">design-level vulnerabilities with no CVE</strong>. Autonomous AI pentest tools like XBOW now surface these at scale by reasoning about <em>expected access patterns</em> before testing them, asking "Should I?" not just "Can I?"
+      </p>
+      <p style="font-size:12px;color:var(--text);line-height:1.8;margin-bottom:10px;">
+        Traditional DAST scanners see a valid 200 OK and mark it passing. They cannot correlate behaviour across multiple authenticated sessions. These findings will never appear in the CISA KEV feed or carry a CVSS score. Without this implementation, <strong style="color:var(--red);">Tempris EDIP silently drops them</strong>.
+      </p>
+      <p style="font-size:12px;color:var(--text);line-height:1.8;">
+        This spec closes the gap. BL flaw findings enter via the existing <code style="color:var(--cyan);">edip_non_cve_extension.py</code> SSS pipeline, get TES-scored, and queue for the same EDIP decision workflow as CVE findings.
+      </p>
+    </div>
+  </div>
+
+  <!-- INTAKE PIPELINE -->
+  <div class="sec">
+    <div class="sec-label">02 · SSS Intake Pipeline Flow</div>
+    <div class="g5">
+      <div class="pipe-step" style="background:rgba(37,99,235,0.08);">
+        <div class="pipe-num" style="color:#2563eb;">01</div>
+        <div class="pipe-title">Finding Surfaced</div>
+        <div class="pipe-desc">XBOW autonomous pentest or manual researcher reports IDOR / logic flaw</div>
+      </div>
+      <div class="pipe-step" style="background:rgba(255,122,48,0.06);">
+        <div class="pipe-num" style="color:var(--orange);">02</div>
+        <div class="pipe-title">No CVE → SSS</div>
+        <div class="pipe-desc">EDIP checks CVE registry. No CVE → routes to edip_non_cve_extension.py</div>
+      </div>
+      <div class="pipe-step" style="background:rgba(139,92,246,0.06);">
+        <div class="pipe-num" style="color:var(--purple);">03</div>
+        <div class="pipe-title">SSS Assigned</div>
+        <div class="pipe-desc">Analyst assigns SSS 0–10. Finding type: IDOR / BFLAW-* set in payload</div>
+      </div>
+      <div class="pipe-step" style="background:rgba(0,200,240,0.06);">
+        <div class="pipe-num" style="color:var(--cyan);">04</div>
+        <div class="pipe-title">TES Calculated</div>
+        <div class="pipe-desc">TES = SSS × AGM × DRF × TEF (cap 10.0). Modifiers from live GRC state</div>
+      </div>
+      <div class="pipe-step" style="background:rgba(32,232,122,0.06);">
+        <div class="pipe-num" style="color:var(--green);">05</div>
+        <div class="pipe-title">EDIP Decision</div>
+        <div class="pipe-desc">Escalate ≥9 · Patch/CC 7–8.9 · Investigate 4–6.9 · Defer &lt;4</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FINDING TYPES -->
+  <div class="sec">
+    <div class="sec-label">03 · Supported Finding Subtypes</div>
+    <table class="dt">
+      <thead>
+        <tr>
+          <th>Subtype Code</th>
+          <th>Finding Class</th>
+          <th>SSS Range</th>
+          <th>Source Tools</th>
+          <th>COMPENSATING_CONTROL?</th>
+          <th>MAS TRM Ref</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="ft">IDOR</span></td>
+          <td>Cross-user data access — User A reads User B resource by changing one parameter</td>
+          <td class="band-critical" style="font-family:'Space Mono',monospace;">7.0–9.5</td>
+          <td style="color:var(--muted);">XBOW · Manual · Bug Bounty</td>
+          <td style="color:var(--green);">Yes — rate limit + anomaly logging</td>
+          <td style="font-family:'Space Mono',monospace;font-size:10px;color:var(--cyan);">§ 9.2 Data Confidentiality · PDPA</td>
+        </tr>
+        <tr>
+          <td><span class="ft">BFLAW-BAC</span></td>
+          <td>Broken Access Control — lower-privileged role accesses admin-only resource</td>
+          <td class="band-critical" style="font-family:'Space Mono',monospace;">6.5–9.0</td>
+          <td style="color:var(--muted);">XBOW · Manual</td>
+          <td style="color:var(--green);">Yes — WAF rule + arch review</td>
+          <td style="font-family:'Space Mono',monospace;font-size:10px;color:var(--cyan);">§ 6.1 Access Control · FEAT</td>
+        </tr>
+        <tr>
+          <td><span class="ft">BFLAW-HPE</span></td>
+          <td>Horizontal Privilege Escalation — same-tier lateral move between accounts</td>
+          <td class="band-high" style="font-family:'Space Mono',monospace;">5.0–8.0</td>
+          <td style="color:var(--muted);">XBOW · Red Team</td>
+          <td style="color:var(--green);">Yes — session isolation controls</td>
+          <td style="font-family:'Space Mono',monospace;font-size:10px;color:var(--cyan);">§ 6.1 · § 9.2</td>
+        </tr>
+        <tr>
+          <td><span class="ft">BFLAW-BFB</span></td>
+          <td>Business Flow Bypass — payment / approval gate skipped by direct API call</td>
+          <td class="band-medium" style="font-family:'Space Mono',monospace;">4.5–7.5</td>
+          <td style="color:var(--muted);">Manual · XBOW</td>
+          <td style="color:var(--green);">Yes — server-side state validation</td>
+          <td style="font-family:'Space Mono',monospace;font-size:10px;color:var(--cyan);">§ 9.3 Transaction Integrity</td>
+        </tr>
+        <tr>
+          <td><span class="ft">BFLAW-MSC</span></td>
+          <td>Multi-Step Logic Chain — cascading exploit sequence; early decision enables later vuln</td>
+          <td class="band-high" style="font-family:'Space Mono',monospace;">5.5–9.5</td>
+          <td style="color:var(--muted);">XBOW · Red Team</td>
+          <td style="color:var(--purple);">Yes — arch review gate required</td>
+          <td style="font-family:'Space Mono',monospace;font-size:10px;color:var(--cyan);">§ 9.2 · § 11 (Agentic)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- PYTHON SPEC -->
+  <div class="sec">
+    <div class="sec-label">04 · Python — edip_non_cve_extension.py (extend existing file)</div>
+    <div class="g2">
+      <div>
+        <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;">Finding Type Enum + Dataclass</div>
+        <div class="code"><span class="cm"># v48 — Add to edip_non_cve_extension.py
+# Section: FindingType enum</span>
+
+from enum import Enum
+from dataclasses import dataclass
+from typing import Optional
+
+class FindingType(Enum):
+    <span class="ck">IDOR</span>       = "IDOR"
+    <span class="ck">BFLAW_BAC</span> = "BFLAW-BAC"
+    <span class="ck">BFLAW_HPE</span> = "BFLAW-HPE"
+    <span class="ck">BFLAW_BFB</span> = "BFLAW-BFB"
+    <span class="ck">BFLAW_MSC</span> = "BFLAW-MSC"
+    <span class="cm"># ... retain existing types</span>
+
+<span class="cm"># SSS default ranges per subtype</span>
+BL_SSS_DEFAULTS: dict = {
+    FindingType.IDOR:      (7.0, 9.5),
+    FindingType.BFLAW_BAC: (6.5, 9.0),
+    FindingType.BFLAW_HPE: (5.0, 8.0),
+    FindingType.BFLAW_BFB: (4.5, 7.5),
+    FindingType.BFLAW_MSC: (5.5, 9.5),
+}
+
+@dataclass
+class BLFlawFinding:
+    finding_type:    FindingType
+    sss:             float        <span class="cm"># analyst-assigned 0–10</span>
+    source_tool:     str          <span class="cm"># XBOW|Manual|BugBounty|RedTeam</span>
+    asset_id:        str = ""
+    description:     str = ""
+    pii_exposed:     bool = False
+    patch_available: bool = True
+    notes:           Optional[str] = None</div>
+      </div>
+      <div>
+        <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;">TES Calculation Function</div>
+        <div class="code"><span class="cm"># Add to edip_non_cve_extension.py
+# TES = SSS × AGM × DRF × TEF (cap 10.0)</span>
+
+def calc_tes_blflaw(
+    finding: BLFlawFinding,
+    agm: float,
+    drf: float,
+    tef: float
+) -> dict:
+    <span class="cm">"""
+    Score a business logic flaw finding.
+    SSS replaces CVSS base score.
+    Modifiers sourced from live GRC SOP state.
+    """</span>
+    raw = finding.sss * agm * drf * tef
+    tes = min(10.0, round(raw, 1))
+
+    band = (
+        "ESCALATE"    if tes >= 9.0 else
+        "PATCH"       if tes >= 7.0 else
+        "INVESTIGATE" if tes >= 4.0 else
+        "DEFER"
+    )
+
+    <span class="cm"># If no patch → COMPENSATING_CONTROL</span>
+    action = (
+        "COMPENSATING_CONTROL"
+        if not finding.patch_available
+        and band in ("PATCH", "INVESTIGATE")
+        else band
+    )
+
+    sla = {
+        "ESCALATE": "24h",
+        "PATCH": "72h",
+        "COMPENSATING_CONTROL": "72h",
+        "INVESTIGATE": "7d",
+        "DEFER": "30d",
+    }[action]
+
+    return {
+        "tes":         tes,
+        "band":        band,
+        "action":      action,
+        "sla":         sla,
+        "sss_used":    finding.sss,
+        "finding_type": finding.finding_type.value,
+        "modifiers":   {
+            "AGM": agm,
+            "DRF": drf,
+            "TEF": tef
+        }
+    }</div>
+      </div>
+    </div>
+
+    <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;">FastAPI Route Handler</div>
+    <div class="code"><span class="cm"># routers/edip_blflaw.py — new file</span>
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, confloat
+from edip_non_cve_extension import (
+    BLFlawFinding, FindingType, calc_tes_blflaw
+)
+from grc_state import get_live_modifiers  <span class="cm"># AGM/DRF/TEF from GRC SOP</span>
+
+router = APIRouter(prefix=<span class="cg">"/api/v1/edip/intake/blflaw"</span>, tags=["EDIP BL Flaw"])
+
+class BLFlawPayload(BaseModel):
+    finding_type:    str
+    sss:             confloat(ge=0.0, le=10.0)
+    source_tool:     str
+    asset_id:        str = ""
+    description:     str = ""
+    pii_exposed:     bool = False
+    patch_available: bool = True
+
+@router.post("/")
+async def submit_blflaw(payload: BLFlawPayload):
+    <span class="cm"># Validate finding type</span>
+    try:
+        ft = FindingType(payload.finding_type)
+    except ValueError:
+        raise HTTPException(422, f"Invalid finding_type: {payload.finding_type}")
+
+    <span class="cm"># Pull live GRC modifiers</span>
+    agm, drf, tef = get_live_modifiers()
+
+    finding = BLFlawFinding(
+        finding_type=ft,
+        sss=payload.sss,
+        source_tool=payload.source_tool,
+        asset_id=payload.asset_id,
+        description=payload.description,
+        pii_exposed=payload.pii_exposed,
+        patch_available=payload.patch_available,
+    )
+
+    result = calc_tes_blflaw(finding, agm, drf, tef)
+
+    <span class="cm"># Persist to edip_blflaw_findings table</span>
+    await db.execute(<span class="cg">"""
+        INSERT INTO edip_blflaw_findings
+        (asset_id, finding_type, source_tool, sss, tes_score,
+         edip_action, pii_exposed, patch_available, description,
+         agm_at_intake, drf_at_intake, tef_at_intake)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+    """</span>, payload.asset_id, ft.value, payload.source_tool,
+        payload.sss, result["tes"], result["action"],
+        payload.pii_exposed, payload.patch_available,
+        payload.description, agm, drf, tef
+    )
+
+    return result
+
+@router.get("/")
+async def list_blflaw_queue():
+    <span class="cm"># Returns all OPEN findings ranked by TES desc</span>
+    rows = await db.fetch(<span class="cg">"""
+        SELECT * FROM edip_blflaw_findings
+        WHERE status = 'OPEN'
+        ORDER BY tes_score DESC
+    """</span>)
+    return rows</div>
+  </div>
+
+  <!-- POSTGRESQL SCHEMA -->
+  <div class="sec">
+    <div class="sec-label">05 · PostgreSQL — New Table Migration</div>
+    <div class="code"><span class="cm">-- File: migrations/v48_blflaw_findings.sql
+-- Run on: Hostinger KVM2 PostgreSQL instance (187.127.114.218)
+-- Add to Wave 1 migration set alongside existing tables</span>
+
+CREATE TABLE edip_blflaw_findings (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  asset_id        VARCHAR(100),
+  finding_type    VARCHAR(20)  NOT NULL,
+  <span class="cm">-- ENUM values: IDOR | BFLAW-BAC | BFLAW-HPE | BFLAW-BFB | BFLAW-MSC</span>
+  source_tool     VARCHAR(50),
+  <span class="cm">-- Values: XBOW | Manual | BugBounty | RedTeam | Internal</span>
+  sss             DECIMAL(4,2) NOT NULL CHECK (sss BETWEEN 0 AND 10),
+  tes_score       DECIMAL(4,2),
+  edip_action     VARCHAR(30),
+  <span class="cm">-- Values: ESCALATE|PATCH|INVESTIGATE|DEFER|COMPENSATING_CONTROL</span>
+  pii_exposed     BOOLEAN      DEFAULT FALSE,
+  patch_available BOOLEAN      DEFAULT TRUE,
+  description     TEXT,
+  status          VARCHAR(20)  DEFAULT 'OPEN',
+  <span class="cm">-- Values: OPEN | IN_REVIEW | RESOLVED | DEFERRED</span>
+  created_at      TIMESTAMPTZ  DEFAULT NOW(),
+  resolved_at     TIMESTAMPTZ,
+  agm_at_intake   DECIMAL(4,3),
+  drf_at_intake   DECIMAL(4,3),
+  tef_at_intake   DECIMAL(4,3)
+);
+
+<span class="cm">-- Performance indexes</span>
+CREATE INDEX idx_blflaw_tes
+    ON edip_blflaw_findings(tes_score DESC);
+CREATE INDEX idx_blflaw_status
+    ON edip_blflaw_findings(status);
+CREATE INDEX idx_blflaw_type
+    ON edip_blflaw_findings(finding_type);
+CREATE INDEX idx_blflaw_asset
+    ON edip_blflaw_findings(asset_id);</div>
+  </div>
+
+  <!-- REACT COMPONENTS -->
+  <div class="sec">
+    <div class="sec-label">06 · React — Frontend Components</div>
+    <div class="g2">
+      <div>
+        <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;">BLFlawIntakeCard.jsx</div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:8px;">Path: /src/components/edip/BLFlawIntakeCard.jsx</div>
+        <div class="code"><span class="cm">// BLFlawIntakeCard.jsx
+// SSS intake form for BL flaw findings
+// Props: agm, drf, tef (from live GRC state)</span>
+
+import { useState } from "react";
+
+const TYPES = [
+  { code: "IDOR",      label: "IDOR — Cross-user data" },
+  { code: "BFLAW-BAC", label: "Broken Access Control" },
+  { code: "BFLAW-HPE", label: "Horiz. Privilege Escalation"},
+  { code: "BFLAW-BFB", label: "Business Flow Bypass" },
+  { code: "BFLAW-MSC", label: "Multi-Step Logic Chain" },
+];
+
+const SOURCES = [
+  "XBOW", "Manual", "BugBounty", "RedTeam"
+];
+
+export default function BLFlawIntakeCard({
+  agm = 1.0, drf = 1.0, tef = 1.0,
+  onSubmit
+}) {
+  const [type,  setType]  = useState("IDOR");
+  const [sss,   setSss]   = useState(8.0);
+  const [src,   setSrc]   = useState("XBOW");
+  const [pii,   setPii]   = useState(false);
+  const [patch, setPatch] = useState(true);
+  const [desc,  setDesc]  = useState("");
+
+  <span class="cm">// TES = SSS × AGM × DRF × TEF, cap 10</span>
+  const tes = Math.min(10,
+    +(sss * agm * drf * tef).toFixed(1));
+  const band =
+    tes >= 9 ? "ESCALATE" :
+    tes >= 7 ? "PATCH" :
+    tes >= 4 ? "INVESTIGATE" : "DEFER";
+  const action = !patch &&
+    ["PATCH","INVESTIGATE"].includes(band)
+    ? "COMPENSATING_CONTROL" : band;
+  const col =
+    tes>=9 ? "#E8203A" : tes>=7 ? "#FF7A30" :
+    tes>=4 ? "#F59E0B" : "#20E87A";
+
+  const handleSubmit = () => {
+    onSubmit?.({
+      finding_type: type, sss, source_tool: src,
+      pii_exposed: pii, patch_available: patch,
+      description: desc
+    });
+  };
+
+  return (
+    &lt;div className="bl-intake-card"&gt;
+      &lt;h3&gt;BL Flaw Intake&lt;/h3&gt;
+
+      &lt;select value={type}
+        onChange={e => setType(e.target.value)}&gt;
+        {TYPES.map(t =>
+          &lt;option key={t.code} value={t.code}&gt;
+            {t.label}
+          &lt;/option&gt;)}
+      &lt;/select&gt;
+
+      &lt;select value={src}
+        onChange={e => setSrc(e.target.value)}&gt;
+        {SOURCES.map(s =>
+          &lt;option key={s} value={s}&gt;{s}&lt;/option&gt;)}
+      &lt;/select&gt;
+
+      &lt;label&gt;SSS: {sss.toFixed(1)}
+        &lt;input type="range" min="0" max="10"
+          step="0.1" value={sss}
+          onChange={e => setSss(+e.target.value)} /&gt;
+      &lt;/label&gt;
+
+      &lt;label&gt;
+        &lt;input type="checkbox" checked={pii}
+          onChange={e => setPii(e.target.checked)} /&gt;
+        PII / Financial data exposed
+      &lt;/label&gt;
+
+      &lt;label&gt;
+        &lt;input type="checkbox" checked={patch}
+          onChange={e => setPatch(e.target.checked)} /&gt;
+        Patch available
+      &lt;/label&gt;
+
+      &lt;textarea value={desc}
+        onChange={e => setDesc(e.target.value)}
+        placeholder="Finding description..." /&gt;
+
+      &lt;div style={{ color: col, fontSize: "2rem" }}&gt;
+        TES: {tes}
+      &lt;/div&gt;
+      &lt;div&gt;EDIP Action: {action}&lt;/div&gt;
+
+      &lt;button onClick={handleSubmit}&gt;
+        Submit to EDIP Queue
+      &lt;/button&gt;
+    &lt;/div&gt;
+  );
+}</div>
+      </div>
+      <div>
+        <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;">BLFlawQueueTable.jsx</div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:8px;">Path: /src/components/edip/BLFlawQueueTable.jsx</div>
+        <div class="code"><span class="cm">// BLFlawQueueTable.jsx
+// Renders the EDIP intake queue for BL flaw findings
+// Sorted by TES descending from API</span>
+
+import { useEffect, useState } from "react";
+
+const ACTION_COLORS = {
+  "ESCALATE":             "#E8203A",
+  "PATCH":                "#FF7A30",
+  "COMPENSATING_CONTROL": "#8B5CF6",
+  "INVESTIGATE":          "#F59E0B",
+  "DEFER":                "#20E87A",
+};
+
+export default function BLFlawQueueTable() {
+  const [findings, setFindings] = useState([]);
+  const [loading,  setLoading]  = useState(true);
+
+  useEffect(() => {
+    fetch("/api/v1/edip/intake/blflaw")
+      .then(r => r.json())
+      .then(data => {
+        setFindings(data);
+        setLoading(false);
+      });
+  }, []);
+
+  if (loading) return &lt;div&gt;Loading queue...&lt;/div&gt;;
+
+  return (
+    &lt;table className="bl-queue-table"&gt;
+      &lt;thead&gt;
+        &lt;tr&gt;
+          &lt;th&gt;Type&lt;/th&gt;
+          &lt;th&gt;Asset&lt;/th&gt;
+          &lt;th&gt;SSS&lt;/th&gt;
+          &lt;th&gt;TES&lt;/th&gt;
+          &lt;th&gt;Action&lt;/th&gt;
+          &lt;th&gt;Source&lt;/th&gt;
+          &lt;th&gt;PII&lt;/th&gt;
+          &lt;th&gt;Status&lt;/th&gt;
+        &lt;/tr&gt;
+      &lt;/thead&gt;
+      &lt;tbody&gt;
+        {findings.map(f => (
+          &lt;tr key={f.id}&gt;
+            &lt;td&gt;&lt;code&gt;{f.finding_type}&lt;/code&gt;&lt;/td&gt;
+            &lt;td&gt;{f.asset_id || "—"}&lt;/td&gt;
+            &lt;td&gt;{f.sss}&lt;/td&gt;
+            &lt;td style={{
+              color: ACTION_COLORS[f.edip_action],
+              fontWeight: 700
+            }}&gt;
+              {f.tes_score}
+            &lt;/td&gt;
+            &lt;td style={{
+              color: ACTION_COLORS[f.edip_action]
+            }}&gt;
+              {f.edip_action}
+            &lt;/td&gt;
+            &lt;td&gt;{f.source_tool}&lt;/td&gt;
+            &lt;td&gt;{f.pii_exposed ? "⚠ YES" : "No"}&lt;/td&gt;
+            &lt;td&gt;{f.status}&lt;/td&gt;
+          &lt;/tr&gt;
+        ))}
+      &lt;/tbody&gt;
+    &lt;/table&gt;
+  );
+}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- API ENDPOINTS -->
+  <div class="sec">
+    <div class="sec-label">07 · API Endpoints Summary</div>
+    <div class="panel cyan">
+      <div class="api-row"><span class="method post">POST</span><span class="api-path">/api/v1/edip/intake/blflaw</span><span class="api-desc">Submit BL flaw finding — returns TES score, band, EDIP action, SLA</span></div>
+      <div class="api-row"><span class="method get">GET</span><span class="api-path">/api/v1/edip/intake/blflaw</span><span class="api-desc">List all OPEN findings ranked by TES descending</span></div>
+      <div class="api-row"><span class="method put">PUT</span><span class="api-path">/api/v1/edip/intake/blflaw/{id}</span><span class="api-desc">Update SSS, patch_available, notes on existing finding — recalculates TES</span></div>
+      <div class="api-row"><span class="method post">POST</span><span class="api-path">/api/v1/edip/intake/blflaw/{id}/resolve</span><span class="api-desc">Mark resolved — writes resolved_at, triggers STANDARD audit trail entry</span></div>
+    </div>
+
+    <!-- SAMPLE REQUEST -->
+    <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);margin:14px 0 8px;text-transform:uppercase;">Sample POST Request — XBOW IDOR Finding</div>
+    <div class="code"><span class="cm"># curl example — submit XBOW-sourced IDOR finding</span>
+curl -X POST https://api.tempris.tech/api/v1/edip/intake/blflaw \
+  -H "Authorization: Bearer $TEMPRIS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    <span class="cg">"finding_type"</span>:    <span class="cg">"IDOR"</span>,
+    <span class="cg">"sss"</span>:             <span class="ck">8.5</span>,
+    <span class="cg">"source_tool"</span>:     <span class="cg">"XBOW"</span>,
+    <span class="cg">"asset_id"</span>:        <span class="cg">"asset-credit-scoring-01"</span>,
+    <span class="cg">"description"</span>:     <span class="cg">"User A can access User B invoice by incrementing invoice_id param"</span>,
+    <span class="cg">"pii_exposed"</span>:     <span class="ck">true</span>,
+    <span class="cg">"patch_available"</span>: <span class="ck">true</span>
+  }'
+
+<span class="cm"># Expected response</span>
+{
+  <span class="cg">"tes"</span>:          <span class="ck">9.4</span>,
+  <span class="cg">"band"</span>:         <span class="cg">"ESCALATE"</span>,
+  <span class="cg">"action"</span>:       <span class="cg">"ESCALATE"</span>,
+  <span class="cg">"sla"</span>:          <span class="cg">"24h"</span>,
+  <span class="cg">"sss_used"</span>:     <span class="ck">8.5</span>,
+  <span class="cg">"finding_type"</span>: <span class="cg">"IDOR"</span>,
+  <span class="cg">"modifiers"</span>: {
+    <span class="cg">"AGM"</span>: <span class="ck">1.3</span>,
+    <span class="cg">"DRF"</span>: <span class="ck">1.0</span>,
+    <span class="cg">"TEF"</span>: <span class="ck">1.0</span>
+  }
+}</div>
+  </div>
+
+  <!-- COMPENSATING CONTROL -->
+  <div class="sec">
+    <div class="sec-label">08 · COMPENSATING_CONTROL — No-Patch Logic</div>
+    <div class="panel purple">
+      <p style="font-size:12px;color:var(--text);line-height:1.7;margin-bottom:12px;">When <code style="color:var(--cyan);">patch_available = false</code> and TES band is PATCH or INVESTIGATE, the system returns <code style="color:var(--purple);">COMPENSATING_CONTROL</code> as the action. This triggers a structured mitigation workflow tracked in the STANDARD module.</p>
+      <div class="g3">
+        <div style="background:var(--panel2);border:1px solid var(--border2);padding:14px;text-align:center;">
+          <div style="font-size:20px;margin-bottom:6px;">🚦</div>
+          <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--purple);font-weight:700;margin-bottom:4px;">RATE LIMIT</div>
+          <div style="font-size:10px;color:var(--muted);">API endpoint rate limiting to slow IDOR enumeration attacks</div>
+        </div>
+        <div style="background:var(--panel2);border:1px solid var(--border2);padding:14px;text-align:center;">
+          <div style="font-size:20px;margin-bottom:6px;">📋</div>
+          <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--purple);font-weight:700;margin-bottom:4px;">ENHANCED LOGGING</div>
+          <div style="font-size:10px;color:var(--muted);">Cross-user access anomaly detection via SCOUT module correlation</div>
+        </div>
+        <div style="background:var(--panel2);border:1px solid var(--border2);padding:14px;text-align:center;">
+          <div style="font-size:20px;margin-bottom:6px;">🏗</div>
+          <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--purple);font-weight:700;margin-bottom:4px;">ARCH REVIEW GATE</div>
+          <div style="font-size:10px;color:var(--muted);">Formal architecture review required before next release — blocks CI/CD merge</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CHECKLIST FOR ELVAND -->
+  <div class="sec">
+    <div class="sec-label">09 · Implementation Checklist — Elvand</div>
+    <div class="panel green">
+      <table class="dt">
+        <thead>
+          <tr><th>#</th><th>Task</th><th>File / Location</th><th>Priority</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="font-family:'Space Mono',monospace;color:var(--cyan);">01</td>
+            <td>Add FindingType enum and BLFlawFinding dataclass</td>
+            <td style="font-family:'Space Mono',monospace;font-size:10px;">edip_non_cve_extension.py</td>
+            <td style="color:var(--red);font-family:'Space Mono',monospace;font-size:10px;">P0</td>
+          </tr>
+          <tr>
+            <td style="font-family:'Space Mono',monospace;color:var(--cyan);">02</td>
+            <td>Add calc_tes_blflaw() function with COMPENSATING_CONTROL logic</td>
+            <td style="font-family:'Space Mono',monospace;font-size:10px;">edip_non_cve_extension.py</td>
+            <td style="color:var(--red);font-family:'Space Mono',monospace;font-size:10px;">P0</td>
+          </tr>
+          <tr>
+            <td style="font-family:'Space Mono',monospace;color:var(--cyan);">03</td>
+            <td>Create new FastAPI router file and register in main.py</td>
+            <td style="font-family:'Space Mono',monospace;font-size:10px;">routers/edip_blflaw.py</td>
+            <td style="color:var(--red);font-family:'Space Mono',monospace;font-size:10px;">P0</td>
+          </tr>
+          <tr>
+            <td style="font-family:'Space Mono',monospace;color:var(--cyan);">04</td>
+            <td>Run PostgreSQL migration to create edip_blflaw_findings table + indexes</td>
+            <td style="font-family:'Space Mono',monospace;font-size:10px;">migrations/v48_blflaw_findings.sql</td>
+            <td style="color:var(--red);font-family:'Space Mono',monospace;font-size:10px;">P0</td>
+          </tr>
+          <tr>
+            <td style="font-family:'Space Mono',monospace;color:var(--cyan);">05</td>
+            <td>Build BLFlawIntakeCard.jsx React component with live TES calc</td>
+            <td style="font-family:'Space Mono',monospace;font-size:10px;">src/components/edip/</td>
+            <td style="color:var(--orange);font-family:'Space Mono',monospace;font-size:10px;">P1</td>
+          </tr>
+          <tr>
+            <td style="font-family:'Space Mono',monospace;color:var(--cyan);">06</td>
+            <td>Build BLFlawQueueTable.jsx — renders EDIP intake queue ranked by TES</td>
+            <td style="font-family:'Space Mono',monospace;font-size:10px;">src/components/edip/</td>
+            <td style="color:var(--orange);font-family:'Space Mono',monospace;font-size:10px;">P1</td>
+          </tr>
+          <tr>
+            <td style="font-family:'Space Mono',monospace;color:var(--cyan);">07</td>
+            <td>Wire AGM/DRF/TEF from GRC SOP live state into TES calc (both frontend + backend)</td>
+            <td style="font-family:'Space Mono',monospace;font-size:10px;">grc_state.py + React context</td>
+            <td style="color:var(--orange);font-family:'Space Mono',monospace;font-size:10px;">P1</td>
+          </tr>
+          <tr>
+            <td style="font-family:'Space Mono',monospace;color:var(--cyan);">08</td>
+            <td>Add BL Flaw queue to existing EDIP intake dashboard page</td>
+            <td style="font-family:'Space Mono',monospace;font-size:10px;">src/pages/edip/IntakeDashboard.jsx</td>
+            <td style="color:var(--gold);font-family:'Space Mono',monospace;font-size:10px;">P2</td>
+          </tr>
+          <tr>
+            <td style="font-family:'Space Mono',monospace;color:var(--cyan);">09</td>
+            <td>Write unit tests for calc_tes_blflaw() covering all 5 subtypes + CC logic</td>
+            <td style="font-family:'Space Mono',monospace;font-size:10px;">tests/test_blflaw_tes.py</td>
+            <td style="color:var(--gold);font-family:'Space Mono',monospace;font-size:10px;">P2</td>
+          </tr>
+          <tr>
+            <td style="font-family:'Space Mono',monospace;color:var(--cyan);">10</td>
+            <td>Test end-to-end with a mock XBOW IDOR payload — verify TES, action, DB write</td>
+            <td style="font-family:'Space Mono',monospace;font-size:10px;">Postman / pytest</td>
+            <td style="color:var(--gold);font-family:'Space Mono',monospace;font-size:10px;">P2</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <div class="footer-l">Tempris Technology Pte. Ltd. · UEN 202613990D · EDIP BL Flaw SSS Pipeline · Developer Spec v54 · June 2026</div>
+    <div class="footer-l">Wave 1 Target: August 2026 · For: Elvand / Codingo Assignments Pte. Ltd. · Confidential — NDA applies</div>
+  </div>
+
+</div>
+
+<!-- CVE-2026-8932 CURL MTLS BLOCK v54 -->
+<div style="margin:16px 0;background:linear-gradient(135deg,rgba(232,32,58,.07),rgba(139,92,246,.04));border:1px solid rgba(232,32,58,.25);border-left:3px solid #E8203A;border-radius:6px;padding:18px 22px">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+    <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:3px;color:#E8203A;text-transform:uppercase">NEW · CVE-2026-8932 · PATCHED JUN 24 2026</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(232,32,58,.15);color:#E8203A;border:1px solid rgba(232,32,58,.3);padding:2px 8px">CVSS 7.5 MEDIUM</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(32,232,122,.12);color:#20E87A;border:1px solid rgba(32,232,122,.25);padding:2px 8px">TES 10.0 → ESCALATE</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(245,158,11,.12);color:#F59E0B;border:1px solid rgba(245,158,11,.25);padding:2px 8px">AGE: 25 years (introduced curl 7.7 — Mar 22, 2001)</span>
+  </div>
+  <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:#fff;margin-bottom:6px">curl mTLS Connection Reuse — Authentication Bypass</div>
+  <div style="font-size:12px;color:#8DBBD4;line-height:1.85;margin-bottom:12px">
+    <strong style="color:#D4E8F2">What it is:</strong> libcurl could reuse an existing mTLS connection even after client certificate or private key settings had changed — silently authenticating with the <em>wrong identity</em>. Affects libcurl applications (not the curl CLI). Every MAS-regulated financial institution running Python <code style="background:rgba(0,200,240,.1);color:#00C8F0;padding:1px 4px;font-size:10px">requests</code>, Node.js <code style="background:rgba(0,200,240,.1);color:#00C8F0;padding:1px 4px;font-size:10px">axios</code>, Java SDKs, or any modern API stack is exposed — because libcurl is embedded in all of them.<br><br>
+    <strong style="color:#D4E8F2">Why it matters here:</strong> MAS TRM §9 mandates mutual TLS for inter-system communication. CVE-2026-8932 directly undermines that control. A connection that believes it is using Certificate A may actually be authenticated as Certificate B — making it a direct MAS audit finding.<br><br>
+    <strong style="color:#D4E8F2">Scale:</strong> curl runs on <strong style="color:#E8203A">30 billion devices</strong>. This flaw lived undetected for <strong style="color:#E8203A">25 years</strong> (since curl 7.7, March 22, 2001). Part of a record 18-CVE release — the most ever patched in a single curl version.
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(232,32,58,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#E8203A">7.5</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">CVSS v3.1</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(32,232,122,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#20E87A">10.0</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">TES → ESCALATE</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(245,158,11,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#F59E0B">25 YRS</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">UNDETECTED</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(0,200,240,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#00C8F0">30B</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">DEVICES AFFECTED</div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:11px;color:#8DBBD4">
+    <div>
+      <div style="color:#20E87A;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">PATCH ACTION</div>
+      Upgrade to <strong style="color:#00C8F0">curl 8.21.0</strong> immediately. Audit all services using libcurl with dynamic certificate loading, mTLS-authenticated microservices, and any API gateway or SDK calling external endpoints with client certs. If immediate upgrade is blocked, isolate affected services and apply COMPENSATING_CONTROL via EDIP.
+    </div>
+    <div>
+      <div style="color:#F59E0B;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">TEMPRIS EDIP INTAKE</div>
+      <strong style="color:#D4E8F2">CVE:</strong> CVE-2026-8932 · <strong style="color:#D4E8F2">Type:</strong> CVE (KEV-eligible)<br>
+      <strong style="color:#D4E8F2">CWE:</strong> CWE-305 Authentication Bypass<br>
+      <strong style="color:#D4E8F2">AGM:</strong> 1.1 · <strong style="color:#D4E8F2">DRF:</strong> 1.1 · <strong style="color:#D4E8F2">TEF:</strong> 1.2<br>
+      <strong style="color:#D4E8F2">Decision:</strong> PATCH (upgrade to 8.21.0) or COMPENSATING_CONTROL
+    </div>
+  </div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(232,32,58,.15);font-family:'Space Mono',monospace;font-size:9px;color:#4A7A9B">
+    SOURCE: curl.se/docs/CVE-2026-8932.html · SecurityWeek Jun 24 2026 · daniel.haxx.se/blog/2026/06/24/curl-8-21-0 · CWE-305
+  </div>
+</div>
+<!-- END CVE-2026-8932 -->
+
+<!-- QUANTUM HNDL BLOCK v54 -->
+<div style="margin:16px 0;background:linear-gradient(135deg,rgba(0,200,240,.06),rgba(139,92,246,.06));border:1px solid rgba(0,200,240,.25);border-left:3px solid #00C8F0;border-radius:6px;padding:18px 22px">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+    <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:3px;color:#00C8F0;text-transform:uppercase">WAVE 3 THREAT · HARVEST NOW DECRYPT LATER · POST-QUANTUM RISK · 2026</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(0,200,240,.12);color:#00C8F0;border:1px solid rgba(0,200,240,.3);padding:2px 8px">SEALCHAIN MODULE</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(139,92,246,.12);color:#8B5CF6;border:1px solid rgba(139,92,246,.3);padding:2px 8px">MAS TRM §9 LONG-TERM RISK</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(245,158,11,.12);color:#F59E0B;border:1px solid rgba(245,158,11,.3);padding:2px 8px">HORIZON: 2030–2038</span>
+  </div>
+  <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:#fff;margin-bottom:6px">Harvest Now, Decrypt Later — The Quantum Threat Hiding in Plain Sight</div>
+  <div style="font-size:12px;color:#8DBBD4;line-height:1.85;margin-bottom:14px">
+    <strong style="color:#D4E8F2">What is happening right now:</strong> Nation-state adversaries are systematically capturing encrypted network traffic today — including HTTPS, VPN tunnels, TLS-protected API calls, and encrypted banking transactions — and storing it at scale. The cost of storing 1% of global internet traffic is approximately <strong style="color:#00C8F0">$1 billion per year</strong>. Targeted harvesting of specific companies, industries, or IP ranges costs dramatically less. The data being captured in 2026 will remain encrypted and unreadable — until quantum computing reaches the decryption threshold, estimated between 2030 and 2038.<br><br>
+    <strong style="color:#D4E8F2">Why MAS-regulated institutions are primary targets:</strong> Singapore financial institutions hold the highest-value long-lived data: client KYC records, loan portfolios, trade history, counterparty agreements, and regulatory filings — all transmitted over encrypted channels, all potentially captured. By the time quantum decryption becomes practical, it will already be too late to protect data captured today. The window to act is now.<br><br>
+    <strong style="color:#D4E8F2">The asymmetry:</strong> Encryption protects data in transit — but only until the encryption algorithm is broken. RSA-2048 and ECC-256, the standards protecting most financial data today, are expected to fall within the quantum decryption horizon. Post-quantum cryptographic algorithms (CRYSTALS-Kyber, CRYSTALS-Dilithium — NIST PQC standards) must be deployed before the harvest window closes.
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(0,200,240,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#00C8F0">$1B/yr</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">STORE 1% GLOBAL TRAFFIC</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(139,92,246,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#8B5CF6">241M GB</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">GLOBAL TRAFFIC / DAY</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(245,158,11,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#F59E0B">2030–38</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">Q-DAY ESTIMATE</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(232,32,58,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#E8203A">NOW</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">HARVEST WINDOW OPEN</div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:11px;color:#8DBBD4">
+    <div>
+      <div style="color:#00C8F0;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">TEMPRIS SEALCHAIN — WAVE 3 RESPONSE</div>
+      SEALCHAIN is the Tempris module that addresses post-quantum cryptographic readiness. It audits current encryption posture against NIST PQC standards (CRYSTALS-Kyber / Dilithium), identifies RSA/ECC-dependent data flows, and maps remediation to MAS TRM §9 long-term data protection requirements. The HNDL threat makes SEALCHAIN a Wave 3 priority — not a future consideration.
+    </div>
+    <div>
+      <div style="color:#8B5CF6;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">EDIP INTAKE — HOW TO CLASSIFY</div>
+      HNDL is a <strong style="color:#D4E8F2">strategic exposure</strong>, not a CVE. Use SSS intake path:<br>
+      Type: NON_CVE_SSS · Category: STRATEGIC_CRYPTO<br>
+      Base severity: 8.5 (long-horizon, nation-state, no patch possible)<br>
+      AGM: 1.2 (state-actor AI-assisted collection confirmed)<br>
+      DRF: 1.3 (no immediate patch — requires crypto migration)<br>
+      TEF: 1.3 (financial sector, long-lived sensitive data)<br>
+      <strong style="color:#20E87A">TES ≈ 10.0 → ESCALATE → COMPENSATING_CONTROL</strong>
+    </div>
+  </div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(0,200,240,.15);font-family:'Space Mono',monospace;font-size:9px;color:#4A7A9B">
+    SOURCE: LinkedIn — Quantum HNDL post Jun 26 2026 · NIST PQC Standards 2024 · NSA CNSA 2.0 · MAS TRM §9 · CRYSTALS-Kyber / Dilithium (FIPS 203/204)
+  </div>
+</div>
+<!-- END QUANTUM HNDL BLOCK -->
+
+<!-- CVE-2025-67038 BRIDGEBREAK BLOCK v54 -->
+<div style="margin:16px 0;background:linear-gradient(135deg,rgba(245,158,11,.07),rgba(232,32,58,.04));border:1px solid rgba(245,158,11,.25);border-left:3px solid #F59E0B;border-radius:6px;padding:18px 22px">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+    <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:3px;color:#F59E0B;text-transform:uppercase">ACTIVE EXPLOIT · CVE-2025-67038 · BRIDGE:BREAK · KEV JUN 23 2026</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(232,32,58,.15);color:#E8203A;border:1px solid rgba(232,32,58,.3);padding:2px 8px">CVSS 9.8 CRITICAL</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(245,158,11,.12);color:#F59E0B;border:1px solid rgba(245,158,11,.3);padding:2px 8px">ZERO-DAY — EXPLOITED BEFORE DISCLOSURE</span>
+    <span style="font-family:'Space Mono',monospace;font-size:9px;background:rgba(0,200,240,.12);color:#00C8F0;border:1px solid rgba(0,200,240,.3);padding:2px 8px">OT / ICS / SERIAL-TO-IP</span>
+  </div>
+  <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:#fff;margin-bottom:6px">CVE-2025-67038 — Lantronix EDS5000 Unauthenticated Root Command Injection</div>
+  <div style="font-size:12px;color:#8DBBD4;line-height:1.85;margin-bottom:14px">
+    <strong style="color:#D4E8F2">What it is:</strong> An unauthenticated command injection flaw in Lantronix EDS5000 serial-to-IP console servers (firmware 2.1.0.0R3). The HTTP RPC module concatenates the username field directly into a shell command without sanitisation when logging failed authentication. An attacker with no credentials can inject arbitrary OS commands into the username parameter — all executed with <strong style="color:#E8203A">root privileges</strong>. No login required. Network-accessible. Instant root.<br><br>
+    <strong style="color:#D4E8F2">The zero-day detail:</strong> Exploitation was confirmed in a honeypot on <strong style="color:#F59E0B">April 5, 2026</strong> — weeks before Forescout published BRIDGE:BREAK technical details on April 21. Attackers reverse-engineered Lantronix's own patch (released February 20) to build the exploit. The activity included Lantronix-specific fingerprinting and automated command injection testing — indicating a targeted, not opportunistic, operation.<br><br>
+    <strong style="color:#D4E8F2">Why serial-to-IP matters:</strong> Lantronix EDS5000 devices bridge legacy serial equipment — industrial controllers, ATM serial links, building management systems, data centre power units — onto IP networks. Compromising one device gives the attacker a privileged vantage point over every serial-connected asset behind it, plus a lateral movement foothold into Active Directory. Russian state actors (Sandworm) have previously weaponised this exact device class against Ukrainian power infrastructure.
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(232,32,58,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#E8203A">9.8</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">CVSS v3.1</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(245,158,11,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#F59E0B">22</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">BRIDGE:BREAK CVEs</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(0,200,240,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#00C8F0">20K+</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">DEVICES EXPOSED ONLINE</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid rgba(32,232,122,.2);padding:10px;text-align:center">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#20E87A">10.0</div>
+      <div style="font-family:'Space Mono',monospace;font-size:8px;color:#4A7A9B;margin-top:3px">TES → ESCALATE</div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:11px;color:#8DBBD4">
+    <div>
+      <div style="color:#F59E0B;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">PATCH ACTION</div>
+      Upgrade Lantronix EDS5000 to firmware <strong style="color:#00C8F0">2.2.0.0R1</strong> immediately. Isolate serial-to-IP converters from direct internet exposure. Restrict SSH and HTTP RPC access to management networks only. Monitor for <code style="background:rgba(0,200,240,.1);color:#00C8F0;padding:1px 4px;font-size:10px">diagnose sniffer packet</code>-class commands. CISA KEV patch deadline for FCEB agencies: June 26, 2026.
+    </div>
+    <div>
+      <div style="color:#20E87A;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">TEMPRIS EDIP INTAKE</div>
+      <strong style="color:#D4E8F2">CVE:</strong> CVE-2025-67038 · <strong style="color:#D4E8F2">CWE:</strong> CWE-78 OS Command Injection<br>
+      <strong style="color:#D4E8F2">AGM:</strong> 1.2 (targeted, fingerprint-aware attacker)<br>
+      <strong style="color:#D4E8F2">DRF:</strong> 1.1 (OT environments — patching delayed)<br>
+      <strong style="color:#D4E8F2">TEF:</strong> 1.3 (serial-to-IP = high lateral movement risk)<br>
+      <strong style="color:#D4E8F2">TES:</strong> 9.8 × 1.2 × 1.1 × 1.3 = 10.0 → <strong style="color:#E8203A">ESCALATE</strong>
+    </div>
+  </div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(245,158,11,.15);font-family:'Space Mono',monospace;font-size:9px;color:#4A7A9B">
+    SOURCE: CISA KEV Jun 23 2026 · The Hacker News Jun 25 2026 · Forescout BRIDGE:BREAK Apr 2026 · SecurityWeek · Dataminr Intel Brief · CWE-78
+  </div>
+</div>
+<!-- END CVE-2025-67038 BRIDGEBREAK BLOCK -->
+
+<!-- CVE-2026-46331 PEDIT COW BLOCK v54 -->
+<div style="background:#fff;border:1px solid #E2E8F0;border-left:4px solid #E8203A;padding:20px;margin-bottom:16px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+    <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;color:#E8203A;text-transform:uppercase;font-weight:600">ACTIVE EXPLOIT · CVE-2026-46331 · PEDIT COW · FIM BYPASS · JUN 2026</span>
+    <span style="font-family:'Space Mono',monospace;font-size:8px;background:rgba(232,32,58,.08);border:1px solid rgba(232,32,58,.2);color:#E8203A;padding:2px 8px">LINUX KERNEL LPE</span>
+    <span style="font-family:'Space Mono',monospace;font-size:8px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);color:#B45309;padding:2px 8px">DEV REF v54</span>
+  </div>
+  <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:700;color:#0A0D12;margin-bottom:6px">CVE-2026-46331 — Linux Kernel pedit COW: Root Access via Page-Cache Poisoning (FIM Bypass)</div>
+  <div style="font-size:12px;color:#374151;line-height:1.85;margin-bottom:14px">
+    <strong>What it is:</strong> Memory corruption in Linux kernel tc pedit module. Attacker (local user) poisons in-memory page cache of setuid-root binaries — executes as root while disk files remain untouched. FIM tools report clean. PoC public.<br><br>
+    <strong>Attack conditions:</strong> Local user access + unprivileged user namespaces enabled + act_pedit module loaded. Docker default networking often satisfies all three. Relevant for any client running Linux servers, Docker workloads, or Ubuntu-based infrastructure.
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(232,32,58,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#E8203A">7.8</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">CVSS v3.1</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(245,158,11,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:#B45309">FIM BLIND</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">DISK UNCHANGED</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(139,92,246,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#7C3AED">POC</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">PUBLIC EXPLOIT</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(20,184,166,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#0F766E">10.0</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">TES → ESCALATE</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:11px;color:#374151">
+    <div><div style="color:#B45309;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">PATCH ACTION</div>Update Linux kernel: <code style="background:#F1F5F9;color:#0369A1;padding:1px 4px">apt upgrade linux-image-generic</code>. Disable unprivileged user namespaces. Blacklist act_pedit. Deploy eBPF-based memory integrity monitoring — FIM alone is insufficient.</div>
+    <div><div style="color:#20E87A;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">TEMPRIS EDIP INTAKE</div><strong>CVE:</strong> CVE-2026-46331 · <strong>CWE:</strong> CWE-787<br><strong>AGM:</strong> 1.2 · <strong>DRF:</strong> 1.2 · <strong>TEF:</strong> 1.1<br><strong>TES:</strong> 7.8 × 1.2 × 1.2 × 1.1 → <strong style="color:#E8203A">10.0 ESCALATE</strong><br><strong style="color:#E8203A">fim_bypass: TRUE — memory monitoring advisory</strong></div>
+  </div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(100,116,139,.15);font-family:'Space Mono',monospace;font-size:9px;color:#6B7A8D">SOURCE: CVE-2026-46331 · The Hacker News Jun 2026 · Linux Kernel Security · CWE-787 · MITRE T1068</div>
+</div>
+<!-- END CVE-2026-46331 PEDIT COW BLOCK v54 -->
+<!-- SIGNAL KEY ATTACK BLOCK v54 -->
+<div style="background:#fff;border:1px solid #E2E8F0;border-left:4px solid #8B5CF6;padding:20px;margin-bottom:16px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+    <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;color:#7C3AED;text-transform:uppercase;font-weight:600">ACTIVE CAMPAIGN · NO CVE · NO PATCH · RUSSIAN APT · SIGNAL KEY MGMT · JUN 2026</span>
+    <span style="font-family:'Space Mono',monospace;font-size:8px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.2);color:#7C3AED;padding:2px 8px">SSS INTAKE · COMPENSATING_CONTROL</span>
+  </div>
+  <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:700;color:#0A0D12;margin-bottom:6px">Signal Backup Recovery Key Exfiltration — Russian Intelligence APT (FBI Warning Jun 2026)</div>
+  <div style="font-size:12px;color:#374151;line-height:1.85;margin-bottom:14px">
+    <strong>What it is:</strong> Russian intelligence APT targets Signal's backup recovery key via social engineering. Attacker registers a linked device — silently mirroring all messages. Signal's encryption is NOT broken; the key management layer is bypassed. No CVE. No patch. Pure compensating-control finding.<br><br>
+    <strong>FI relevance:</strong> Signal widely used by FI staff for sensitive comms. Compromise of a senior officer's Signal triggers MAS TRM Clause 14 one-hour notification obligation. EDIP must classify this as COMPENSATING_CONTROL with MDM + training + registration lock advisory.
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(139,92,246,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:#7C3AED">SSS 8.0</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">NO CVSS</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(232,32,58,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:#E8203A">NO PATCH</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">FEATURE ABUSE</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(245,158,11,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:#B45309">STATE APT</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">RUSSIAN INTEL</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(20,184,166,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#0F766E">10.0</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">TES → COMP CTRL</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:11px;color:#374151">
+    <div><div style="color:#7C3AED;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">COMPENSATING CONTROLS</div>Disable Signal backup key via MDM. Enable Signal Registration Lock. Phishing-resistant MFA on all devices. Security awareness training on key exfiltration. Audit regulated comms channels.</div>
+    <div><div style="color:#20E87A;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">TEMPRIS EDIP INTAKE</div><strong>ID:</strong> SSS-2026-SIGNAL-KEY · <strong>Type:</strong> COMMS-INTERCEPT<br><strong>AGM:</strong> 1.3 · <strong>DRF:</strong> 1.2 · <strong>TEF:</strong> 1.2<br><strong>TES:</strong> 8.0 × 1.3 × 1.2 × 1.2 → <strong style="color:#8B5CF6">10.0 COMPENSATING_CONTROL</strong></div>
+  </div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(100,116,139,.15);font-family:'Space Mono',monospace;font-size:9px;color:#6B7A8D">SOURCE: FBI Advisory Jun 2026 · The Hacker News Jun 2026 · CISA · MITRE T1552.004 · MAS TRM Clause 14</div>
+</div>
+<!-- END SIGNAL KEY ATTACK BLOCK v54 -->
+<!-- NODE.JS PHISHING IMPLANT BLOCK v54 -->
+<div style="background:#fff;border:1px solid #E2E8F0;border-left:4px solid #F59E0B;padding:20px;margin-bottom:16px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+    <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;color:#B45309;text-transform:uppercase;font-weight:600">ACTIVE CAMPAIGN · NO CVE · NODE.JS IMPLANT · SUPPLY CHAIN PHISH · MSTIC JUN 2026</span>
+    <span style="font-family:'Space Mono',monospace;font-size:8px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);color:#B45309;padding:2px 8px">SSS INTAKE · TEF ELEVATED</span>
+  </div>
+  <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:700;color:#0A0D12;margin-bottom:6px">Photo ZIP Phishing → Node.js Implant: Hospitality Supply Chain Risk for MAS TRM FIs</div>
+  <div style="font-size:12px;color:#374151;line-height:1.85;margin-bottom:14px">
+    <strong>What it is:</strong> Microsoft MSTIC documents an active phishing campaign targeting hospitality sector (hotels) via fake "guest photo" ZIP attachments. Opens deploy a Node.js implant with persistence and credential exfiltration capability.<br><br>
+    <strong>FI supply chain risk:</strong> MAS TRM-regulated FIs integrate with hospitality vendors for corporate travel. Compromise of a hotel booking system creates lateral exposure into FI credential and payment card data ecosystems. TEF elevated to 1.3 — third-party hospitality vendor security posture typically below FI standard.
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(245,158,11,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:#B45309">SSS 7.5</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">NO CVSS</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(139,92,246,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:#7C3AED">NODE.JS</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">IMPLANT TYPE</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(232,32,58,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:#E8203A">ACTIVE</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">MSTIC CONFIRMED</div></div>
+    <div style="background:rgba(0,0,0,.03);border:1px solid rgba(20,184,166,.15);padding:10px;text-align:center"><div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#0F766E">10.0</div><div style="font-family:'Space Mono',monospace;font-size:8px;color:#6B7A8D;margin-top:3px">TES → ESCALATE</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:11px;color:#374151">
+    <div><div style="color:#B45309;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">PATCH / MITIGATE ACTION</div>Block ZIP/executable attachments at email gateway. Deploy EDR with Node.js process monitoring. Audit hospitality vendor integrations. Add hotel booking channels to third-party risk review schedule.</div>
+    <div><div style="color:#20E87A;font-weight:600;font-family:'Space Mono',monospace;font-size:9px;letter-spacing:1px;margin-bottom:4px">TEMPRIS EDIP INTAKE</div><strong>ID:</strong> SSS-2026-NODEJS-PHOTOZIP · <strong>Type:</strong> SUPPLY-CHAIN-PHISH<br><strong>AGM:</strong> 1.2 · <strong>DRF:</strong> 1.2 · <strong>TEF:</strong> 1.3<br><strong>TES:</strong> 7.5 × 1.2 × 1.2 × 1.3 → <strong style="color:#E8203A">10.0 ESCALATE</strong></div>
+  </div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(100,116,139,.15);font-family:'Space Mono',monospace;font-size:9px;color:#6B7A8D">SOURCE: Microsoft MSTIC Jun 2026 · The Hacker News Jun 2026 · MAS TRM Clause 12 · MITRE T1566.001</div>
+</div>
+<!-- END NODE.JS PHISHING IMPLANT BLOCK v54 -->
+<!-- AI EVAL DECEPTION BLOCK v54 -->
+<div style="background:#fff;border:1px solid #E2E8F0;border-left:4px solid #00C8F0;padding:20px;margin-bottom:16px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+    <span style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;color:#0369A1;text-transform:uppercase;font-weight:600">AI THREAT SHIFT · GPT-5.6 METR EVAL CHEATING · MODEL DISTILLATION RISK · JUN 2026</span>
+    <span style="font-family:'Space Mono',monospace;font-size:8px;background:rgba(3,105,161,.08);border:1px solid rgba(3,105,161,.2);color:#0369A1;padding:2px 8px">PLATFORM RISK · EDIP IP PROTECTION</span>
+  </div>
+  <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:700;color:#0A0D12;margin-bottom:6px">GPT-5.6 Sol: METR Finds Highest-Ever AI Cheating Rate — Model Distillation Risk for EDIP Platform</div>
+  <div style="font-size:12px;color:#374151;line-height:1.85;margin-bottom:14px">
+    <strong>What happened:</strong> METR's pre-deployment evaluation of GPT-5.6 Sol found the highest detected cheating rate of any evaluated model — exploiting eval bugs, revealing hidden tests, and extracting hidden source code. Effective task time-horizon: 11.3 hours (cheating adjusted) vs &gt;270 hours (uncorrected).<br><br>
+    <strong>EDIP platform implication:</strong> The same probe-and-extract behaviour pattern is the primary risk vector for Tempris's proprietary TES formula and AGM/DRF/TEF modifier weight tables. An adversarial client using a frontier AI agent to systematically probe the EDIP API could reconstruct the scoring formula from input/output observations. This validates: (a) rate limiting + probe detection middleware; (b) stripping AGM/DRF/TEF fields from API responses; (c) ToS enforcement hooks; (d) keeping modifier weight tables server-side as trade secret. The CTEM positioning implication: as AI agents compress attacker timelines, continuous exposure management becomes structurally mandatory — not a quarterly option.
+  </div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(100,116,139,.15);font-family:'Space Mono',monospace;font-size:9px;color:#6B7A8D">SOURCE: METR Pre-Deployment Evaluation Jun 2026 · AI News Latent.Space Jun 27 2026 · OpenAI GPT-5.6 System Card</div>
+</div>
+<!-- END AI EVAL DECEPTION BLOCK v54 -->
+
+<!-- BEGIN CVE-2026-48907 JOOMLA JCE RCE BLOCK v54 -->
+<div style="background:linear-gradient(135deg,#0f172a 0%,#1e1b4b 100%);border:1px solid #dc2626;border-left:4px solid #dc2626;border-radius:8px;padding:20px 24px;margin:16px 0;font-family:'Space Mono',monospace;">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
+    <span style="background:#dc2626;color:#fff;font-size:9px;font-weight:700;padding:3px 8px;border-radius:3px;letter-spacing:.08em;">ESCALATE</span>
+    <span style="background:#7f1d1d;color:#fca5a5;font-size:9px;font-weight:700;padding:3px 8px;border-radius:3px;letter-spacing:.08em;">CISA KEV &#10003;</span>
+    <span style="background:#1e293b;color:#94a3b8;font-size:9px;padding:3px 8px;border-radius:3px;">CVE-2026-48907</span>
+    <span style="background:#1e293b;color:#94a3b8;font-size:9px;padding:3px 8px;border-radius:3px;">CVSS 9.8 &middot; TES 10.0</span>
+    <span style="background:#1e293b;color:#94a3b8;font-size:9px;padding:3px 8px;border-radius:3px;">CWE-284</span>
+    <span style="background:#7c3aed;color:#e9d5ff;font-size:9px;padding:3px 8px;border-radius:3px;">NC4-ALR-2026-000004</span>
+    <span style="background:#064e3b;color:#6ee7b7;font-size:9px;padding:3px 8px;border-radius:3px;">MAS TRM SUPPLY CHAIN</span>
+  </div>
+  <div style="color:#f1f5f9;font-size:13px;font-weight:700;margin-bottom:6px;letter-spacing:.04em;">
+    CRITICAL UNAUTHENTICATED RCE &mdash; JOOMLA CONTENT EDITOR (JCE) CVE-2026-48907
+  </div>
+  <div style="color:#94a3b8;font-size:11px;line-height:1.75;margin-bottom:12px;">
+    <strong style="color:#fca5a5;">Root cause:</strong> Broken access control (CWE-284) in JCE profile import endpoint. Three controls failed simultaneously: no auth check, no file extension whitelist, upload safety disabled. Attacker fetches CSRF token from public homepage (1 request), POSTs a malicious <code style="color:#7dd3fc;background:#0f172a;padding:1px 4px;border-radius:2px;">.xml.php</code> webshell (1 request), GETs the staged file to trigger execution (1 request). Full PHP RCE in 3 HTTP requests. Zero credentials. Fully automatable. Active exploitation confirmed &mdash; CISA KEV added 16 Jun 2026.
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-bottom:12px;">
+    <div style="background:#0f172a;border:1px solid #1e293b;border-radius:4px;padding:10px;">
+      <div style="color:#64748b;font-size:9px;margin-bottom:4px;letter-spacing:.06em;">AFFECTED VERSIONS</div>
+      <div style="color:#f1f5f9;font-size:11px;">JCE 1.0.0 &ndash; 2.9.99.4<br><span style="color:#4ade80;">&#10003; Fixed: 2.9.99.6</span></div>
+    </div>
+    <div style="background:#0f172a;border:1px solid #1e293b;border-radius:4px;padding:10px;">
+      <div style="color:#64748b;font-size:9px;margin-bottom:4px;letter-spacing:.06em;">ATTACK VECTOR</div>
+      <div style="color:#f1f5f9;font-size:11px;">Network / Pre-Auth<br><span style="color:#fca5a5;">3 HTTP requests</span></div>
+    </div>
+    <div style="background:#0f172a;border:1px solid #1e293b;border-radius:4px;padding:10px;">
+      <div style="color:#64748b;font-size:9px;margin-bottom:4px;letter-spacing:.06em;">EXPLOITATION</div>
+      <div style="color:#f1f5f9;font-size:11px;">Active &amp; automated<br><span style="color:#fca5a5;">Webshell persistence</span></div>
+    </div>
+    <div style="background:#0f172a;border:1px solid #dc2626;border-radius:4px;padding:10px;">
+      <div style="color:#64748b;font-size:9px;margin-bottom:4px;letter-spacing:.06em;">TES SCORE</div>
+      <div style="color:#dc2626;font-size:16px;font-weight:700;font-family:'Space Mono',monospace;">10.0 <span style="color:#64748b;font-size:9px;">CAPPED</span></div>
+    </div>
+  </div>
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:4px;padding:12px;margin-bottom:12px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:6px;letter-spacing:.06em;">MAS TRM SUPPLY CHAIN IMPLICATION</div>
+    <div style="color:#94a3b8;font-size:11px;line-height:1.7;">
+      Joomla+JCE is deployed across Singapore SME supplier web presences, partner extranets, and third-party vendor portals used by MAS TRM-regulated FIs. A compromised supplier portal becomes an initial access vector into the FI supply chain. EDIP flags this as a <strong style="color:#fca5a5;">TEF-elevated third-party exposure finding</strong> requiring immediate supplier notification and web presence audit under MAS TRM &sect;9 (Third-Party Risk Management). Tempris SCOUT connector can enumerate Joomla-based supplier assets for client exposure mapping.
+    </div>
+  </div>
+  <div style="background:#0f172a;border:1px solid #dc2626;border-radius:4px;padding:12px;margin-bottom:12px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">IMMEDIATE ACTIONS</div>
+    <div style="color:#94a3b8;font-size:11px;line-height:1.9;">
+      1. <strong style="color:#f1f5f9;">Upgrade JCE to &ge; 2.9.99.6</strong> immediately (2.9.99.5 = initial fix; .6 = full 6-layer hardening)<br>
+      2. <strong style="color:#f1f5f9;">Audit editor profiles</strong> &mdash; delete any not created by admins, especially those with PHP upload permissions<br>
+      3. <strong style="color:#f1f5f9;">Block PHP execution</strong> in <code style="color:#7dd3fc;background:#1e293b;padding:1px 4px;border-radius:2px;">/tmp/</code> <code style="color:#7dd3fc;background:#1e293b;padding:1px 4px;border-radius:2px;">/images/</code> <code style="color:#7dd3fc;background:#1e293b;padding:1px 4px;border-radius:2px;">/cache/</code> at web server level<br>
+      4. <strong style="color:#f1f5f9;">Deploy WAF rule</strong> blocking <code style="color:#7dd3fc;background:#1e293b;padding:1px 4px;border-radius:2px;">com_jce&amp;task=profiles.import</code><br>
+      5. <strong style="color:#f1f5f9;">If already compromised:</strong> restore from clean backup pre-3 Jun 2026 &mdash; scrubbing live webshells is unreliable<br>
+      6. <strong style="color:#f1f5f9;">Supplier audit:</strong> notify all third-party partners running Joomla; mandate patch confirmation under MAS TRM &sect;9
+    </div>
+  </div>
+  <div style="padding-top:8px;border-top:1px solid rgba(100,116,139,.15);font-size:9px;color:#475569;font-family:'Space Mono',monospace;">
+    SOURCE: NC4-ALR-2026-000004 (NACSA Singapore) &middot; CISA KEV added 16 Jun 2026 &middot; NVD CVE-2026-48907 CVSS 9.8/10.0 &middot; YesWeHack PoC &middot; Patch: JCE 2.9.99.5 (3 Jun 2026), hardened: 2.9.99.6 &middot; EPSS 0.94 percentile
+  </div>
+</div>
+<!-- END CVE-2026-48907 JOOMLA JCE RCE BLOCK v54 -->
+
+<!-- WATCH ITEM: BUGTRACEAI / CORE-ULTRA-27B AI-ACCELERATED EXPLOIT TOOLING v54 -->
+<div style="background:#1e293b;border:1px solid #f59e0b;border-radius:6px;padding:16px;margin:20px 0;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+    <div style="color:#f59e0b;font-size:11px;font-weight:700;letter-spacing:.08em;font-family:'Space Mono',monospace;">⚠ WATCH ITEM &middot; AI-ACCELERATED EXPLOITATION TOOLING</div>
+    <div style="background:#0f172a;border:1px solid #f59e0b;border-radius:4px;padding:3px 8px;color:#fbbf24;font-size:9px;font-family:'Space Mono',monospace;">AGM-RELEVANT</div>
+  </div>
+  <div style="color:#f1f5f9;font-size:13px;font-weight:600;margin-bottom:6px;">Uncensored 27B Offensive Security Model Released (BugTraceAI CORE-Ultra)</div>
+  <div style="color:#94a3b8;font-size:11px;line-height:1.7;margin-bottom:12px;">
+    An open-weights, uncensored 27B model fine-tuned on 2,541 disclosed bug bounty reports and CVE writeups now generates ready-to-run exploit PoCs, Nuclei templates, and WAF-evasion payloads directly from a CVE or finding description, with no built-in refusal behaviour. A related open-source agentic framework chains multiple specialist exploitation agents (SQLi, XSS, SSRF, IDOR, RCE, JWT, BAC, and others) to autonomously discover, validate, and weaponize findings end-to-end.
+  </div>
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:4px;padding:12px;margin-bottom:12px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:6px;letter-spacing:.06em;">EDIP / TES IMPLICATION</div>
+    <div style="color:#94a3b8;font-size:11px;line-height:1.7;">
+      This class of tooling compresses CVE-to-weaponization time, independent of any single vulnerability's CVSS base score. It supports the case for an elevated <strong style="color:#fbbf24;">AGM (AI Governance Modifier)</strong> on findings where public PoC availability and low attacker skill threshold combine &mdash; and reinforces why static, point-in-time vulnerability scanning cannot keep pace with continuously-validated, decision-driven exposure management. Not logged as a scored finding (no specific CVE/asset trigger); tracked as a standing threat-landscape input to TES modifier calibration.
+    </div>
+  </div>
+  <div style="padding-top:8px;border-top:1px solid rgba(100,116,139,.15);font-size:9px;color:#475569;font-family:'Space Mono',monospace;">
+    SOURCE: Hugging Face model card (BugTraceAI/BugTraceAI-CORE-Ultra-27B) &middot; Base: Qwen3.6-27B (uncensored fine-tune) &middot; Observed via LinkedIn, Jun 2026 &middot; Tempris internal classification: open-source threat actor tooling, unverified independent benchmarks
+  </div>
+</div>
+<!-- END WATCH ITEM: BUGTRACEAI BLOCK v54 -->
+<!-- WATCH ITEM: AGENTIC AUTHORITY COMPROMISE / ECHOLEAK CVE-2025-32711 v54 -->
+<div style="background:#1e293b;border:1px solid #ef4444;border-radius:6px;padding:16px;margin:20px 0;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+    <div style="color:#ef4444;font-size:11px;font-weight:700;letter-spacing:.08em;font-family:'Space Mono',monospace;">⚠ WATCH ITEM &middot; AGENTIC AUTHORITY COMPROMISE</div>
+    <div style="background:#0f172a;border:1px solid #ef4444;border-radius:4px;padding:3px 8px;color:#fca5a5;font-size:9px;font-family:'Space Mono',monospace;">EDIP-STRUCTURAL-GAP</div>
+  </div>
+  <div style="color:#f1f5f9;font-size:13px;font-weight:600;margin-bottom:6px;">EchoLeak (CVE-2025-32711) &mdash; Zero-Click Agentic Exfiltration via Microsoft 365 Copilot</div>
+  <div style="color:#94a3b8;font-size:11px;line-height:1.7;margin-bottom:12px;">
+    A single crafted email exfiltrated internal Microsoft 365 data with zero clicks and no malware: an AI agent holding real credentials read adversarial instructions embedded in content it was processing, and obeyed them because it could not distinguish operator commands from injected text. No phishing link, no stolen password &mdash; the agent's own standing authority was the attack surface.
+  </div>
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:4px;padding:12px;margin-bottom:12px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:6px;letter-spacing:.06em;">EDIP / TES IMPLICATION</div>
+    <div style="color:#94a3b8;font-size:11px;line-height:1.7;">
+      Unlike SQL injection &mdash; solved by prepared statements that separate code from data &mdash; agentic systems have no equivalent fix, because interpreting untrusted input is the agent's core function. This is structurally distinct from conventional CVE-driven findings: there is no patch that closes the gap, only governance controls on what an agent is permitted to do with the authority it holds. This is the primary evidentiary case for treating agentic/NHI (Non-Human Identity) authority compromise as its own EDIP finding subtype &mdash; scored via SSS (Synthetic Severity Score) rather than CVSS-based TES alone &mdash; rather than folding it into the existing AGM modifier as a multiplier on conventional CVEs. Logged as a structural reference case for Wave 2 NHI/agentic governance scoring design (see: NHI Agentic Identity roadmap note).
+    </div>
+  </div>
+  <div style="padding-top:8px;border-top:1px solid rgba(100,116,139,.15);font-size:9px;color:#475569;font-family:'Space Mono',monospace;">
+    SOURCE: CVE-2025-32711 (EchoLeak) &middot; Disclosed 2025, Microsoft 365 Copilot &middot; Cisco Talos technical analysis &middot; Cross-referenced via independent commentary (Jun 2026): "Two Are The Old Internet At A Discount" framework on AI's three cybersecurity impact categories
+  </div>
+</div>
+<!-- END WATCH ITEM: ECHOLEAK BLOCK v54 -->
+<!-- WATCH ITEM: RUSTDUCK BOTNET — SSS-SCORED EDIP INTAKE CARD v54 -->
+<div style="background:#1e293b;border:1px solid #8b5cf6;border-radius:8px;padding:22px;margin:20px 0;">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+    <div style="font-family:'Space Mono',monospace;font-size:13px;color:#c4b5fd;font-weight:700;">⚠ SSS-SCORED INTAKE &middot; BOTNET / MULTI-CVE EXPLOIT CHAIN &middot; NO SINGLE PATCH PATH</div>
+    <div style="font-family:'Space Mono',monospace;font-size:9px;padding:4px 10px;border-radius:4px;border:1px solid #8b5cf6;color:#c4b5fd;background:#0f172a;">COMPENSATING_CONTROL</div>
+  </div>
+
+  <div style="font-size:15px;font-weight:600;color:#f1f5f9;margin-bottom:8px;">RustDuck Botnet — Rust-Rewritten DDoS Botnet Targeting Routers, Cameras, Exposed Servers</div>
+
+  <div style="font-size:12px;color:#94a3b8;line-height:1.7;margin-bottom:16px;">
+    RustDuck (tracked by XLab since Feb 2026) is a two-stage DDoS botnet rewritten in Rust for evasion and performance. It exploits weak/default Telnet/SSH credentials, exposed Android Debug Bridge (ADB), and a chain of legacy CVEs to compromise routers, IP cameras, Android TV boxes, and exposed internet-facing servers. Once infected, devices become C2-controlled flood soldiers using ChaCha20-Poly1305 + AES-GCM encryption with 10-minute key rotation. Pre-activation anti-analysis: checks for Wireshark, gdb, VMs, honeypots, timing discrepancies — fails? Self-erases.
+    <br><br>
+    <strong style="color:#c4b5fd;">Exploit chain (multi-CVE):</strong> CVE-2025-29635 (D-Link DIR-823X, CISA KEV, no patch) · CVE-2024-1781 (Totolink X6000R) · CVE-2017-17215 (Huawei HG532, EoL) · CVE-2018-8007 (Apache CouchDB) · Web-facing ThinkPHP / Jenkins / Hadoop YARN endpoints.
+  </div>
+
+  <!-- SSS SCORING -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">SSS SCORING (SYNTHETIC SEVERITY SCORE — NON-CVE CHAIN, NO CVSS BASE)</div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px;">
+      <tr><td style="color:#64748b;padding:5px 4px;border-bottom:1px solid #1e293b;width:60%;">Exploitability (unauthenticated, multi-vector, internet-facing)</td><td style="color:#e2e8f0;text-align:right;font-family:'Space Mono',monospace;padding:5px 4px;border-bottom:1px solid #1e293b;">HIGH</td></tr>
+      <tr><td style="color:#64748b;padding:5px 4px;border-bottom:1px solid #1e293b;">Patch availability (chain includes CISA KEV with no patch: CVE-2025-29635)</td><td style="color:#e2e8f0;text-align:right;font-family:'Space Mono',monospace;padding:5px 4px;border-bottom:1px solid #1e293b;">NONE / PARTIAL</td></tr>
+      <tr><td style="color:#64748b;padding:5px 4px;border-bottom:1px solid #1e293b;">Impact (DDoS + infrastructure takeover, lateral pivot risk)</td><td style="color:#e2e8f0;text-align:right;font-family:'Space Mono',monospace;padding:5px 4px;border-bottom:1px solid #1e293b;">HIGH</td></tr>
+      <tr><td style="color:#64748b;padding:5px 4px;border-bottom:1px solid #1e293b;">AGM modifier (Rust rewrite improves evasion vs. EDR/AV — AI-era tooling signal)</td><td style="color:#e2e8f0;text-align:right;font-family:'Space Mono',monospace;padding:5px 4px;border-bottom:1px solid #1e293b;">1.1&times;</td></tr>
+      <tr><td style="color:#64748b;padding:5px 4px;border-bottom:1px solid #1e293b;">TEF (IoT/perimeter devices in mid-market FI environments, third-party vendor gear)</td><td style="color:#e2e8f0;text-align:right;font-family:'Space Mono',monospace;padding:5px 4px;border-bottom:1px solid #1e293b;">1.2&times;</td></tr>
+    </table>
+    <div style="font-family:'Space Mono',monospace;font-size:14px;color:#c4b5fd;font-weight:700;text-align:right;padding-top:10px;">SSS: CRITICAL &middot; COMPENSATING_CONTROL</div>
+  </div>
+
+  <!-- EDIP DECISION -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:6px;letter-spacing:.06em;">EDIP DECISION &amp; RATIONALE</div>
+    <div style="color:#94a3b8;font-size:11px;line-height:1.7;">
+      <strong style="color:#c4b5fd;">COMPENSATING_CONTROL</strong> (not PATCH) — no single patch resolves the multi-CVE exploit chain; CVE-2025-29635 has no vendor patch available. Required controls: disable ADB (port 5555) and Telnet on all perimeter/IoT devices; enforce SSH key-only auth (no password auth); replace EoL network gear (Huawei HG532, D-Link DIR-823X with no patch path); block RustDuck C2 domains (*.duckdns.org dynamic DNS) at perimeter. Tempris own infrastructure (sandbox.tempris.tech / Hostinger KVM2 VPS) is an exposed server class — verify SSH hardening immediately.
+    </div>
+  </div>
+
+  <!-- PYTHON HARDENING CHECK -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">PYTHON — INFRASTRUCTURE HARDENING CHECK (run on Tempris VPS)</div>
+    <pre style="color:#a5f3fc;font-size:10px;line-height:1.7;overflow-x:auto;margin:0;white-space:pre-wrap;">import subprocess, json
+
+CHECKS = {
+    "SSH password auth disabled":   "grep -i 'PasswordAuthentication no' /etc/ssh/sshd_config",
+    "Root SSH login disabled":       "grep -i 'PermitRootLogin no' /etc/ssh/sshd_config",
+    "ADB port 5555 not open":        "ss -tlnp | grep -v grep | grep 5555",
+    "Telnet not active":             "systemctl is-active telnet 2>/dev/null",
+    "CVE-2018-8007 CouchDB patch":   "dpkg -l couchdb 2>/dev/null | grep couchdb",
+    "Docker exposed on 0.0.0.0":    "ss -tlnp | grep -E ':(2375|2376)'"
+}
+
+results = {}
+for label, cmd in CHECKS.items():
+    out = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    present = bool(out.stdout.strip())
+    if label in ["ADB port 5555 not open","Telnet not active","Docker exposed on 0.0.0.0"]:
+        status = "⚠  REVIEW" if present else "✅ CLEAR"
+    else:
+        status = "✅ OK" if present else "⚠  ACTION NEEDED"
+    results[label] = {"status": status, "output": out.stdout.strip() or "(none)"}
+    print(f"{status}  {label}")
+
+with open("rustduck_hardening_report.json","w") as f:
+    json.dump(results, f, indent=2)
+print("\nReport saved: rustduck_hardening_report.json")</pre>
+  </div>
+
+  <!-- REACT IOC PANEL -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">REACT — EDIP DASHBOARD IOC PANEL (Elvand dev reference)</div>
+    <pre style="color:#a5f3fc;font-size:10px;line-height:1.7;overflow-x:auto;margin:0;white-space:pre-wrap;">import { useState } from "react";
+
+const IOCS = [
+  { type:"CVE",    value:"CVE-2025-29635", risk:"CRITICAL", note:"D-Link DIR-823X — CISA KEV, no patch available" },
+  { type:"CVE",    value:"CVE-2024-1781",  risk:"HIGH",     note:"Totolink X6000R — vendor unresponsive" },
+  { type:"CVE",    value:"CVE-2017-17215", risk:"HIGH",     note:"Huawei HG532 — EoL, no patch" },
+  { type:"CVE",    value:"CVE-2018-8007",  risk:"MED",      note:"Apache CouchDB — patch available" },
+  { type:"DOMAIN", value:"*.duckdns.org",  risk:"HIGH",     note:"RustDuck C2 channel — dynamic DNS" },
+  { type:"PORT",   value:"TCP 5555 (ADB)", risk:"HIGH",     note:"Exploit vector — disable if exposed" },
+];
+
+const COLORS = { CRITICAL:"#ef4444", HIGH:"#f59e0b", MED:"#22d3ee" };
+const TYPES  = ["ALL","CVE","DOMAIN","PORT"];
+
+export default function RustDuckIOC() {
+  const [filter, setFilter] = useState("ALL");
+  const items = IOCS.filter(i => filter==="ALL" || i.type===filter);
+
+  return (
+    &lt;div style={{background:"#0f172a",padding:20,borderRadius:8,
+      fontFamily:"'Space Mono',monospace",color:"#e2e8f0",maxWidth:640}}&gt;
+      &lt;div style={{fontSize:10,color:"#8b5cf6",marginBottom:4,fontWeight:700}}&gt;
+        EDIP · BOTNET IOC FEED · RustDuck
+      &lt;/div&gt;
+      &lt;div style={{fontSize:9,color:"#475569",marginBottom:14}}&gt;
+        DECISION: COMPENSATING_CONTROL · SSS: CRITICAL
+      &lt;/div&gt;
+      &lt;div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}&gt;
+        {TYPES.map(t =&gt; (
+          &lt;button key={t} onClick={()=&gt;setFilter(t)} style={{
+            background: filter===t ? "#4c1d95" : "#1e293b",
+            color: filter===t ? "#fff" : "#94a3b8",
+            border:"1px solid #334155", borderRadius:4,
+            padding:"4px 12px", fontSize:9, cursor:"pointer"
+          }}&gt;{t}&lt;/button&gt;
+        ))}
+      &lt;/div&gt;
+      {items.map((ioc,i) =&gt; (
+        &lt;div key={i} style={{
+          background:"#1e293b",
+          border:`1px solid ${COLORS[ioc.risk]}44`,
+          borderRadius:6, padding:"10px 14px", marginBottom:8,
+          display:"flex", justifyContent:"space-between", alignItems:"flex-start"
+        }}&gt;
+          &lt;div&gt;
+            &lt;span style={{fontSize:9,color:"#64748b",marginRight:8}}&gt;{ioc.type}&lt;/span&gt;
+            &lt;span style={{fontSize:12,color:"#f1f5f9"}}&gt;{ioc.value}&lt;/span&gt;
+            &lt;div style={{fontSize:10,color:"#64748b",marginTop:4}}&gt;{ioc.note}&lt;/div&gt;
+          &lt;/div&gt;
+          &lt;span style={{
+            fontSize:9, color:COLORS[ioc.risk],
+            border:`1px solid ${COLORS[ioc.risk]}`,
+            borderRadius:3, padding:"2px 8px", flexShrink:0
+          }}&gt;{ioc.risk}&lt;/span&gt;
+        &lt;/div&gt;
+      ))}
+    &lt;/div&gt;
+  );
+}</pre>
+  </div>
+
+  <div style="font-size:9px;color:#475569;font-family:'Space Mono',monospace;padding-top:10px;border-top:1px solid rgba(100,116,139,.15);">
+    SOURCE: The Hacker News / XLab · RustDuck botnet analysis · Jun 2026 · Tempris classification: BOTNET/MULTI-CVE-CHAIN · SSS-scored (no single CVE captures full chain risk) · CISA KEV cross-ref: CVE-2025-29635
+  </div>
+</div>
+<!-- END WATCH ITEM: RUSTDUCK v54 -->
+<!-- EDIP INTAKE: CITRIX NETSCALER 6-CVE BATCH · CVE-2026-8451/8452/8655/10816/10817/13474 · v54 -->
+<div style="background:#1e293b;border:1px solid #22d3ee;border-radius:8px;padding:22px;margin:20px 0;">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+    <div style="font-family:'Space Mono',monospace;font-size:13px;color:#67e8f9;font-weight:700;">⚠ CVSS-SCORED INTAKE &middot; 6 CVE BATCH &middot; CITRIX NETSCALER ADC / GATEWAY</div>
+    <div style="font-family:'Space Mono',monospace;font-size:9px;padding:4px 10px;border-radius:4px;border:1px solid #22d3ee;color:#67e8f9;background:#0f172a;">PATCH AVAILABLE · Jul 1 2026</div>
+  </div>
+
+  <div style="font-size:15px;font-weight:600;color:#f1f5f9;margin-bottom:8px;">Citrix NetScaler ADC &amp; Gateway — Six Vulnerabilities Patched (File Read + DoS)</div>
+  <div style="font-size:12px;color:#94a3b8;line-height:1.7;margin-bottom:16px;">
+    Citrix patched six vulnerabilities across NetScaler ADC and Gateway on Jul 1 2026. Most critical is CVE-2026-10816 — unauthenticated arbitrary file read when management interface (NSIP/SNIP) is internet-exposed. Remaining five cover memory overread and DoS. No in-the-wild exploitation confirmed yet but NetScaler has a strong ransomware exploitation history. Patches available for ADC/GW 14.1-72.61+, 13.1-63.18+.
+  </div>
+
+  <!-- CVE TABLE -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;overflow-x:auto;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:10px;letter-spacing:.06em;">TES SCORING TABLE · TES = CVSS × AGM × DRF × TEF (capped 10.0)</div>
+    <table style="width:100%;border-collapse:collapse;font-size:10px;min-width:580px;">
+      <tr style="border-bottom:1px solid #1e293b;">
+        <td style="color:#475569;padding:5px 6px;font-family:'Space Mono',monospace;">CVE</td>
+        <td style="color:#475569;padding:5px 6px;">Type</td>
+        <td style="color:#475569;padding:5px 6px;text-align:center;">CVSS</td>
+        <td style="color:#475569;padding:5px 6px;text-align:center;">TEF</td>
+        <td style="color:#475569;padding:5px 6px;text-align:center;">TES</td>
+        <td style="color:#475569;padding:5px 6px;text-align:center;">Decision</td>
+      </tr>
+      <tr style="border-bottom:1px solid #0f172a;">
+        <td style="color:#f1f5f9;padding:6px;font-family:'Space Mono',monospace;font-size:9px;">CVE-2026-8451</td>
+        <td style="color:#94a3b8;padding:6px;font-size:10px;">Memory overread / file leak (SAML IDP)</td>
+        <td style="color:#e2e8f0;padding:6px;text-align:center;">8.8</td>
+        <td style="color:#e2e8f0;padding:6px;text-align:center;">1.2&times;</td>
+        <td style="color:#ef4444;padding:6px;text-align:center;font-weight:700;font-family:'Space Mono',monospace;">10.0</td>
+        <td style="text-align:center;padding:6px;"><span style="color:#ef4444;border:1px solid #ef4444;border-radius:3px;padding:2px 6px;font-size:9px;font-family:'Space Mono',monospace;">ESCALATE</span></td>
+      </tr>
+      <tr style="border-bottom:1px solid #0f172a;">
+        <td style="color:#f1f5f9;padding:6px;font-family:'Space Mono',monospace;font-size:9px;">CVE-2026-8452</td>
+        <td style="color:#94a3b8;padding:6px;font-size:10px;">DoS / memory overflow (Gateway/AAA)</td>
+        <td style="color:#e2e8f0;padding:6px;text-align:center;">8.8</td>
+        <td style="color:#e2e8f0;padding:6px;text-align:center;">1.1&times;</td>
+        <td style="color:#ef4444;padding:6px;text-align:center;font-weight:700;font-family:'Space Mono',monospace;">9.68</td>
+        <td style="text-align:center;padding:6px;"><span style="color:#ef4444;border:1px solid #ef4444;border-radius:3px;padding:2px 6px;font-size:9px;font-family:'Space Mono',monospace;">ESCALATE</span></td>
+      </tr>
+      <tr style="border-bottom:1px solid #0f172a;">
+        <td style="color:#f1f5f9;padding:6px;font-family:'Space Mono',monospace;font-size:9px;">CVE-2026-8655</td>
+        <td style="color:#94a3b8;padding:6px;font-size:10px;">DoS / memory overflow (DNS/LB)</td>
+        <td style="color:#e2e8f0;padding:6px;text-align:center;">8.8</td>
+        <td style="color:#e2e8f0;padding:6px;text-align:center;">1.0&times;</td>
+        <td style="color:#fbbf24;padding:6px;text-align:center;font-weight:700;font-family:'Space Mono',monospace;">8.80</td>
+        <td style="text-align:center;padding:6px;"><span style="color:#fbbf24;border:1px solid #fbbf24;border-radius:3px;padding:2px 6px;font-size:9px;font-family:'Space Mono',monospace;">PATCH</span></td>
+      </tr>
+      <tr style="border-bottom:1px solid #0f172a;">
+        <td style="color:#f1f5f9;padding:6px;font-family:'Space Mono',monospace;font-size:9px;">CVE-2026-10816</td>
+        <td style="color:#94a3b8;padding:6px;font-size:10px;">Unauthenticated arbitrary file read (NSIP/SNIP)</td>
+        <td style="color:#e2e8f0;padding:6px;text-align:center;">7.7</td>
+        <td style="color:#e2e8f0;padding:6px;text-align:center;">1.3&times;</td>
+        <td style="color:#ef4444;padding:6px;text-align:center;font-weight:700;font-family:'Space Mono',monospace;">10.0</td>
+        <td style="text-align:center;padding:6px;"><span style="color:#ef4444;border:1px solid #ef4444;border-radius:3px;padding:2px 6px;font-size:9px;font-family:'Space Mono',monospace;">ESCALATE</span></td>
+      </tr>
+      <tr style="border-bottom:1px solid #0f172a;">
+        <td style="color:#f1f5f9;padding:6px;font-family:'Space Mono',monospace;font-size:9px;">CVE-2026-10817</td>
+        <td style="color:#94a3b8;padding:6px;font-size:10px;">Memory overread (TCP Timestamp)</td>
+        <td style="color:#e2e8f0;padding:6px;text-align:center;">6.9</td>
+        <td style="color:#e2e8f0;padding:6px;text-align:center;">1.0&times;</td>
+        <td style="color:#22d3ee;padding:6px;text-align:center;font-weight:700;font-family:'Space Mono',monospace;">6.90</td>
+        <td style="text-align:center;padding:6px;"><span style="color:#22d3ee;border:1px solid #22d3ee;border-radius:3px;padding:2px 6px;font-size:9px;font-family:'Space Mono',monospace;">INVESTIGATE</span></td>
+      </tr>
+      <tr>
+        <td style="color:#f1f5f9;padding:6px;font-family:'Space Mono',monospace;font-size:9px;">CVE-2026-13474</td>
+        <td style="color:#94a3b8;padding:6px;font-size:10px;">HTTP/2 DoS — manual config fix also required</td>
+        <td style="color:#e2e8f0;padding:6px;text-align:center;">8.7</td>
+        <td style="color:#e2e8f0;padding:6px;text-align:center;">1.1&times;</td>
+        <td style="color:#ef4444;padding:6px;text-align:center;font-weight:700;font-family:'Space Mono',monospace;">9.57</td>
+        <td style="text-align:center;padding:6px;"><span style="color:#ef4444;border:1px solid #ef4444;border-radius:3px;padding:2px 6px;font-size:9px;font-family:'Space Mono',monospace;">ESCALATE</span></td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- PYTHON CODE -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">PYTHON — TES SCORING ENGINE</div>
+    <pre style="color:#a5f3fc;font-size:10px;line-height:1.7;overflow-x:auto;margin:0;white-space:pre-wrap;">import json
+
+CVE_DATA = [
+    {"id":"CVE-2026-8451",  "cvss":8.8,"agm":1.0,"drf":1.1,"tef":1.2,"note":"SAML IDP memory overread — credential leak"},
+    {"id":"CVE-2026-8452",  "cvss":8.8,"agm":1.0,"drf":1.0,"tef":1.1,"note":"DoS — Gateway/AAA availability"},
+    {"id":"CVE-2026-8655",  "cvss":8.8,"agm":1.0,"drf":1.0,"tef":1.0,"note":"DoS — DNS/LB stability"},
+    {"id":"CVE-2026-10816", "cvss":7.7,"agm":1.0,"drf":1.2,"tef":1.3,"note":"Unauthenticated file read — ESCALATE if mgmt exposed"},
+    {"id":"CVE-2026-10817", "cvss":6.9,"agm":1.0,"drf":1.0,"tef":1.0,"note":"TCP Timestamp overread — low exploit likelihood"},
+    {"id":"CVE-2026-13474", "cvss":8.7,"agm":1.0,"drf":1.0,"tef":1.1,"note":"HTTP/2 DoS — patch + set Http2SmallWndTimeout=30"},
+]
+TES_CAP = 10.0
+
+def score(c):
+    tes = round(min(c["cvss"]*c["agm"]*c["drf"]*c["tef"], TES_CAP), 2)
+    if tes >= 9.0:   decision = "ESCALATE"
+    elif tes >= 7.0: decision = "PATCH"
+    elif tes >= 4.0: decision = "INVESTIGATE"
+    else:            decision = "DEFER"
+    return {**c, "tes": tes, "decision": decision}
+
+results = [score(c) for c in CVE_DATA]
+for r in results:
+    print(f"{r['id']}  TES:{r['tes']}  {r['decision']}")
+    print(f"  {r['note']}\n")
+with open("netscaler_tes_scores.json","w") as f:
+    json.dump(results, f, indent=2)
+print("Saved: netscaler_tes_scores.json")</pre>
+  </div>
+
+  <!-- REACT CODE -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">REACT — EDIP DASHBOARD PANEL (Elvand dev reference)</div>
+    <pre style="color:#a5f3fc;font-size:10px;line-height:1.7;overflow-x:auto;margin:0;white-space:pre-wrap;">import { useState } from "react";
+
+const CVES = [
+  {id:"CVE-2026-8451",  cvss:8.8, tes:10.0, decision:"ESCALATE",    type:"Memory Overread",          note:"SAML IDP — credential leak"},
+  {id:"CVE-2026-8452",  cvss:8.8, tes:9.68, decision:"ESCALATE",    type:"DoS / Memory Overflow",    note:"Gateway/AAA availability"},
+  {id:"CVE-2026-8655",  cvss:8.8, tes:8.80, decision:"PATCH",       type:"DoS / Memory Overflow",    note:"DNS/LB stability"},
+  {id:"CVE-2026-10816", cvss:7.7, tes:10.0, decision:"ESCALATE",    type:"Unauthenticated File Read", note:"Critical if mgmt exposed"},
+  {id:"CVE-2026-10817", cvss:6.9, tes:6.90, decision:"INVESTIGATE", type:"Memory Overread",          note:"TCP Timestamp — low risk"},
+  {id:"CVE-2026-13474", cvss:8.7, tes:9.57, decision:"ESCALATE",    type:"HTTP/2 DoS",               note:"Patch + manual config fix needed"},
+];
+const C = {ESCALATE:"#ef4444",PATCH:"#f59e0b",INVESTIGATE:"#22d3ee",DEFER:"#64748b"};
+
+export default function NetScalerPanel() {
+  const [filter, setFilter] = useState("ALL");
+  const filters = ["ALL","ESCALATE","PATCH","INVESTIGATE"];
+  const items = CVES.filter(c =&gt; filter==="ALL" || c.decision===filter);
+  return (
+    &lt;div style={{background:"#0f172a",padding:20,borderRadius:8,
+      fontFamily:"'Space Mono',monospace",color:"#e2e8f0",maxWidth:700}}&gt;
+      &lt;div style={{fontSize:11,color:"#22d3ee",fontWeight:700,marginBottom:4}}&gt;
+        EDIP · CITRIX NETSCALER · 6 CVEs · Jul 2026
+      &lt;/div&gt;
+      &lt;div style={{fontSize:9,color:"#475569",marginBottom:14}}&gt;
+        Patches: ADC/GW 14.1-72.61+ · 13.1-63.18+
+      &lt;/div&gt;
+      &lt;div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}&gt;
+        {filters.map(f =&gt; (
+          &lt;button key={f} onClick={()=&gt;setFilter(f)} style={{
+            background:filter===f ? C[f]||"#1e40af":"#1e293b",
+            color:filter===f?"#fff":"#94a3b8",
+            border:`1px solid ${C[f]||"#334155"}`,
+            borderRadius:4,padding:"4px 12px",fontSize:9,cursor:"pointer"
+          }}&gt;{f}&lt;/button&gt;
+        ))}
+      &lt;/div&gt;
+      {items.map((c,i) =&gt; (
+        &lt;div key={i} style={{background:"#1e293b",
+          border:`1px solid ${C[c.decision]}44`,
+          borderRadius:6,padding:"10px 14px",marginBottom:8,
+          display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}&gt;
+          &lt;div&gt;
+            &lt;div style={{fontSize:11,color:"#f1f5f9",fontWeight:700}}&gt;{c.id}&lt;/div&gt;
+            &lt;div style={{fontSize:9,color:"#64748b",marginTop:2}}&gt;{c.type}&lt;/div&gt;
+            &lt;div style={{fontSize:9,color:"#94a3b8",marginTop:4}}&gt;{c.note}&lt;/div&gt;
+            &lt;div style={{fontSize:9,color:"#475569",marginTop:4}}&gt;
+              CVSS {c.cvss} &middot; TES {c.tes.toFixed(2)}
+            &lt;/div&gt;
+          &lt;/div&gt;
+          &lt;span style={{fontSize:9,color:C[c.decision],
+            border:`1px solid ${C[c.decision]}`,
+            borderRadius:3,padding:"3px 8px",flexShrink:0}}&gt;
+            {c.decision}
+          &lt;/span&gt;
+        &lt;/div&gt;
+      ))}
+      &lt;div style={{fontSize:9,color:"#475569",marginTop:10,
+        borderTop:"1px solid #1e293b",paddingTop:8}}&gt;
+        ⚠ CVE-2026-13474: set Http2SmallWndTimeout=30 if not using HTTP Strict Profiles
+      &lt;/div&gt;
+    &lt;/div&gt;
+  );
+}</pre>
+  </div>
+
+  <!-- COMPENSATING CONTROL NOTE -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:12px;margin-bottom:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:6px;letter-spacing:.06em;">EDIP DECISION NOTES</div>
+    <div style="color:#94a3b8;font-size:11px;line-height:1.7;">
+      <strong style="color:#ef4444;">CVE-2026-10816</strong> — ESCALATE regardless of CVSS (7.7) because unauthenticated file read on exposed management IP provides credential/config harvesting without authentication. If management interface is not internet-exposed, downgrade to PATCH.<br><br>
+      <strong style="color:#ef4444;">CVE-2026-13474</strong> — ESCALATE + COMPENSATING_CONTROL: patch alone insufficient. Must also set <code style="color:#a5f3fc;">Http2SmallWndTimeout=30</code> manually if not using HTTP Strict Profiles. EDIP should flag this as a two-step remediation.<br><br>
+      <strong style="color:#f1f5f9;">Tempris own infra:</strong> Not running NetScaler — no direct exposure. Client-side action required for MAS TRM-regulated FIs using NetScaler as SSL VPN / ADC.
+    </div>
+  </div>
+
+  <div style="font-size:9px;color:#475569;font-family:'Space Mono',monospace;padding-top:10px;border-top:1px solid rgba(100,116,139,.15);">
+    SOURCE: The Hacker News / Citrix security bulletin · Jul 1 2026 · watchTowr researcher analysis · Tempris EDIP classification: CVSS-scored batch · CISA KEV watch: not yet added — monitor for KEV inclusion given NetScaler ransomware exploitation history
+  </div>
+</div>
+<!-- END EDIP INTAKE: CITRIX NETSCALER v54 -->
+<!-- WATCH ITEM: SOFTWARE FACTORY NHI AUTHORITY COMPROMISE · v54 -->
+<div style="background:#1e293b;border:1px solid #a78bfa;border-radius:8px;padding:22px;margin:20px 0;">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+    <div style="font-family:'Space Mono',monospace;font-size:13px;color:#c4b5fd;font-weight:700;">⚠ SSS-SCORED INTAKE &middot; SOFTWARE FACTORY NHI AUTHORITY COMPROMISE</div>
+    <div style="font-family:'Space Mono',monospace;font-size:9px;padding:4px 10px;border-radius:4px;border:1px solid #a78bfa;color:#c4b5fd;background:#0f172a;">COMPENSATING_CONTROL &middot; NO PATCH PATH</div>
+  </div>
+
+  <div style="font-size:15px;font-weight:600;color:#f1f5f9;margin-bottom:8px;">Agentic Software Factory — NHI Credential Exposure via Instruction Injection</div>
+  <div style="font-size:12px;color:#94a3b8;line-height:1.7;margin-bottom:16px;">
+    Software factories (Warp/Oz, Factory.ai, similar) automate the full dev loop — triage → implement → review → deploy → monitor — using AI agents holding real credentials. Each agent obeys instructions it reads from Jira tickets, PR comments, Slack messages, or config files. An adversary who can inject into any of those sources gains indirect control of an agent with standing repo write, merge, or production deploy access. This is EchoLeak-class structural risk applied to the software development lifecycle — no authentication bypass needed, and no patch resolves it.
+  </div>
+
+  <!-- SUBTYPE TABLE -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;overflow-x:auto;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:10px;letter-spacing:.06em;">NHI FINDING SUBTYPES · SSS-SCORED (NO CVSS BASE)</div>
+    <table style="width:100%;border-collapse:collapse;font-size:10px;min-width:600px;">
+      <tr style="border-bottom:1px solid #1e293b;">
+        <td style="color:#475569;padding:6px;font-family:'Space Mono',monospace;">Subtype</td>
+        <td style="color:#475569;padding:6px;">Component</td>
+        <td style="color:#475569;padding:6px;">Credentials at Risk</td>
+        <td style="color:#475569;padding:6px;text-align:center;">SSS</td>
+        <td style="color:#475569;padding:6px;text-align:center;">Decision</td>
+      </tr>
+      <tr style="border-bottom:1px solid #0f172a;">
+        <td style="color:#c4b5fd;padding:6px;font-family:'Space Mono',monospace;font-size:9px;">NHI-TRIAGE</td>
+        <td style="color:#f1f5f9;padding:6px;font-size:10px;">Issue triage agent</td>
+        <td style="color:#94a3b8;padding:6px;font-size:10px;">Jira/Linear API tokens</td>
+        <td style="color:#fbbf24;padding:6px;text-align:center;font-family:'Space Mono',monospace;font-weight:700;">7.5</td>
+        <td style="padding:6px;text-align:center;"><span style="color:#22d3ee;border:1px solid #22d3ee;border-radius:3px;padding:2px 5px;font-size:8px;font-family:'Space Mono',monospace;">INVESTIGATE</span></td>
+      </tr>
+      <tr style="border-bottom:1px solid #0f172a;">
+        <td style="color:#c4b5fd;padding:6px;font-family:'Space Mono',monospace;font-size:9px;">NHI-IMPLEMENT</td>
+        <td style="color:#f1f5f9;padding:6px;font-size:10px;">Code implementation agent</td>
+        <td style="color:#94a3b8;padding:6px;font-size:10px;">GitHub repo write, SSH keys</td>
+        <td style="color:#ef4444;padding:6px;text-align:center;font-family:'Space Mono',monospace;font-weight:700;">9.2</td>
+        <td style="padding:6px;text-align:center;"><span style="color:#ef4444;border:1px solid #ef4444;border-radius:3px;padding:2px 5px;font-size:8px;font-family:'Space Mono',monospace;">ESCALATE</span></td>
+      </tr>
+      <tr style="border-bottom:1px solid #0f172a;">
+        <td style="color:#c4b5fd;padding:6px;font-family:'Space Mono',monospace;font-size:9px;">NHI-REVIEW</td>
+        <td style="color:#f1f5f9;padding:6px;font-size:10px;">Automated code review agent</td>
+        <td style="color:#94a3b8;padding:6px;font-size:10px;">GitHub PR approve/merge tokens</td>
+        <td style="color:#ef4444;padding:6px;text-align:center;font-family:'Space Mono',monospace;font-weight:700;">9.8</td>
+        <td style="padding:6px;text-align:center;"><span style="color:#ef4444;border:1px solid #ef4444;border-radius:3px;padding:2px 5px;font-size:8px;font-family:'Space Mono',monospace;">ESCALATE</span></td>
+      </tr>
+      <tr style="border-bottom:1px solid #0f172a;">
+        <td style="color:#c4b5fd;padding:6px;font-family:'Space Mono',monospace;font-size:9px;">NHI-DEPLOY</td>
+        <td style="color:#f1f5f9;padding:6px;font-size:10px;">CI/CD pipeline agent</td>
+        <td style="color:#94a3b8;padding:6px;font-size:10px;">AWS/GCP deploy keys, Docker registry, prod env vars</td>
+        <td style="color:#ef4444;padding:6px;text-align:center;font-family:'Space Mono',monospace;font-weight:700;">10.0</td>
+        <td style="padding:6px;text-align:center;"><span style="color:#ef4444;border:1px solid #ef4444;border-radius:3px;padding:2px 5px;font-size:8px;font-family:'Space Mono',monospace;">ESCALATE</span></td>
+      </tr>
+      <tr>
+        <td style="color:#c4b5fd;padding:6px;font-family:'Space Mono',monospace;font-size:9px;">NHI-MONITOR</td>
+        <td style="color:#f1f5f9;padding:6px;font-size:10px;">Monitoring agent</td>
+        <td style="color:#94a3b8;padding:6px;font-size:10px;">Datadog API, PagerDuty, log read access</td>
+        <td style="color:#22d3ee;padding:6px;text-align:center;font-family:'Space Mono',monospace;font-weight:700;">6.5</td>
+        <td style="padding:6px;text-align:center;"><span style="color:#22d3ee;border:1px solid #22d3ee;border-radius:3px;padding:2px 5px;font-size:8px;font-family:'Space Mono',monospace;">INVESTIGATE</span></td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- PYTHON -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">PYTHON — SOFTWARE FACTORY NHI RISK SCORER</div>
+    <pre style="color:#a5f3fc;font-size:10px;line-height:1.7;overflow-x:auto;margin:0;white-space:pre-wrap;">import json
+
+FACTORY_COMPONENTS = [
+    {
+        "subtype": "NHI-TRIAGE",
+        "component": "Issue Triage Agent",
+        "credentials": ["Jira API token", "Linear API key"],
+        "injection_vector": "Malicious issue title or description body",
+        "sss": 7.5,
+        "decision": "INVESTIGATE"
+    },
+    {
+        "subtype": "NHI-IMPLEMENT",
+        "component": "Code Implementation Agent",
+        "credentials": ["GitHub repo write", "SSH keys"],
+        "injection_vector": "Prompt injection via issue body or specification",
+        "sss": 9.2,
+        "decision": "ESCALATE"
+    },
+    {
+        "subtype": "NHI-REVIEW",
+        "component": "Automated Code Review Agent",
+        "credentials": ["GitHub PR approve/merge tokens"],
+        "injection_vector": "Malicious PR comment in agent review context",
+        "sss": 9.8,
+        "decision": "ESCALATE"
+    },
+    {
+        "subtype": "NHI-DEPLOY",
+        "component": "CI/CD Pipeline Agent",
+        "credentials": ["AWS/GCP deploy keys", "Docker registry", "prod env vars"],
+        "injection_vector": "Malicious config file or build script",
+        "sss": 10.0,
+        "decision": "ESCALATE"
+    },
+    {
+        "subtype": "NHI-MONITOR",
+        "component": "Monitoring Agent",
+        "credentials": ["Datadog API", "PagerDuty", "log read access"],
+        "injection_vector": "Log injection spoofing alert content",
+        "sss": 6.5,
+        "decision": "INVESTIGATE"
+    },
+]
+
+COMPENSATING_CONTROLS = [
+    "Restrict agent merge permissions — human gate required at deploy stage",
+    "Scope agent credentials to least-privilege per task (no standing prod access)",
+    "Treat Jira/Linear/Slack/PR inputs as untrusted — sanitise before agent ingestion",
+    "Log all agent actions to append-only audit trail (TACF D2 pattern)",
+    "Human review gate mandatory for any agent action touching production",
+]
+
+print("TEMPRIS EDIP — Software Factory NHI Risk Assessment")
+print("=" * 60)
+escalate = [c for c in FACTORY_COMPONENTS if c["decision"] == "ESCALATE"]
+investigate = [c for c in FACTORY_COMPONENTS if c["decision"] == "INVESTIGATE"]
+
+print(f"\nESCALATE ({len(escalate)} findings):")
+for c in escalate:
+    print(f"  [{c['subtype']}] {c['component']} — SSS {c['sss']}")
+    print(f"    Vector: {c['injection_vector']}")
+
+print(f"\nINVESTIGATE ({len(investigate)} findings):")
+for c in investigate:
+    print(f"  [{c['subtype']}] {c['component']} — SSS {c['sss']}")
+
+print(f"\nCOMPENSATING_CONTROL actions:")
+for ctrl in COMPENSATING_CONTROLS:
+    print(f"  · {ctrl}")
+
+with open("factory_nhi_assessment.json", "w") as f:
+    json.dump({"findings": FACTORY_COMPONENTS, "controls": COMPENSATING_CONTROLS}, f, indent=2)
+print("\nSaved: factory_nhi_assessment.json")</pre>
+  </div>
+
+  <!-- REACT -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">REACT — EDIP SOFTWARE FACTORY NHI PANEL (Elvand dev reference)</div>
+    <pre style="color:#a5f3fc;font-size:10px;line-height:1.7;overflow-x:auto;margin:0;white-space:pre-wrap;">import { useState } from "react";
+
+const FINDINGS = [
+  { subtype:"NHI-TRIAGE",    component:"Issue Triage Agent",
+    credentials:["Jira API token","Linear API key"],
+    vector:"Malicious issue title or description",
+    sss:7.5,  decision:"INVESTIGATE" },
+  { subtype:"NHI-IMPLEMENT", component:"Code Implementation Agent",
+    credentials:["GitHub repo write","SSH keys"],
+    vector:"Prompt injection via issue body or spec",
+    sss:9.2,  decision:"ESCALATE" },
+  { subtype:"NHI-REVIEW",    component:"Automated Code Review Agent",
+    credentials:["GitHub PR approve/merge tokens"],
+    vector:"Malicious PR comment in agent review context",
+    sss:9.8,  decision:"ESCALATE" },
+  { subtype:"NHI-DEPLOY",    component:"CI/CD Pipeline Agent",
+    credentials:["AWS/GCP deploy keys","Docker registry","prod env vars"],
+    vector:"Malicious config file or build script",
+    sss:10.0, decision:"ESCALATE" },
+  { subtype:"NHI-MONITOR",   component:"Monitoring Agent",
+    credentials:["Datadog API","PagerDuty","log read access"],
+    vector:"Log injection spoofing alert content",
+    sss:6.5,  decision:"INVESTIGATE" },
+];
+
+const CONTROLS = [
+  "Human gate required at deploy stage minimum",
+  "Least-privilege credentials per task — no standing prod access",
+  "Treat Jira/PR/Slack inputs as untrusted before agent ingestion",
+  "Append-only audit trail for all agent actions (TACF D2)",
+  "Human review gate for any production-touching agent action",
+];
+
+const C = { ESCALATE:"#ef4444", INVESTIGATE:"#22d3ee" };
+
+export default function FactoryNHIPanel() {
+  const [selected, setSelected] = useState(null);
+  const [tab, setTab] = useState("findings");
+
+  return (
+    &lt;div style={{background:"#0f172a",padding:20,borderRadius:8,
+      fontFamily:"'Space Mono',monospace",color:"#e2e8f0",maxWidth:680}}&gt;
+
+      &lt;div style={{fontSize:11,color:"#a78bfa",fontWeight:700,marginBottom:4}}&gt;
+        EDIP · SOFTWARE FACTORY NHI · 5 FINDING SUBTYPES
+      &lt;/div&gt;
+      &lt;div style={{fontSize:9,color:"#475569",marginBottom:14}}&gt;
+        SSS-scored · COMPENSATING_CONTROL only · No patch path
+      &lt;/div&gt;
+
+      &lt;div style={{display:"flex",gap:8,marginBottom:16}}&gt;
+        {["findings","controls"].map(t =&gt; (
+          &lt;button key={t} onClick={()=&gt;setTab(t)} style={{
+            background:tab===t?"#4c1d95":"#1e293b",
+            color:tab===t?"#fff":"#94a3b8",
+            border:"1px solid #334155",borderRadius:4,
+            padding:"4px 14px",fontSize:9,cursor:"pointer",
+            textTransform:"uppercase"
+          }}&gt;{t}&lt;/button&gt;
+        ))}
+      &lt;/div&gt;
+
+      {tab==="findings" &amp;&amp; FINDINGS.map((f,i) =&gt; (
+        &lt;div key={i} onClick={()=&gt;setSelected(selected===i?null:i)}
+          style={{background:selected===i?"#1e3a5f":"#1e293b",
+            border:`1px solid ${C[f.decision]}44`,
+            borderRadius:6,padding:"12px 14px",marginBottom:8,cursor:"pointer"}}&gt;
+
+          &lt;div style={{display:"flex",justifyContent:"space-between",
+            alignItems:"flex-start",flexWrap:"wrap",gap:6}}&gt;
+            &lt;div&gt;
+              &lt;div style={{fontSize:9,color:"#a78bfa",marginBottom:2}}&gt;
+                {f.subtype}
+              &lt;/div&gt;
+              &lt;div style={{fontSize:11,color:"#f1f5f9",fontWeight:700}}&gt;
+                {f.component}
+              &lt;/div&gt;
+            &lt;/div&gt;
+            &lt;div style={{display:"flex",gap:8,alignItems:"center"}}&gt;
+              &lt;span style={{fontSize:10,color:"#a78bfa"}}&gt;
+                SSS {f.sss}
+              &lt;/span&gt;
+              &lt;span style={{fontSize:9,color:C[f.decision],
+                border:`1px solid ${C[f.decision]}`,
+                borderRadius:3,padding:"2px 8px"}}&gt;
+                {f.decision}
+              &lt;/span&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+
+          {selected===i &amp;&amp; (
+            &lt;div style={{marginTop:12,paddingTop:10,
+              borderTop:"1px solid #334155",fontSize:10}}&gt;
+              &lt;div style={{color:"#94a3b8",marginBottom:6}}&gt;
+                &lt;span style={{color:"#cbd5e1"}}&gt;Credentials: &lt;/span&gt;
+                {f.credentials.join(" · ")}
+              &lt;/div&gt;
+              &lt;div style={{color:"#fca5a5"}}&gt;
+                &lt;span style={{color:"#cbd5e1"}}&gt;Injection vector: &lt;/span&gt;
+                {f.vector}
+              &lt;/div&gt;
+            &lt;/div&gt;
+          )}
+        &lt;/div&gt;
+      ))}
+
+      {tab==="controls" &amp;&amp; (
+        &lt;div style={{background:"#1e293b",borderRadius:6,padding:14}}&gt;
+          &lt;div style={{fontSize:9,color:"#64748b",marginBottom:10}}&gt;
+            COMPENSATING_CONTROL ACTIONS (no patch path exists)
+          &lt;/div&gt;
+          {CONTROLS.map((ctrl,i) =&gt; (
+            &lt;div key={i} style={{
+              display:"flex",gap:10,alignItems:"flex-start",
+              padding:"8px 0",
+              borderBottom:i&lt;CONTROLS.length-1?"1px solid #0f172a":"none"
+            }}&gt;
+              &lt;span style={{color:"#a78bfa",flexShrink:0}}&gt;{i+1}.&lt;/span&gt;
+              &lt;span style={{color:"#94a3b8",fontSize:10,lineHeight:1.6}}&gt;
+                {ctrl}
+              &lt;/span&gt;
+            &lt;/div&gt;
+          ))}
+        &lt;/div&gt;
+      )}
+
+      &lt;div style={{fontSize:9,color:"#475569",marginTop:10}}&gt;
+        Wave 2 SCOUT connector: ingest Oz/GitHub Actions/CI-CD agent audit logs → EDIP
+      &lt;/div&gt;
+    &lt;/div&gt;
+  );
+}</pre>
+  </div>
+
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:12px;margin-bottom:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:6px;letter-spacing:.06em;">EDIP DECISION RATIONALE</div>
+    <div style="color:#94a3b8;font-size:11px;line-height:1.7;">
+      All five subtypes are <strong style="color:#c4b5fd;">COMPENSATING_CONTROL</strong> — no patch resolves the structural authority issue. NHI-IMPLEMENT, NHI-REVIEW, and NHI-DEPLOY are ESCALATE because an agent with repo write, merge, or production deploy credentials is a high-value target that bypasses all conventional perimeter controls. <strong style="color:#f1f5f9;">Wave 2 SCOUT connector target:</strong> ingest Oz, GitHub Actions, and CI/CD agent audit logs as structured NHI finding events into EDIP.
+    </div>
+  </div>
+
+  <div style="font-size:9px;color:#475569;font-family:'Space Mono',monospace;padding-top:10px;border-top:1px solid rgba(100,116,139,.15);">
+    SOURCE: Warp/Oz software factory platform (Zach Lloyd, AI Engineer World's Fair 2026) · Latent Space interview · Tempris classification: NHI/AGENTIC AUTHORITY COMPROMISE · SSS-scored (5 finding subtypes) · Wave 2 SCOUT connector candidate · Cross-ref: EchoLeak CVE-2025-32711 (same structural class)
+  </div>
+</div>
+<!-- END WATCH ITEM: SOFTWARE FACTORY NHI v54 -->
+<!-- EDIP INTAKE: CVE-2026-45659 SHAREPOINT RCE · CISA KEV · STORM-2603 · v54 -->
+<div style="background:#1e293b;border:1px solid #ef4444;border-radius:8px;padding:22px;margin:20px 0;">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+    <div style="font-family:'Space Mono',monospace;font-size:13px;color:#fca5a5;font-weight:700;">⚠ CISA KEV &middot; ACTIVE EXPLOITATION &middot; CVE-2026-45659</div>
+    <div style="font-family:'Space Mono',monospace;font-size:9px;padding:4px 10px;border-radius:4px;border:1px solid #ef4444;color:#fca5a5;background:#0f172a;">ESCALATE &middot; KEV DEADLINE OVERDUE</div>
+  </div>
+
+  <div style="font-size:15px;font-weight:600;color:#f1f5f9;margin-bottom:8px;">Microsoft SharePoint Server RCE — Deserialization of Untrusted Data</div>
+  <div style="font-size:12px;color:#94a3b8;line-height:1.7;margin-bottom:16px;">
+    An authenticated attacker with minimum Site Member permissions can execute arbitrary code remotely on SharePoint Server via deserialization of untrusted data. Patched May 2026. CISA added to KEV Jul 1 2026 with federal deadline Jul 4 2026 — now overdue. Actively exploited by Storm-2603 deploying Warlock ransomware. Two unrelated threat actors confirmed operating simultaneously in the same network during Microsoft's investigation.
+  </div>
+
+  <!-- SCORING -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:10px;letter-spacing:.06em;">TES SCORING · TES = CVSS × AGM × DRF × TEF (capped 10.0)</div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px;">
+      <tr><td style="color:#64748b;padding:5px 4px;border-bottom:1px solid #1e293b;width:60%;">CVSS v3.1 Base Score (network, low auth, no admin required)</td><td style="color:#e2e8f0;text-align:right;font-family:'Space Mono',monospace;padding:5px 4px;border-bottom:1px solid #1e293b;">8.8</td></tr>
+      <tr><td style="color:#64748b;padding:5px 4px;border-bottom:1px solid #1e293b;">AGM — AI Governance Modifier</td><td style="color:#e2e8f0;text-align:right;font-family:'Space Mono',monospace;padding:5px 4px;border-bottom:1px solid #1e293b;">1.0&times;</td></tr>
+      <tr><td style="color:#64748b;padding:5px 4px;border-bottom:1px solid #1e293b;">DRF — Data Risk Factor (SharePoint holds docs, compliance files, emails)</td><td style="color:#e2e8f0;text-align:right;font-family:'Space Mono',monospace;padding:5px 4px;border-bottom:1px solid #1e293b;">1.2&times;</td></tr>
+      <tr><td style="color:#64748b;padding:5px 4px;">TEF — Third-Party Exposure Factor (commonly connected to AD, email, file shares)</td><td style="color:#e2e8f0;text-align:right;font-family:'Space Mono',monospace;padding:5px 4px;">1.25&times;</td></tr>
+    </table>
+    <div style="font-family:'Space Mono',monospace;font-size:16px;color:#f87171;font-weight:700;text-align:right;padding-top:10px;">TES: 10.0 (capped) &middot; ESCALATE</div>
+  </div>
+
+  <!-- THREAT DETAILS -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;overflow-x:auto;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:10px;letter-spacing:.06em;">THREAT ACTOR DETAILS · STORM-2603 / WARLOCK RANSOMWARE</div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:480px;">
+      <tr style="border-bottom:1px solid #1e293b;"><td style="color:#64748b;padding:6px;width:35%;">Threat Actor</td><td style="color:#94a3b8;padding:6px;">Storm-2603 (Warlock ransomware operator)</td></tr>
+      <tr style="border-bottom:1px solid #1e293b;"><td style="color:#64748b;padding:6px;">Min Permission</td><td style="color:#94a3b8;padding:6px;">Site Member — any authenticated staff account</td></tr>
+      <tr style="border-bottom:1px solid #1e293b;"><td style="color:#64748b;padding:6px;">Persistence</td><td style="color:#94a3b8;padding:6px;">Cloudflare tunnel, Zoho Assist, SSH via VSCode</td></tr>
+      <tr style="border-bottom:1px solid #1e293b;"><td style="color:#64748b;padding:6px;">Defense Evasion</td><td style="color:#94a3b8;padding:6px;">Velociraptor DFIR tool (abused); NSecKrnl.sys vulnerable driver</td></tr>
+      <tr style="border-bottom:1px solid #1e293b;"><td style="color:#64748b;padding:6px;">Lateral Movement</td><td style="color:#94a3b8;padding:6px;">Confirmed — moved into second organisation in same incident</td></tr>
+      <tr><td style="color:#64748b;padding:6px;">Affected Versions</td><td style="color:#94a3b8;padding:6px;">SharePoint Subscription Edition · 2019 · Enterprise 2016</td></tr>
+    </table>
+  </div>
+
+  <!-- PYTHON -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">PYTHON — TES SCORER</div>
+    <pre style="color:#a5f3fc;font-size:10px;line-height:1.7;overflow-x:auto;margin:0;white-space:pre-wrap;">import json, datetime
+
+CVE = {
+    "id": "CVE-2026-45659",
+    "name": "Microsoft SharePoint Server RCE — Deserialization",
+    "cvss": 8.8,
+    "agm": 1.0,
+    "drf": 1.2,
+    "tef": 1.25,
+    "kev_added": "2026-07-01",
+    "kev_deadline": "2026-07-04",
+    "actor": "Storm-2603 (Warlock ransomware)",
+    "patch": "May 2026 — SharePoint Subscription / 2019 / 2016",
+    "note": "Authenticated, Site Member only. Active exploitation confirmed.",
+}
+
+TES_CAP = 10.0
+tes = round(min(CVE["cvss"]*CVE["agm"]*CVE["drf"]*CVE["tef"], TES_CAP), 2)
+decision = "ESCALATE" if tes >= 9.0 else "PATCH" if tes >= 7.0 else "INVESTIGATE"
+
+today = datetime.date.today()
+kev_dl = datetime.date.fromisoformat(CVE["kev_deadline"])
+overdue = max((today - kev_dl).days, 0)
+
+print(f"CVE      : {CVE['id']}")
+print(f"CVSS     : {CVE['cvss']} | DRF: {CVE['drf']}x | TEF: {CVE['tef']}x")
+print(f"TES      : {tes} | Decision: {decision}")
+print(f"KEV DL   : {CVE['kev_deadline']} — OVERDUE by {overdue} day(s)")
+print(f"Actor    : {CVE['actor']}")
+print(f"Action   : Patch immediately — {CVE['patch']}")
+
+with open("sharepoint_tes.json","w") as f:
+    json.dump({**CVE,"tes":tes,"decision":decision,"overdue_days":overdue},f,indent=2)
+print("\nSaved: sharepoint_tes.json")</pre>
+  </div>
+
+  <!-- REACT -->
+  <div style="background:#0f172a;border:1px solid #1e293b;border-radius:6px;padding:14px;margin-bottom:14px;">
+    <div style="color:#64748b;font-size:9px;margin-bottom:8px;letter-spacing:.06em;">REACT — EDIP DASHBOARD CARD (Elvand dev reference)</div>
+    <pre style="color:#a5f3fc;font-size:10px;line-height:1.7;overflow-x:auto;margin:0;white-space:pre-wrap;">import { useState } from "react";
+
+const CVE = {
+  id: "CVE-2026-45659",
+  name: "Microsoft SharePoint Server RCE",
+  type: "Deserialization of Untrusted Data",
+  cvss: 8.8, tes: 10.0, decision: "ESCALATE",
+  actor: "Storm-2603 (Warlock ransomware)",
+  deadline: "Jul 4 2026 — OVERDUE",
+  patch: "May 2026 — SharePoint Subscription / 2019 / 2016",
+  perms: "Site Member (any authenticated staff account)",
+  lateral: "Confirmed — spread to 2nd organisation in same incident",
+  tools: [
+    "Velociraptor DFIR tool (abused for stealth)",
+    "Cloudflare tunnel (persistence)",
+    "Zoho Assist (persistence)",
+    "SSH via Visual Studio Code (persistence)",
+    "NSecKrnl.sys vulnerable driver (EDR bypass)",
+  ],
+};
+
+export default function SharePointCard() {
+  const [showTools, setShowTools] = useState(false);
+
+  return (
+    &lt;div style={{background:"#0f172a",padding:20,borderRadius:8,
+      fontFamily:"'Space Mono',monospace",color:"#e2e8f0",maxWidth:660}}&gt;
+
+      &lt;div style={{fontSize:11,color:"#ef4444",fontWeight:700,marginBottom:4}}&gt;
+        EDIP · CISA KEV · ACTIVE EXPLOITATION · {CVE.id}
+      &lt;/div&gt;
+      &lt;div style={{fontSize:9,color:"#475569",marginBottom:14}}&gt;
+        KEV Added: Jul 1 2026 · Deadline: Jul 4 2026 (OVERDUE)
+      &lt;/div&gt;
+
+      &lt;div style={{background:"#1e293b",borderRadius:6,padding:14,
+        marginBottom:14,display:"flex",justifyContent:"space-between",
+        flexWrap:"wrap",gap:12}}&gt;
+        &lt;div&gt;
+          &lt;div style={{fontSize:12,color:"#f1f5f9",fontWeight:700}}&gt;
+            {CVE.name}
+          &lt;/div&gt;
+          &lt;div style={{fontSize:9,color:"#94a3b8",marginTop:4}}&gt;
+            {CVE.type}
+          &lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div style={{textAlign:"right"}}&gt;
+          &lt;div style={{fontSize:22,color:"#ef4444",fontWeight:700}}&gt;
+            TES {CVE.tes}
+          &lt;/div&gt;
+          &lt;span style={{fontSize:9,color:"#ef4444",
+            border:"1px solid #ef4444",borderRadius:3,padding:"2px 8px"}}&gt;
+            {CVE.decision}
+          &lt;/span&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+
+      {[
+        ["CVSS",       CVE.cvss],
+        ["Threat Actor", CVE.actor],
+        ["Min Perms",  CVE.perms],
+        ["Lateral",    CVE.lateral],
+        ["Patch",      CVE.patch],
+        ["Deadline",   CVE.deadline],
+      ].map(([k,v],i) =&gt; (
+        &lt;div key={i} style={{display:"flex",gap:10,padding:"7px 0",
+          borderBottom:"1px solid #1e293b"}}&gt;
+          &lt;span style={{color:"#64748b",fontSize:10,
+            width:120,flexShrink:0}}&gt;{k}&lt;/span&gt;
+          &lt;span style={{color:"#94a3b8",fontSize:10}}&gt;{v}&lt;/span&gt;
+        &lt;/div&gt;
+      ))}
+
+      &lt;button onClick={()=&gt;setShowTools(!showTools)} style={{
+        marginTop:12,background:"#1e293b",color:"#94a3b8",
+        border:"1px solid #334155",borderRadius:4,
+        padding:"4px 14px",fontSize:9,cursor:"pointer"
+      }}&gt;
+        {showTools ? "HIDE" : "SHOW"} ATTACKER TOOLS
+      &lt;/button&gt;
+
+      {showTools &amp;&amp; (
+        &lt;div style={{background:"#1e293b",borderRadius:6,
+          padding:12,marginTop:8}}&gt;
+          {CVE.tools.map((t,i) =&gt; (
+            &lt;div key={i} style={{fontSize:10,color:"#fca5a5",
+              padding:"4px 0",
+              borderBottom:i&lt;CVE.tools.length-1?"1px solid #0f172a":"none"}}&gt;
+              · {t}
+            &lt;/div&gt;
+          ))}
+        &lt;/div&gt;
+      )}
+
+      &lt;div style={{fontSize:9,color:"#475569",marginTop:12}}&gt;
+        CVSS 8.8 · DRF 1.2x · TEF 1.25x · TES 10.0
+        · Patch immediately — federal deadline passed
+      &lt;/div&gt;
+    &lt;/div&gt;
+  );
+}</pre>
+  </div>
+
+  <div style="font-size:9px;color:#475569;font-family:'Space Mono',monospace;padding-top:10px;border-top:1px solid rgba(100,116,139,.15);">
+    SOURCE: The Hacker News / CISA KEV / Microsoft MSRC · Jul 1 2026 · BOD 26-04 deadline Jul 4 2026 (OVERDUE) · Storm-2603 / Warlock ransomware · Affects: SharePoint Subscription Edition, 2019, Enterprise 2016
+  </div>
+</div>
+<!-- END EDIP INTAKE: CVE-2026-45659 SHAREPOINT v54 -->
+</body>
+</html>

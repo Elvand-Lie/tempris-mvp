@@ -1,0 +1,187 @@
+{
+  "meta": {
+    "source_event": "May 18–19 2026 Supply Chain Attack Wave",
+    "intake_type": "NON_CVE_SSS",
+    "total_findings": 5,
+    "exported_at": "2026-06-25T07:01:26.974728+00:00",
+    "schema_version": "1.0.0",
+    "generator": "tempris_sss_supply_chain_intake.py"
+  },
+  "findings": [
+    {
+      "finding_id": "SSS-2026-0518-001",
+      "type": "NON_CVE_SSS",
+      "source": "SUPPLY_CHAIN",
+      "title": "Shai-Hulud Self-Replicating npm Worm — CI/CD Credential Theft",
+      "description": "Self-replicating npm worm that stole OAuth tokens to propagate across the npm registry, compromising CI/CD pipelines. No CVE was assigned during the active exploitation window.",
+      "affected_ecosystem": "npm / GitHub Actions",
+      "attack_vectors": [
+        "PKG_REGISTRY_NPM",
+        "CICD_GITHUB_ACTIONS"
+      ],
+      "patch_available": false,
+      "recommended_action": "COMPENSATING_CONTROL",
+      "scoring": {
+        "base_severity": 9.1,
+        "AGM": 1.3,
+        "DRF": 0.95,
+        "TEF": 1.2,
+        "TES_raw": 10.0,
+        "TES_effective": 8.5,
+        "controls_applied": true
+      },
+      "decision": "PATCH",
+      "compensating_controls": [
+        "npm ci with committed lockfile enforced",
+        "min-release-age=2 configured on npm",
+        "Internal registry proxy with quarantine"
+      ],
+      "references": [
+        "https://www.stepsecurity.io/blog/5-supply-chain-attacks-in-48-hours",
+        "https://boostsecurity.io/blog/supply-chain-hunting-season---may-edition"
+      ],
+      "analyst": "tempris-system-v1.0",
+      "ingested_at": "2026-06-25T07:01:26.974361+00:00",
+      "mas_trm_mapping": "MAS TRM §9.1.3 — Third-Party Software Risk"
+    },
+    {
+      "finding_id": "SSS-2026-0518-002",
+      "type": "NON_CVE_SSS",
+      "source": "SUPPLY_CHAIN",
+      "title": "Poisoned VS Code Extension — 2.2M Install Developer Endpoint Compromise",
+      "description": "Malicious VS Code extension with 2.2 million active installs used to compromise developer endpoints and exfiltrate GitHub credentials. Targets developer machines directly, bypassing CI/CD controls.",
+      "affected_ecosystem": "VS Code / Developer Endpoint",
+      "attack_vectors": [
+        "IDE_EXTENSION"
+      ],
+      "patch_available": false,
+      "recommended_action": "COMPENSATING_CONTROL",
+      "scoring": {
+        "base_severity": 8.7,
+        "AGM": 1.1,
+        "DRF": 1.1,
+        "TEF": 1.0,
+        "TES_raw": 10.0,
+        "TES_effective": 9.0,
+        "controls_applied": true
+      },
+      "decision": "ESCALATE",
+      "compensating_controls": [
+        "Extension allowlist enforced via VS Code policy",
+        "Developer endpoint EDR with extension monitoring"
+      ],
+      "references": [
+        "https://www.cm-alliance.com/cybersecurity-blog/5-of-the-biggest-supply-chain-attacks-of-2026-so-far"
+      ],
+      "analyst": "tempris-system-v1.0",
+      "ingested_at": "2026-06-25T07:01:26.974541+00:00",
+      "mas_trm_mapping": "MAS TRM §9.1.3 — Third-Party Software Risk"
+    },
+    {
+      "finding_id": "SSS-2026-0518-003",
+      "type": "NON_CVE_SSS",
+      "source": "SUPPLY_CHAIN",
+      "title": "Compromised GitHub Actions — Multiple Workflow Injections",
+      "description": "Multiple GitHub Actions compromised via stolen PATs, injecting credential-harvesting payloads into CI/CD runner environments. Targets ephemeral runners not covered by EDR.",
+      "affected_ecosystem": "GitHub Actions / CI Pipeline",
+      "attack_vectors": [
+        "CICD_GITHUB_ACTIONS",
+        "SCM_REPOSITORY"
+      ],
+      "patch_available": true,
+      "recommended_action": "PATCH",
+      "scoring": {
+        "base_severity": 8.9,
+        "AGM": 1.2,
+        "DRF": 1.15,
+        "TEF": 1.3,
+        "TES_raw": 10.0,
+        "TES_effective": 8.5,
+        "controls_applied": true
+      },
+      "decision": "PATCH",
+      "compensating_controls": [
+        "Pin Actions to full commit SHA (not tags)",
+        "Restrict GITHUB_TOKEN permissions to least privilege",
+        "StepSecurity Harden-Runner deployed on all runners"
+      ],
+      "references": [
+        "https://www.stepsecurity.io/blog/5-supply-chain-attacks-in-48-hours",
+        "https://boostsecurity.io/blog/supply-chain-hunting-season---may-edition"
+      ],
+      "analyst": "tempris-system-v1.0",
+      "ingested_at": "2026-06-25T07:01:26.974556+00:00",
+      "mas_trm_mapping": "MAS TRM §9.1.3 — Third-Party Software Risk"
+    },
+    {
+      "finding_id": "SSS-2026-0518-004",
+      "type": "NON_CVE_SSS",
+      "source": "SUPPLY_CHAIN",
+      "title": "Trojanized Microsoft PyPI SDK (durabletask) — 35-Minute Active Window",
+      "description": "Malicious version of Microsoft's durabletask PyPI package active for 35 minutes. No CVE during exploitation window. CI pipelines running continuous builds were exposed before advisory publication.",
+      "affected_ecosystem": "PyPI / Python CI Pipelines",
+      "attack_vectors": [
+        "PKG_REGISTRY_PYPI",
+        "CICD_GITHUB_ACTIONS"
+      ],
+      "patch_available": true,
+      "recommended_action": "PATCH",
+      "scoring": {
+        "base_severity": 8.5,
+        "AGM": 1.0,
+        "DRF": 1.2,
+        "TEF": 1.1,
+        "TES_raw": 10.0,
+        "TES_effective": 9.0,
+        "controls_applied": true
+      },
+      "decision": "ESCALATE",
+      "compensating_controls": [
+        "min-release-age gate (pip) configured",
+        "Internal PyPI proxy with version quarantine"
+      ],
+      "references": [
+        "https://www.stepsecurity.io/blog/5-supply-chain-attacks-in-48-hours",
+        "https://www.softscheck.com/en/blog/supply-chain-attacks/"
+      ],
+      "analyst": "tempris-system-v1.0",
+      "ingested_at": "2026-06-25T07:01:26.974596+00:00",
+      "mas_trm_mapping": "MAS TRM §9.1.3 — Third-Party Software Risk"
+    },
+    {
+      "finding_id": "SSS-2026-0518-005",
+      "type": "NON_CVE_SSS",
+      "source": "SUPPLY_CHAIN",
+      "title": "GitHub Internal Repository Exfiltration — ~3,800 Repos",
+      "description": "GitHub disclosed exfiltration of approximately 3,800 internal source code repositories, culminating the 48-hour supply chain wave. Demonstrates pipeline compromise leading to platform-level breach.",
+      "affected_ecosystem": "GitHub Platform / SCM",
+      "attack_vectors": [
+        "SCM_REPOSITORY",
+        "CICD_GITHUB_ACTIONS"
+      ],
+      "patch_available": false,
+      "recommended_action": "COMPENSATING_CONTROL",
+      "scoring": {
+        "base_severity": 9.5,
+        "AGM": 1.1,
+        "DRF": 0.9,
+        "TEF": 1.4,
+        "TES_raw": 10.0,
+        "TES_effective": 8.5,
+        "controls_applied": true
+      },
+      "decision": "PATCH",
+      "compensating_controls": [
+        "Repository access audit logs reviewed",
+        "Secret scanning enabled on all repos",
+        "GITHUB_TOKEN rotation completed"
+      ],
+      "references": [
+        "https://www.stepsecurity.io/blog/5-supply-chain-attacks-in-48-hours"
+      ],
+      "analyst": "tempris-system-v1.0",
+      "ingested_at": "2026-06-25T07:01:26.974603+00:00",
+      "mas_trm_mapping": "MAS TRM §9.1.3 — Third-Party Software Risk"
+    }
+  ]
+}

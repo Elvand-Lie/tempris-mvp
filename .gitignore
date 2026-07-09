@@ -1,0 +1,76 @@
+# ─── Dependencies ─────────────────────────────────────────────────────────────
+node_modules/
+tempris/api/venv/
+
+# ─── Build Artifacts ──────────────────────────────────────────────────────────
+dist/
+dist-ssr/
+_py_compile_cache/
+.tmp/
+.tmp_pycompile/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# ─── Secrets & Credentials ───────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ─── Databases ────────────────────────────────────────────────────────────────
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ─── Deployment Tarballs & Staging ────────────────────────────────────────────
+*.tar.gz
+_vps_push_*/
+_deploy_staging/
+_deploy_frontend.tar.gz
+_deploy_hardening.tar.gz
+
+# ─── Nested Git Repos (we flatten into one monorepo) ─────────────────────────
+tempris/.git/
+freellmapi/.git/
+markitdown/.git/
+
+# ─── Editor & OS ──────────────────────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+Thumbs.db
+
+# ─── Vercel ───────────────────────────────────────────────────────────────────
+.vercel/
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ─── Misc Runtime Artifacts ──────────────────────────────────────────────────
+*.local
+*.bak
+freellmapi/server/data/
+
+# ─── Third-party Clones (install separately) ─────────────────────────────────
+markitdown/
+
+# ─── Binaries ─────────────────────────────────────────────────────────────────
+*.exe
+
+# ─── Gemini Agent Data ───────────────────────────────────────────────────────
+.agents/

@@ -1,0 +1,25 @@
+FROM node:20-alpine
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package.json package-lock.json ./
+
+# Install dependencies (might need to just use npm install if lockfile is out of sync)
+RUN npm install
+
+# Copy source code and shared folder
+COPY . .
+
+# Build the project
+RUN npm run build
+
+# Create data directory with appropriate permissions for SQLite
+RUN mkdir -p /app/data
+
+# Expose port
+EXPOSE 3001
+
+# Start the server
+CMD ["node", "dist/index.js"]

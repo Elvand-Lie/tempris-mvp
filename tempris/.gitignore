@@ -1,0 +1,47 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+.tmp
+.tmp_pycompile
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+.vercel
+
+# Python
+api/venv
+__pycache__/
+*.pyc
+
+# Databases & journals — runtime artifacts, never commit
+*.db
+*.db-journal
+
+# Deployment tarballs
+*.tar.gz
+_vps_push_*
+
+# Secrets — never commit these
+.env
+.env.*
+*.pem
+*.key

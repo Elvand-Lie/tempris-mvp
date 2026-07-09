@@ -1,0 +1,93 @@
+<html><head><style>body{font-family: Arial, sans-serif; margin: 40px; line-height: 1.6;} code{background: #f4f4f4; padding: 2px 4px; border-radius: 4px;}</style></head><body><div class="markdown-heading"><h1 class="heading-element">Tempris Private Bug Bounty Framework</h1><a id="user-content-tempris-private-bug-bounty-framework" class="anchor" aria-label="Permalink: Tempris Private Bug Bounty Framework" href="#tempris-private-bug-bounty-framework"><span aria-hidden="true" class="octicon octicon-link"></span></a></div>
+<div class="markdown-heading"><h2 class="heading-element">1. Program Overview</h2><a id="user-content-1-program-overview" class="anchor" aria-label="Permalink: 1. Program Overview" href="#1-program-overview"><span aria-hidden="true" class="octicon octicon-link"></span></a></div>
+<p>Tempris is a continuous threat exposure management (CTEM) platform developed by a Singapore-based cyber tech firm. Security is fundamental to our product. Before general release, we are partnering with select security researchers to stress-test our application. This Private Bug Bounty Framework outlines the scope, rules of engagement, and rewards for this aggressive testing phase.</p>
+<div class="markdown-heading"><h2 class="heading-element">2. Scope</h2><a id="user-content-2-scope" class="anchor" aria-label="Permalink: 2. Scope" href="#2-scope"><span aria-hidden="true" class="octicon octicon-link"></span></a></div>
+<p><strong>In-Scope Targets:</strong></p>
+<ul>
+<li>All API endpoints under <code>/api/*</code>
+</li>
+<li>React Frontend (SPA)</li>
+<li>SPEAK AI chatbot</li>
+<li>SPOTLIGHT report generator</li>
+<li>STRIKE simulation engine</li>
+<li>SCOUT scanner</li>
+<li>SPECTRUM EDIP engine</li>
+<li>STANDARD compliance module</li>
+<li>Asset Inventory</li>
+<li>GRC/ISO 42001 module</li>
+<li>TACF Audit Trail</li>
+</ul>
+<p><strong>Out-of-Scope Targets:</strong></p>
+<ul>
+<li>Underlying infrastructure (VPS, Docker, PostgreSQL)</li>
+<li>Third-party APIs (e.g., FreeLLMAPI)</li>
+<li>Social engineering (phishing, vishing)</li>
+<li>Denial of Service (DoS/DDoS) attacks</li>
+<li>Physical security testing</li>
+</ul>
+<div class="markdown-heading"><h2 class="heading-element">3. Rules of Engagement</h2><a id="user-content-3-rules-of-engagement" class="anchor" aria-label="Permalink: 3. Rules of Engagement" href="#3-rules-of-engagement"><span aria-hidden="true" class="octicon octicon-link"></span></a></div>
+<ul>
+<li>
+<strong>No Destructive Testing</strong>: Do not delete, alter, or destroy data outside of test accounts.</li>
+<li>
+<strong>No Data Exfiltration</strong>: Do not extract sensitive or proprietary data from the system.</li>
+<li>
+<strong>Report Before Disclosure</strong>: All vulnerabilities must be reported to the Tempris team and patched before any public disclosure.</li>
+<li>
+<strong>Test Accounts</strong>: Test accounts for all roles (Superadmin, Admin, Analyst, Viewer, Read-only) will be provided. Do not compromise accounts belonging to other users.</li>
+<li>
+<strong>Rate Limiting</strong>: Rate limiting is active on authentication and API endpoints. Respect the rate limits to avoid disrupting the platform.</li>
+</ul>
+<div class="markdown-heading"><h2 class="heading-element">4. Vulnerability Classification (CVSS 4.0 Aligned)</h2><a id="user-content-4-vulnerability-classification-cvss-40-aligned" class="anchor" aria-label="Permalink: 4. Vulnerability Classification (CVSS 4.0 Aligned)" href="#4-vulnerability-classification-cvss-40-aligned"><span aria-hidden="true" class="octicon octicon-link"></span></a></div>
+<ul>
+<li>
+<strong>Critical (9.0-10.0)</strong>: Remote Code Execution (RCE), Authentication Bypass, Full Data Breach.</li>
+<li>
+<strong>High (7.0-8.9)</strong>: Privilege Escalation, Insecure Direct Object Reference (IDOR), Server-Side Request Forgery (SSRF).</li>
+<li>
+<strong>Medium (4.0-6.9)</strong>: Cross-Site Scripting (XSS), Cross-Site Request Forgery (CSRF), Sensitive Information Disclosure.</li>
+<li>
+<strong>Low (0.1-3.9)</strong>: UI/UX bugs, minor misconfigurations without direct security impact.</li>
+</ul>
+<div class="markdown-heading"><h2 class="heading-element">5. Reward Tiers</h2><a id="user-content-5-reward-tiers" class="anchor" aria-label="Permalink: 5. Reward Tiers" href="#5-reward-tiers"><span aria-hidden="true" class="octicon octicon-link"></span></a></div>
+<p>This program operates on an equity-based partnership model, not cash bounties. Findings contribute to a holistic evaluation of potential security partnerships. High-impact discoveries will be directly tied to partnership equity negotiations.</p>
+<div class="markdown-heading"><h2 class="heading-element">6. Reporting Process</h2><a id="user-content-6-reporting-process" class="anchor" aria-label="Permalink: 6. Reporting Process" href="#6-reporting-process"><span aria-hidden="true" class="octicon octicon-link"></span></a></div>
+<p>Please submit findings to our security team. Reports must include:</p>
+<ul>
+<li>
+<strong>Title</strong>: A clear, concise title.</li>
+<li>
+<strong>Severity</strong>: Estimated CVSS 4.0 score/category.</li>
+<li>
+<strong>Steps to Reproduce</strong>: Step-by-step instructions to recreate the vulnerability.</li>
+<li>
+<strong>Impact</strong>: Explanation of the potential business or security impact.</li>
+<li>
+<strong>Screenshots/PoC</strong>: Visual evidence or exploit code demonstrating the issue.</li>
+</ul>
+<div class="markdown-heading"><h2 class="heading-element">7. Legal Safe Harbor</h2><a id="user-content-7-legal-safe-harbor" class="anchor" aria-label="Permalink: 7. Legal Safe Harbor" href="#7-legal-safe-harbor"><span aria-hidden="true" class="octicon octicon-link"></span></a></div>
+<p>Tempris commits to protecting good-faith security researchers. No legal action will be taken against individuals who conduct testing within the defined scope and adhere to the Rules of Engagement.</p>
+<div class="markdown-heading"><h2 class="heading-element">8. Already Patched Vulnerabilities</h2><a id="user-content-8-already-patched-vulnerabilities" class="anchor" aria-label="Permalink: 8. Already Patched Vulnerabilities" href="#8-already-patched-vulnerabilities"><span aria-hidden="true" class="octicon octicon-link"></span></a></div>
+<p>The following issues were identified in previous assessments and have been remediated. Reports on these specific issues will not be accepted:</p>
+<ul>
+<li>
+<code>DEMO_MODE</code> backdoor (removed)</li>
+<li>SSRF in SCOUT scanner (RFC1918, link-local, and loopback blocked)</li>
+<li>JWT secret fallback (fail-closed implementation in production)</li>
+<li>GRC/TES manipulation (server-side validation added)</li>
+<li>STRIKE endpoint IDOR (authorization guards and RBAC enforced)</li>
+<li>SPOTLIGHT IDOR (history filtered by user role)</li>
+<li>Audit hash chain verification (tamper detection activated)</li>
+<li>Brute-force attacks (5-attempt lockout implemented)</li>
+</ul>
+<div class="markdown-heading"><h2 class="heading-element">9. Testing Environment</h2><a id="user-content-9-testing-environment" class="anchor" aria-label="Permalink: 9. Testing Environment" href="#9-testing-environment"><span aria-hidden="true" class="octicon octicon-link"></span></a></div>
+<ul>
+<li>
+<strong>Target URL</strong>: <code>https://187.127.114.218</code>
+</li>
+<li>
+<strong>API Documentation</strong>: Available at <code>/docs</code> (requires authentication)</li>
+</ul>
+<div class="markdown-heading"><h2 class="heading-element">10. Contact</h2><a id="user-content-10-contact" class="anchor" aria-label="Permalink: 10. Contact" href="#10-contact"><span aria-hidden="true" class="octicon octicon-link"></span></a></div>
+<p>Submit all reports and inquiries to: <code>security@tempris.com</code></p>
+</body></html>
