@@ -1,0 +1,47 @@
+{
+  "pack_name": "entra",
+  "version": "1.0.0",
+  "findings": [
+    {
+      "id": "F-ENT-01",
+      "tenant_id": "tempris",
+      "finding_type": "vulnerability",
+      "subtype": "Vishing",
+      "pipeline": "SYNTHETIC",
+      "verification": "SINGLE_SOURCE",
+      "cvss": 7.2,
+      "priority": "P1",
+      "status": "unmitigated",
+      "title": "Entra Passkey Vishing Attack Cluster",
+      "vendor": "Microsoft",
+      "product": "Entra ID",
+      "description": "Phishing/vishing of helpdesk staff to register rogue MFA passkeys.",
+      "sources": [
+        {
+          "source_id": "SRC-ENT-01",
+          "publisher": "Cyber Security Agency",
+          "verification_state": "SINGLE_SOURCE",
+          "analyst_notes": "First report from financial sector watch."
+        }
+      ],
+      "controls": [
+        {
+          "title": "Enforce FIDO2 Attestation",
+          "layer_type": "identity",
+          "priority": "P1"
+        },
+        {
+          "title": "Helpdesk Out-of-band Verification Protocol",
+          "layer_type": "governance",
+          "priority": "P1"
+        },
+        {
+          "title": "Geofencing IP Restrictions",
+          "layer_type": "network",
+          "priority": "P2"
+        }
+      ]
+    }
+  ],
+  "relationships": []
+}

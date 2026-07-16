@@ -18,7 +18,8 @@ def sanitize_user_input(message: str) -> str:
     message = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', message)
     # Truncate to max length
     message = message[:2000]
-    # Strip common injection patterns
+    
+    # Block common jailbreak and instruction override injection patterns
     injection_patterns = [
         r'(?i)ignore\s+(all\s+)?(previous|above|prior)\s+(instructions|prompts|context)',
         r'(?i)disregard\s+(all\s+)?(previous|above|prior)',
@@ -26,17 +27,64 @@ def sanitize_user_input(message: str) -> str:
         r'(?i)system\s*prompt\s*:',
         r'(?i)\[\s*SYSTEM\s*\]',
         r'(?i)```\s*system',
+        r'(?i)reveal\s+your\s+(system\s+)?prompt',
+        r'(?i)output\s+the\s+raw\s+data',
+        r'(?i)raw\s+instructions',
     ]
     for pattern in injection_patterns:
         if re.search(pattern, message):
-            logger.warning(f"Potential prompt injection detected and blocked")
-            # Return a special marker that chat_completion will intercept
+            logger.warning("SPEAK Guardrail Event: Prompt injection attempt detected and blocked.")
             return "__INJECTION_BLOCKED__"
+            
+    # Second-order prompt injection corpus checks
+    second_order_phrases = [
+        "dan mode", "do anything now", "jailbreak", "override prompt",
+        "override system", "ignore guidelines", "bypass rules",
+        "ignore rules", "bypass filter", "prompt injection",
+        "ignore safety", "disable constraints"
+    ]
+    for phrase in second_order_phrases:
+        if phrase in message.lower():
+            logger.warning("SPEAK Guardrail Event: Second-order prompt injection detected and blocked.")
+            return "__INJECTION_BLOCKED__"
+            
     return message.strip()
 
 
 def filter_llm_output(response: str, system_prompt: str) -> str:
-    """Filter LLM output to prevent system prompt leakage."""
+    """Filter LLM output to prevent system prompt leakage, scoring secrets exposure, and HTML execution."""
+    lowered_resp = response.lower()
+    
+    # 1. System prompt leakage indicators
+    system_indicators = [
+        "you are speak", 
+        "tempris ai security assistant", 
+        "nerve center of the tempris", 
+        "system instructions", 
+        "system_prompt",
+        "[system instructions — confidential"
+    ]
+    if any(ind in lowered_resp for ind in system_indicators):
+        logger.warning("SPEAK Guardrail Event: System prompt leakage detected in response. Output blocked.")
+        return "I can assist you with compliance frameworks, IT asset lists, and vulnerability mitigations. What security area should we address?"
+
+    # 2. Prevent raw HTML execution tags
+    html_patterns = [r"<script", r"<iframe", r"<embed", r"<object", r"onmouseover", r"onerror", r"javascript:"]
+    if any(re.search(pat, lowered_resp) for pat in html_patterns):
+        logger.warning("SPEAK Guardrail Event: Raw HTML execution pattern detected in response. Output blocked.")
+        return "Actionable security recommendation: Consult your administrator. Script execution output is restricted."
+
+    # 3. Check and redact scoring internals
+    scoring_internals = ["agm", "drf", "tef", "tes_raw", "tes_intermediate", "formula_version", "modifier_table_ref", "sss_base_raw"]
+    contains_scoring = False
+    for key in scoring_internals:
+        if key in lowered_resp:
+            contains_scoring = True
+            response = re.sub(rf"(?i)\b{key}\b", "[REDACTED]", response)
+            
+    if contains_scoring:
+        logger.warning("SPEAK Guardrail Event: Scoring internals redacted from response.")
+
     # Check if the response contains large chunks of the system prompt
     prompt_lines = [l.strip() for l in system_prompt.split('\n') if len(l.strip()) > 40]
     leaked_lines = 0
@@ -45,7 +93,7 @@ def filter_llm_output(response: str, system_prompt: str) -> str:
             leaked_lines += 1
     
     if leaked_lines > 3:
-        logger.warning(f"Possible system prompt leakage detected ({leaked_lines} lines). Filtering response.")
+        logger.warning("SPEAK Guardrail Event: Possible system prompt leakage detected via matching lines. Output blocked.")
         return "I can help you with security analysis, threat intelligence, and compliance questions. What would you like to know?"
     
     return response

@@ -10,13 +10,94 @@ from sqlalchemy.orm import Session
 from services.database import get_db
 from models import ControlStatus, ControlEvidence, IncidentReport
 from routers.audit import append_to_audit_log, AuditEntry
-from routers.auth import get_current_user, require_role
+from routers.auth import get_current_user, require_role, get_auth_context, scoped_evidence_query, EvidencePermission
+from typing import Optional
+import os
+import re
+import uuid
+import unicodedata
+import urllib.parse
+from pathlib import Path
 
 router = APIRouter()
-
 VALID_STATUSES = ["not_assessed", "compliant", "partial", "non_compliant", "not_applicable"]
 
+def get_evidence_storage_root() -> str:
+    root = os.environ.get("EVIDENCE_STORAGE_ROOT", "").strip()
+    if not root:
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        root = os.path.join(backend_dir, "data", "evidence")
+    os.makedirs(root, exist_ok=True)
+    return os.path.realpath(root)
+
+def validate_storage_path(file_path: str, strict: bool = True):
+    if not file_path:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    try:
+        root = Path(get_evidence_storage_root()).resolve(strict=True)
+        candidate = Path(file_path).resolve(strict=strict)
+        
+        # Confinement check
+        candidate.relative_to(root)
+        
+        if os.name == 'nt':
+            if root.drive.lower() != candidate.drive.lower():
+                raise ValueError("Different drives")
+    except (ValueError, FileNotFoundError):
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+def sanitize_filename(filename: str) -> str:
+    if not filename:
+        return "evidence_file.dat"
+    # Normalize Unicode
+    filename = unicodedata.normalize("NFKC", filename)
+    # Remove CR, LF, NUL and other control characters
+    filename = re.sub(r'[\r\n\x00-\x1f\x7f-\x9f]', '', filename)
+    # Remove path separators
+    filename = re.sub(r'[\\/]', '', filename)
+    # Remove header delimiters
+    filename = re.sub(r'[";*=]', '', filename)
+    
+    base, ext = os.path.splitext(filename)
+    base = base[:100]
+    ext = ext[:10]
+    filename = base + ext
+    
+    if filename in (".", "..", ""):
+        return "evidence_file.dat"
+    return filename
+
+def log_evidence_action(
+    user_ctx,
+    evidence_id: int,
+    action: str,
+    module: str,
+    outcome: str,
+    reason_code: str,
+    owning_tenant: Optional[str] = None
+):
+    detail = f"User {user_ctx.user_id} ({user_ctx.role}) performed {action} on evidence {evidence_id}. Outcome: {outcome}. Reason: {reason_code}."
+    metadata = {
+        "actor_user_id": user_ctx.user_id,
+        "actor_role": user_ctx.role,
+        "action": action,
+        "evidence_id": evidence_id,
+        "owning_tenant": owning_tenant or "not_found_or_out_of_scope",
+        "outcome": outcome,
+        "reason_code": reason_code,
+        "request_id": uuid.uuid4().hex
+    }
+    append_to_audit_log(AuditEntry(
+        user=user_ctx.user_id,
+        action=action,
+        module=module,
+        detail=detail,
+        metadata_=metadata
+    ))
+
+
 # ── Framework Definitions ────────────────────────────────────────────────────
+
 
 FRAMEWORKS = {
     "mas_trm_2024": {
@@ -285,13 +366,19 @@ def update_control_status(framework_id: str, control_id: str, update: ControlSta
 async def upload_evidence(
     framework_id: str,
     control_id: str,
+    target_tenant_id: Optional[str] = None,
     file: UploadFile = File(None),
     db: Session = Depends(get_db),
-    user = Depends(require_role("Superadmin", "Admin", "Analyst")),
+    user = Depends(get_current_user),
 ):
     """Upload evidence for a compliance control. Accepts file upload or creates a marker record."""
-    import os, re, traceback
+    import os, traceback
     from uuid import uuid4
+
+    if ".." in framework_id or "/" in framework_id or "\\" in framework_id:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    if ".." in control_id or "/" in control_id or "\\" in control_id:
+        raise HTTPException(status_code=404, detail="Evidence not found")
 
     fw = FRAMEWORKS.get(framework_id)
     if not fw:
@@ -300,7 +387,26 @@ async def upload_evidence(
     if not ctrl:
         raise HTTPException(status_code=404, detail="Control not found")
 
-    user_email = user.get("sub", "unknown")
+    auth_ctx = get_auth_context(user)
+    if auth_ctx.role not in ("Superadmin", "Admin", "Analyst"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    # Enforce no implicit/fallback defaults and target tenant checks
+    if auth_ctx.is_superadmin:
+        if not target_tenant_id:
+            raise HTTPException(status_code=400, detail="Superadmin upload must explicitly specify a valid target_tenant_id")
+        from routers.auth import USERS
+        valid_tenants = {u.get("tenant_id") for u in USERS.values() if u.get("tenant_id")}
+        if target_tenant_id not in valid_tenants:
+            raise HTTPException(status_code=400, detail="Invalid target tenant ID")
+        assigned_tenant_id = target_tenant_id
+    else:
+        if target_tenant_id is not None:
+            raise HTTPException(status_code=400, detail="Caller-supplied tenant ID is not permitted")
+        if not auth_ctx.tenant_id:
+            raise HTTPException(status_code=400, detail="Missing tenant context")
+        assigned_tenant_id = auth_ctx.tenant_id
+
     ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".docx", ".xlsx", ".txt", ".md"}
     MAX_SIZE = 10 * 1024 * 1024  # 10 MB
 
@@ -310,8 +416,8 @@ async def upload_evidence(
     try:
         if file and file.filename:
             raw_name = file.filename
-            safe_name = re.sub(r'[^\w\s\-\.]', '_', raw_name)
-            ext = os.path.splitext(safe_name)[1].lower()
+            clean_name = sanitize_filename(raw_name)
+            ext = os.path.splitext(clean_name)[1].lower()
             if ext not in ALLOWED_EXTENSIONS:
                 raise HTTPException(status_code=400, detail=f"File type '{ext}' not allowed. Accepted: {', '.join(ALLOWED_EXTENSIONS)}")
 
@@ -319,39 +425,44 @@ async def upload_evidence(
             if len(content) > MAX_SIZE:
                 raise HTTPException(status_code=400, detail="File exceeds 10 MB limit.")
 
-            # Try primary path, fallback to /tmp
-            base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'evidence')
-            evidence_dir = os.path.join(base_dir, 'standard', framework_id, control_id)
+            root_dir = get_evidence_storage_root()
+            evidence_dir = os.path.join(root_dir, 'standard', framework_id, control_id)
+            
+            if os.path.islink(evidence_dir):
+                raise HTTPException(status_code=400, detail="Symlinks not allowed in storage directory path")
+                
+            os.makedirs(evidence_dir, exist_ok=True)
+            
+            resolved_evidence_dir = os.path.realpath(evidence_dir)
             try:
-                os.makedirs(evidence_dir, exist_ok=True)
-                # Test write permission
-                test_file = os.path.join(evidence_dir, '.write_test')
-                with open(test_file, 'w') as tf:
-                    tf.write('ok')
-                os.remove(test_file)
-            except (OSError, PermissionError):
-                # Fallback to /tmp-based storage
-                evidence_dir = os.path.join('/tmp', 'tempris_evidence', 'standard', framework_id, control_id)
-                os.makedirs(evidence_dir, exist_ok=True)
+                Path(resolved_evidence_dir).relative_to(Path(root_dir))
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid destination path")
 
             unique_name = f"{uuid4().hex}{ext}"
             file_path = os.path.join(evidence_dir, unique_name)
+            validate_storage_path(file_path, strict=False)
+
             with open(file_path, "wb") as f:
                 f.write(content)
-            filename = safe_name
+            filename = clean_name
 
         ev = ControlEvidence(
-            framework_id=framework_id, control_id=control_id,
-            filename=filename, file_path=file_path, uploaded_by=user_email
+            tenant_id=assigned_tenant_id,
+            framework_id=framework_id,
+            control_id=control_id,
+            filename=filename,
+            file_path=file_path,
+            uploaded_by=auth_ctx.user_id
         )
         db.add(ev)
         db.commit()
         db.refresh(ev)
 
-        append_to_audit_log(AuditEntry(
-            user=user_email, action="EVIDENCE_UPLOADED", module="STANDARD",
-            detail=f"Evidence '{filename}' uploaded for control {control_id} in {fw['name']}"
-        ))
+        log_evidence_action(
+            auth_ctx, ev.id, "EVIDENCE_UPLOADED", "STANDARD",
+            "success", "authorized", assigned_tenant_id
+        )
         return {"status": "uploaded", "evidence": {"id": ev.id, "filename": filename, "uploaded_at": ev.uploaded_at.isoformat() if ev.uploaded_at else ""}}
     except HTTPException:
         raise
@@ -363,13 +474,26 @@ async def upload_evidence(
 @router.get("/frameworks/{framework_id}/controls/{control_id}/evidence")
 def list_evidence(
     framework_id: str, control_id: str,
-    db: Session = Depends(get_db), user = Depends(require_role("Superadmin", "Admin", "Analyst")),
+    db: Session = Depends(get_db), user = Depends(get_current_user),
 ):
     """List all evidence files attached to a control."""
-    records = db.query(ControlEvidence).filter(
-        ControlEvidence.framework_id == framework_id,
-        ControlEvidence.control_id == control_id
-    ).order_by(ControlEvidence.uploaded_at.desc()).all()
+    if ".." in framework_id or "/" in framework_id or "\\" in framework_id:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    if ".." in control_id or "/" in control_id or "\\" in control_id:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+    auth_ctx = get_auth_context(user)
+    if auth_ctx.role not in ("Superadmin", "Admin", "Analyst"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    query = scoped_evidence_query(
+        db,
+        user=auth_ctx,
+        framework_id=framework_id,
+        control_id=control_id,
+        required_permission=EvidencePermission.LIST
+    )
+    records = query.order_by(ControlEvidence.uploaded_at.desc()).all()
     return [
         {
             "id": r.id, "filename": r.filename,
@@ -384,60 +508,261 @@ def list_evidence(
 @router.get("/frameworks/{framework_id}/controls/{control_id}/evidence/{evidence_id}/download")
 def download_evidence(
     framework_id: str, control_id: str, evidence_id: int,
-    db: Session = Depends(get_db), user = Depends(require_role("Superadmin", "Admin", "Analyst")),
+    db: Session = Depends(get_db), user = Depends(get_current_user),
 ):
     """Download an evidence file."""
-    import os
     from fastapi.responses import FileResponse
 
-    ev = db.query(ControlEvidence).filter(
-        ControlEvidence.id == evidence_id,
-        ControlEvidence.framework_id == framework_id,
-        ControlEvidence.control_id == control_id
-    ).first()
-    if not ev:
+    if ".." in framework_id or "/" in framework_id or "\\" in framework_id:
         raise HTTPException(status_code=404, detail="Evidence not found")
-    if not ev.file_path or not os.path.exists(ev.file_path):
-        raise HTTPException(status_code=404, detail="Evidence file not found on disk")
+    if ".." in control_id or "/" in control_id or "\\" in control_id:
+        raise HTTPException(status_code=404, detail="Evidence not found")
 
+    auth_ctx = get_auth_context(user)
+    query = scoped_evidence_query(
+        db,
+        user=auth_ctx,
+        evidence_id=evidence_id,
+        framework_id=framework_id,
+        control_id=control_id,
+        required_permission=EvidencePermission.DOWNLOAD
+    )
+    ev = query.first()
+
+    if not ev:
+        log_evidence_action(
+            auth_ctx, evidence_id, "EVIDENCE_DOWNLOAD_DENIED", "STANDARD",
+            "denied", "not_found_or_out_of_scope"
+        )
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+    if not ev.file_path or not os.path.exists(ev.file_path):
+        log_evidence_action(
+            auth_ctx, evidence_id, "EVIDENCE_DOWNLOAD_DENIED", "STANDARD",
+            "denied", "file_not_found", ev.tenant_id
+        )
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+    validate_storage_path(ev.file_path)
+
+    if auth_ctx.is_superadmin:
+        log_evidence_action(
+            auth_ctx, evidence_id, "EVIDENCE_DOWNLOAD", "STANDARD",
+            "success", "superadmin_bypass", ev.tenant_id
+        )
+    else:
+        log_evidence_action(
+            auth_ctx, evidence_id, "EVIDENCE_DOWNLOAD", "STANDARD",
+            "success", "authorized", ev.tenant_id
+        )
+
+    clean_filename = sanitize_filename(ev.filename)
+    ascii_filename = "".join(c for c in clean_filename if ord(c) < 128)
+    if not ascii_filename:
+        ascii_filename = "evidence_file.dat"
+    encoded_filename = urllib.parse.quote(clean_filename)
+    content_disposition = f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+
+    headers = {
+        "Content-Disposition": content_disposition,
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "no-store, private",
+        "Pragma": "no-cache",
+        "Content-Length": str(os.path.getsize(ev.file_path))
+    }
     return FileResponse(
-        ev.file_path,
-        filename=ev.filename or "evidence",
+        path=ev.file_path,
         media_type="application/octet-stream",
+        headers=headers
+    )
+
+
+@router.get("/frameworks/{framework_id}/controls/{control_id}/evidence/{evidence_id}/preview")
+def preview_evidence(
+    framework_id: str, control_id: str, evidence_id: int,
+    db: Session = Depends(get_db), user = Depends(get_current_user),
+):
+    from fastapi.responses import FileResponse
+
+    if ".." in framework_id or "/" in framework_id or "\\" in framework_id:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    if ".." in control_id or "/" in control_id or "\\" in control_id:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+    auth_ctx = get_auth_context(user)
+    query = scoped_evidence_query(
+        db,
+        user=auth_ctx,
+        evidence_id=evidence_id,
+        framework_id=framework_id,
+        control_id=control_id,
+        required_permission=EvidencePermission.PREVIEW
+    )
+    ev = query.first()
+
+    if not ev:
+        log_evidence_action(
+            auth_ctx, evidence_id, "EVIDENCE_PREVIEW_DENIED", "STANDARD",
+            "denied", "not_found_or_out_of_scope"
+        )
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+    if not ev.file_path or not os.path.exists(ev.file_path):
+        log_evidence_action(
+            auth_ctx, evidence_id, "EVIDENCE_PREVIEW_DENIED", "STANDARD",
+            "denied", "file_not_found", ev.tenant_id
+        )
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+    validate_storage_path(ev.file_path)
+
+    if auth_ctx.is_superadmin:
+        log_evidence_action(
+            auth_ctx, evidence_id, "EVIDENCE_PREVIEW", "STANDARD",
+            "success", "superadmin_bypass", ev.tenant_id
+        )
+    else:
+        log_evidence_action(
+            auth_ctx, evidence_id, "EVIDENCE_PREVIEW", "STANDARD",
+            "success", "authorized", ev.tenant_id
+        )
+
+    clean_filename = sanitize_filename(ev.filename)
+    ext = os.path.splitext(clean_filename)[1].lower()
+
+    inline_preview_allowed = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".txt": "text/plain",
+        ".md": "text/plain"
+    }
+
+    if ext in inline_preview_allowed:
+        media_type = inline_preview_allowed[ext]
+        disposition = f'inline; filename="{clean_filename}"'
+    else:
+        media_type = "application/octet-stream"
+        ascii_filename = "".join(c for c in clean_filename if ord(c) < 128)
+        if not ascii_filename:
+            ascii_filename = "evidence_file.dat"
+        encoded_filename = urllib.parse.quote(clean_filename)
+        disposition = f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+
+    headers = {
+        "Content-Disposition": disposition,
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "no-store, private",
+        "Pragma": "no-cache",
+        "Content-Length": str(os.path.getsize(ev.file_path))
+    }
+    return FileResponse(
+        path=ev.file_path,
+        media_type=media_type,
+        headers=headers
     )
 
 
 @router.delete("/frameworks/{framework_id}/controls/{control_id}/evidence/{evidence_id}")
 def delete_evidence(
     framework_id: str, control_id: str, evidence_id: int,
-    db: Session = Depends(get_db),
-    user = Depends(require_role("Superadmin", "Admin")),
+    db: Session = Depends(get_db), user = Depends(get_current_user),
 ):
     """Delete an evidence record and its file."""
-    import os
-
-    ev = db.query(ControlEvidence).filter(
-        ControlEvidence.id == evidence_id,
-        ControlEvidence.framework_id == framework_id,
-        ControlEvidence.control_id == control_id
-    ).first()
-    if not ev:
+    if ".." in framework_id or "/" in framework_id or "\\" in framework_id:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    if ".." in control_id or "/" in control_id or "\\" in control_id:
         raise HTTPException(status_code=404, detail="Evidence not found")
 
+    auth_ctx = get_auth_context(user)
+    query = scoped_evidence_query(
+        db,
+        user=auth_ctx,
+        evidence_id=evidence_id,
+        framework_id=framework_id,
+        control_id=control_id,
+        required_permission=EvidencePermission.DELETE
+    )
+    ev = query.first()
+
+    if not ev:
+        log_evidence_action(
+            auth_ctx, evidence_id, "EVIDENCE_DELETE_DENIED", "STANDARD",
+            "denied", "not_found_or_out_of_scope"
+        )
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+    file_path = ev.file_path
+    if file_path:
+        validate_storage_path(file_path)
+
+    tenant_id = ev.tenant_id
+
+    # 1. Initiated log
+    log_evidence_action(
+        auth_ctx, evidence_id, "EVIDENCE_DELETE_REQUESTED", "STANDARD",
+        "success", "initiated", tenant_id
+    )
+
+    # 2. Compensating rollback quarantine setup
+    quarantine_dir = os.path.join(get_evidence_storage_root(), ".quarantine")
+    os.makedirs(quarantine_dir, exist_ok=True)
+    
+    quarantine_filename = os.path.basename(file_path) + ".quarantine" if file_path else None
+    quarantine_path = os.path.join(quarantine_dir, quarantine_filename) if quarantine_filename else None
+
+    moved_to_quarantine = False
+    if file_path and os.path.exists(file_path):
+        try:
+            os.replace(file_path, quarantine_path)
+            moved_to_quarantine = True
+        except Exception as e:
+            log_evidence_action(
+                auth_ctx, evidence_id, "EVIDENCE_DELETE_FAILED", "STANDARD",
+                "error", f"filesystem_quarantine_failed: {str(e)}", tenant_id
+            )
+            raise HTTPException(status_code=500, detail="Evidence deletion failed: filesystem error")
+
     filename = ev.filename
-    # Remove file from disk
-    if ev.file_path and os.path.exists(ev.file_path):
-        os.remove(ev.file_path)
 
-    db.delete(ev)
-    db.commit()
+    # 3. Database deletion and transaction commit
+    try:
+        db.delete(ev)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        log_evidence_action(
+            auth_ctx, evidence_id, "EVIDENCE_DELETE_FAILED", "STANDARD",
+            "error", f"database_transaction_failed: {str(e)}", tenant_id
+        )
+        if moved_to_quarantine:
+            try:
+                os.replace(quarantine_path, file_path)
+                log_evidence_action(
+                    auth_ctx, evidence_id, "EVIDENCE_DELETE_RECOVERED", "STANDARD",
+                    "success", "restored_from_quarantine", tenant_id
+                )
+            except Exception as re:
+                log_evidence_action(
+                    auth_ctx, evidence_id, "EVIDENCE_DELETE_RECOVERY_FAILED", "STANDARD",
+                    "error", f"failed_to_restore_quarantine: {str(re)}", tenant_id
+                )
+        raise HTTPException(status_code=500, detail="Evidence deletion failed: database error")
 
-    user_email = user.get("sub", "unknown")
-    append_to_audit_log(AuditEntry(
-        user=user_email, action="EVIDENCE_DELETED", module="STANDARD",
-        detail=f"Evidence '{filename}' deleted from control {control_id} in framework {framework_id}"
-    ))
+    # 4. Complete filesystem removal
+    if moved_to_quarantine:
+        try:
+            os.remove(quarantine_path)
+        except Exception:
+            pass
+
+    log_evidence_action(
+        auth_ctx, evidence_id, "EVIDENCE_DELETED", "STANDARD",
+        "success", "authorized", tenant_id
+    )
+
     return {"status": "deleted", "evidence_id": evidence_id}
+
 
 
 

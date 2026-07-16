@@ -1,0 +1,85 @@
+{
+  "pack_name": "defensive",
+  "version": "1.0.0",
+  "findings": [
+    {
+      "id": "F-DEF-01",
+      "tenant_id": "tempris",
+      "finding_type": "vulnerability",
+      "subtype": "CVE",
+      "pipeline": "STANDARD",
+      "verification": "CONFIRMED",
+      "cvss": 7.5,
+      "priority": "P1",
+      "status": "unmitigated",
+      "cve": "CVE-2026-RoguePlanet",
+      "title": "RoguePlanet EDR Abuse",
+      "vendor": "RoguePlanet",
+      "product": "EDR Agent",
+      "description": "Arbitrary command execution through unauthenticated local Named Pipes.",
+      "sources": [
+        {
+          "source_id": "SRC-DEF-01",
+          "publisher": "GovTech Security",
+          "verification_state": "CONFIRMED"
+        }
+      ],
+      "controls": []
+    },
+    {
+      "id": "F-DEF-02",
+      "tenant_id": "tempris",
+      "finding_type": "vulnerability",
+      "subtype": "CVE",
+      "pipeline": "STANDARD",
+      "verification": "CONFIRMED",
+      "cvss": 6.8,
+      "priority": "P1",
+      "status": "unmitigated",
+      "cve": "CVE-2026-GodDamn",
+      "title": "GodDamn Sentinel Agent Escalation",
+      "vendor": "GodDamn",
+      "product": "Sentinel",
+      "description": "Privilege escalation via DLL hijacking in helper service.",
+      "sources": [],
+      "controls": []
+    },
+    {
+      "id": "F-DEF-03",
+      "tenant_id": "tempris",
+      "finding_type": "vulnerability",
+      "subtype": "PoisonX",
+      "pipeline": "SYNTHETIC",
+      "verification": "CONFIRMED",
+      "cvss": 8.0,
+      "priority": "P1",
+      "status": "unmitigated",
+      "title": "PoisonX Active Antivirus Tampering",
+      "vendor": "PoisonX",
+      "product": "Antivirus Core",
+      "description": "No-patch active security software tampering technique.",
+      "sources": [],
+      "controls": [
+        {
+          "title": "Local Group Policy Restricting Driver Loading",
+          "layer_type": "compensating",
+          "priority": "P1"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "source_id": "F-DEF-01",
+      "target_id": "F-DEF-03",
+      "relationship_type": "META_PATTERN",
+      "metadata": {"pattern": "control-as-attack-surface"}
+    },
+    {
+      "source_id": "F-DEF-02",
+      "target_id": "F-DEF-03",
+      "relationship_type": "META_PATTERN",
+      "metadata": {"pattern": "control-as-attack-surface"}
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime, Boolean, JSON, ARRAY, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime, Boolean, JSON, ForeignKey, Index
 from sqlalchemy.sql import func
 from services.database import Base
 
@@ -6,6 +6,7 @@ from services.database import Base
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(50), nullable=False, default="tempris", index=True)
     timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     user_email = Column(String(255))
     action = Column(String(100), nullable=False)
@@ -19,13 +20,13 @@ class AuditLog(Base):
 class EdipDecision(Base):
     __tablename__ = "edip_decisions"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(50), nullable=False, default="tempris", index=True)
     finding_id = Column(String(50), nullable=False)
     cve = Column(String(20))
     decision = Column(String(20), nullable=False)
     rationale = Column(Text)  # Business justification for the decision
     decided_by = Column(String(255))
     decided_at = Column(DateTime(timezone=True), server_default=func.now())
-    # L3: EDIP Engine enhancements
     auto_classified = Column(Boolean, default=False)
     confidence = Column(Float)
     explanation = Column(Text)
@@ -36,6 +37,7 @@ class EdipDecision(Base):
 class StrikeAuthorization(Base):
     __tablename__ = "strike_authorizations"
     id = Column(String(50), primary_key=True)
+    tenant_id = Column(String(50), nullable=False, default="tempris", index=True)
     target_name = Column(String(255))
     target_ip = Column(String(50))
     techniques = Column(JSON, default=[])
@@ -62,6 +64,7 @@ class StrikeSimulation(Base):
 class ControlStatus(Base):
     __tablename__ = "control_statuses"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(50), nullable=False, default="tempris", index=True)
     framework_id = Column(String(50), nullable=False)
     control_id = Column(String(50), nullable=False)
     status = Column(String(20), default="not_assessed")
@@ -72,6 +75,7 @@ class ControlStatus(Base):
 class ControlEvidence(Base):
     __tablename__ = "control_evidence"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(50), nullable=False)
     framework_id = Column(String(50), nullable=False)
     control_id = Column(String(50), nullable=False)
     filename = Column(String(255))
@@ -79,10 +83,15 @@ class ControlEvidence(Base):
     uploaded_by = Column(String(255))
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    __table_args__ = (
+        Index("ix_evidence_tenant_framework_control", "tenant_id", "framework_id", "control_id"),
+    )
+
 
 class IncidentReport(Base):
     __tablename__ = "incident_reports"
     report_id = Column(String(50), primary_key=True)
+    tenant_id = Column(String(50), nullable=False, default="tempris", index=True)
     report_type = Column(String(100), nullable=False)
     status = Column(String(50), nullable=False)
     severity = Column(String(20), nullable=False)
@@ -95,12 +104,14 @@ class IncidentReport(Base):
 class SpotlightReport(Base):
     __tablename__ = "spotlight_reports"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(50), nullable=False, default="tempris", index=True)
     report_type = Column(String(50), nullable=False)
     narrative = Column(Text, nullable=False)
     tes_score = Column(Float)
     metadata_ = Column("metadata", JSON, default={})
     generated_by = Column(String(255))
     generated_at = Column(DateTime(timezone=True), server_default=func.now())
+
 
 class SurgeResearcher(Base):
     __tablename__ = "surge_researchers"
@@ -128,9 +139,11 @@ class SurgeSubmission(Base):
     finding_id = Column(String(20))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(50), nullable=False, default="tempris", index=True)
     user_email = Column(String(255))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -153,12 +166,10 @@ class TesSnapshot(Base):
     snapshot_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-# â”€â”€ Phase 2: Asset Inventory â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 class Asset(Base):
-    """L5-02/03/08: Asset Inventory for CTEM cycle. Links to findings and controls."""
     __tablename__ = "assets"
     id = Column(String(50), primary_key=True)  # e.g., "ASSET-001"
+    tenant_id = Column(String(50), nullable=False, default="tempris", index=True)
     name = Column(String(255), nullable=False)
     asset_type = Column(String(50))  # server, application, database, network, endpoint, iot
     ip_address = Column(String(50))
@@ -173,12 +184,10 @@ class Asset(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-# â”€â”€ Phase 3: Scanner Findings Persistence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 class ScanFinding(Base):
-    """L1-04: Persist scan findings to DB so they survive restarts."""
     __tablename__ = "scan_findings"
     id = Column(String(50), primary_key=True)
+    tenant_id = Column(String(50), nullable=False, default="tempris", index=True)
     scan_id = Column(String(50))
     target = Column(String(255))
     port = Column(Integer)
@@ -191,10 +200,7 @@ class ScanFinding(Base):
     discovered_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-# â”€â”€ Phase 4: GRC / ISO 42001 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 class GrcState(Base):
-    """ISO/IEC 42001:2023 GRC state â€” toggles and SOP builder state."""
     __tablename__ = "grc_states"
     id = Column(Integer, primary_key=True, autoincrement=True)
     toggles = Column(JSON)  # {agm: [bool], drf: [bool], tef: [bool]}
@@ -204,7 +210,6 @@ class GrcState(Base):
 
 
 class GrcSignoff(Base):
-    """Tracks individual PIC / end-user sign-offs for ISO 42001 controls."""
     __tablename__ = "grc_signoffs"
     id = Column(Integer, primary_key=True, autoincrement=True)
     control_id = Column(String(20), nullable=False)
@@ -214,10 +219,7 @@ class GrcSignoff(Base):
     notes = Column(Text)
 
 
-# â”€â”€ Phase 5: Findings Database â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 class GrcPolicyDocument(Base):
-    """Custom GRC policy documents created from the Policy Library."""
     __tablename__ = "grc_policy_documents"
     id = Column(String(80), primary_key=True)
     title = Column(String(255), nullable=False)
@@ -233,10 +235,28 @@ class GrcPolicyDocument(Base):
 
 
 class Finding(Base):
-    """Vulnerability findings â€” KEV, PoC scans, and SSS supply chain threats.
-    Replaces the in-memory GLOBAL_FINDINGS list with proper DB persistence."""
     __tablename__ = "findings"
     id = Column(String(20), primary_key=True)              # F-1000, F-2000, F-3000
+    tenant_id = Column(String(50), nullable=False, default="tempris", index=True)
+    external_id = Column(String(100), index=True)
+    cve_id = Column(String(50), index=True)
+    finding_type = Column(String(50), nullable=False, default="standard")
+    subtype = Column(String(50))
+    pipeline = Column(String(50), nullable=False, default="STANDARD")
+    verification = Column(String(50), nullable=False, default="CONFIRMED")
+    score = Column(Float)
+    decision = Column(String(50))
+    sla = Column(Integer)
+    patch_available = Column(Boolean, default=True)
+    cve_assigned = Column(Boolean, default=True)
+    exploited_in_wild = Column(Boolean, default=False)
+    ai_assisted = Column(Boolean, default=False)
+    engagement_id = Column(String(50), index=True)
+    summary = Column(Text)
+    description = Column(Text)
+    public_reason_codes = Column(JSON, default=[])
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # Legacy fields mapping
     cve = Column(String(50), index=True)                   # CVE-2026-XXXX or SSS-2026-XXXX
     title = Column(String(500), nullable=False)
     vendor = Column(String(255), index=True)
@@ -257,10 +277,7 @@ class Finding(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-# â”€â”€ Phase 6: Anti-Distillation Defenses â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 class AccountQueryLog(Base):
-    """Per-account daily query counter for rate limiting + anomaly detection."""
     __tablename__ = "account_query_logs"
     id = Column(Integer, primary_key=True, autoincrement=True)
     account_email = Column(String(255), nullable=False, index=True)
@@ -272,7 +289,6 @@ class AccountQueryLog(Base):
 
 
 class AccountSuspension(Base):
-    """ToS enforcement â€” tracks suspended accounts."""
     __tablename__ = "account_suspensions"
     id = Column(Integer, primary_key=True, autoincrement=True)
     email = Column(String(255), nullable=False, index=True)
@@ -285,7 +301,6 @@ class AccountSuspension(Base):
 
 
 class RevokedToken(Base):
-    """JWT IDs invalidated by logout before their normal expiry."""
     __tablename__ = "revoked_tokens"
     id = Column(Integer, primary_key=True, autoincrement=True)
     jti = Column(String(64), nullable=False, unique=True, index=True)
@@ -293,3 +308,171 @@ class RevokedToken(Base):
     revoked_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+    id = Column(String(50), primary_key=True)  # UUID string
+    account_subject = Column(String(255), nullable=False, index=True)
+    jti_hash = Column(String(64), nullable=False, index=True)
+    issued_at = Column(DateTime(timezone=True), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    last_seen_at = Column(DateTime(timezone=True))
+    revoked_at = Column(DateTime(timezone=True))
+    revoking_actor = Column(String(255))
+    revocation_reason = Column(String(500))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    user_agent = Column(String(255))
+
+
+# ── Generic Finding Supporting Tables ───────────────────────────────────────
+
+class FindingRelationship(Base):
+    __tablename__ = "finding_relationships"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_id = Column(String(50), nullable=False, index=True)
+    target_id = Column(String(50), nullable=False, index=True)
+    relationship_type = Column(String(50), nullable=False)  # CHAIN, ACTOR_CLUSTER, META_PATTERN, ENRICHES, DUPLICATE_OF, RELATED_TO
+    metadata_ = Column("metadata", JSON, default=[])  # ordering, label, breakpoint, narrative
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FindingSource(Base):
+    __tablename__ = "finding_sources"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    finding_id = Column(String(50), nullable=False, index=True)
+    source_id = Column(String(100), nullable=False)
+    publisher = Column(String(255), nullable=False)
+    retrieved_at = Column(DateTime(timezone=True), nullable=False)
+    last_verified_at = Column(DateTime(timezone=True), nullable=False)
+    verification_state = Column(String(50), nullable=False, default="CONFIRMED")  # CONFIRMED, DISPUTED, SINGLE_SOURCE
+    expiry_date = Column(DateTime(timezone=True))
+    analyst_notes = Column(Text)
+
+
+class FindingDisputedClaim(Base):
+    __tablename__ = "finding_disputed_claims"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    finding_id = Column(String(50), nullable=False, index=True)
+    source = Column(String(100), nullable=False)
+    claim_details = Column(Text, nullable=False)
+    disagreement_text = Column(Text)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class FindingControl(Base):
+    __tablename__ = "finding_controls"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    finding_id = Column(String(50), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text)
+    layer_type = Column(String(50), nullable=False)  # build, identity, network, detection, response, governance, awareness, patch, compensating
+    priority = Column(String(5), nullable=False, default="P1")
+    status = Column(String(20), nullable=False, default="not_assessed")
+
+
+class FindingEvidence(Base):
+    __tablename__ = "finding_evidence"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    finding_id = Column(String(50), nullable=False, index=True)
+    filename = Column(String(255), nullable=False)
+    file_path = Column(String(500), nullable=False)
+    uploaded_by = Column(String(255), nullable=False)
+    uploaded_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    verification_state = Column(String(50), nullable=False, default="CONFIRMED")  # CONFIRMED, DISPUTED, SINGLE_SOURCE
+
+
+class FindingStatusHistory(Base):
+    __tablename__ = "finding_status_history"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    finding_id = Column(String(50), nullable=False, index=True)
+    old_status = Column(String(50), nullable=False)
+    new_status = Column(String(50), nullable=False)
+    changed_by = Column(String(255), nullable=False)
+    changed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    notes = Column(Text)
+
+
+# ── Partner Program & Onboarding Tracker ─────────────────────────────────────
+
+class PartnerOnboarding(Base):
+    __tablename__ = "partner_onboarding"
+    id = Column(String(50), primary_key=True)
+    partner_id = Column(String(50), nullable=False, index=True)
+    license_verified = Column(Boolean, default=False, nullable=False)
+    agreements_signed = Column(Boolean, default=False, nullable=False)
+    attendees = Column(JSON, default=[], nullable=False)
+    provisioning_status = Column(String(50), default="pending", nullable=False)
+    role_assigned = Column(String(50))
+    attendance_checkins = Column(JSON, default=[], nullable=False)
+    module_checkpoints = Column(JSON, default={}, nullable=False)
+    pilot_evidence_submitted = Column(Boolean, default=False, nullable=False)
+    assessment_result = Column(String(50))
+    certification_number = Column(String(100))
+    expiry_date = Column(DateTime(timezone=True))
+    renewal_status = Column(String(50))
+    release_notes_acknowledged = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ── Unified Reporting Registry ──────────────────────────────────────────────
+
+class GeneratedReport(Base):
+    __tablename__ = "generated_reports"
+    id = Column(String(50), primary_key=True)
+    tenant_id = Column(String(50), nullable=False, index=True)
+    engagement_id = Column(String(50))
+    report_type = Column(String(50), nullable=False)  # risk, gap, evidence, combined, json
+    generator_version = Column(String(20), nullable=False)
+    requested_by = Column(String(255), nullable=False)
+    approved_by = Column(String(255))
+    source_finding_ids = Column(JSON, default=[], nullable=False)
+    source_evidence_ids = Column(JSON, default=[], nullable=False)
+    framework_configuration = Column(JSON, default={}, nullable=False)
+    content_hash = Column(String(64), nullable=False)
+    artifact_location = Column(String(500), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ── AEV Registry and Runs ───────────────────────────────────────────────────
+
+class AevModule(Base):
+    __tablename__ = "aev_modules"
+    id = Column(String(50), primary_key=True)
+    name = Column(String(100), nullable=False)
+    enabled = Column(Boolean, default=False, nullable=False)
+    contract_approved = Column(Boolean, default=False, nullable=False)
+    owner = Column(String(255))
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AevRun(Base):
+    __tablename__ = "aev_runs"
+    id = Column(String(50), primary_key=True)
+    module_id = Column(String(50), ForeignKey("aev_modules.id"), nullable=False)
+    tenant_id = Column(String(50), nullable=False, index=True)
+    status = Column(String(50), default="DRAFT", nullable=False)  # DRAFT, AUTHORIZED, RUNNING, PAUSED, COMPLETED, FAILED, CANCELLED
+    authorized_by = Column(String(255))
+    target_input = Column(JSON, default={}, nullable=False)
+    evidence_generated = Column(JSON, default=[], nullable=False)
+    safety_gate_passed = Column(Boolean, default=False, nullable=False)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+
+
+# ── Operations Change Queue ──────────────────────────────────────────────────
+
+class OperationsChangeTicket(Base):
+    __tablename__ = "operations_change_queue"
+    id = Column(String(50), primary_key=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False)
+    runbook_reference = Column(String(255))
+    backup_required = Column(Boolean, default=True, nullable=False)
+    rollback_plan = Column(Text)
+    dry_run_output = Column(Text)
+    preflight_passed = Column(Boolean, default=False, nullable=False)
+    status = Column(String(50), default="PENDING", nullable=False)  # PENDING, APPROVED, EXECUTED, FAILED, ROLLED_BACK
+    approved_by = Column(String(255))
+    approved_at = Column(DateTime(timezone=True))
+    evidence_path = Column(String(500))
+    post_verification_template = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -1,0 +1,53 @@
+{
+  "pack_name": "ionstack",
+  "version": "1.0.0",
+  "findings": [
+    {
+      "id": "F-ION-01",
+      "tenant_id": "tempris",
+      "finding_type": "vulnerability",
+      "subtype": "CVE",
+      "pipeline": "STANDARD",
+      "verification": "CONFIRMED",
+      "cvss": 7.5,
+      "priority": "P1",
+      "status": "unmitigated",
+      "cve": "CVE-2026-ION-1",
+      "title": "IonStack Gateway RCE (Link 1/2)",
+      "vendor": "IonStack",
+      "product": "Gateway Proxy",
+      "description": "Pre-auth remote command execution in routing engine. First step of attack chain.",
+      "sources": [],
+      "controls": []
+    },
+    {
+      "id": "F-ION-02",
+      "tenant_id": "tempris",
+      "finding_type": "vulnerability",
+      "subtype": "CVE",
+      "pipeline": "STANDARD",
+      "verification": "CONFIRMED",
+      "cvss": 6.8,
+      "priority": "P1",
+      "status": "unmitigated",
+      "cve": "CVE-2026-ION-2",
+      "title": "IonStack Internal DB Access (Link 2/2)",
+      "vendor": "IonStack",
+      "product": "Database Agent",
+      "description": "Bypass authentication to access local credentials. Second step of attack chain.",
+      "sources": [],
+      "controls": []
+    }
+  ],
+  "relationships": [
+    {
+      "source_id": "F-ION-01",
+      "target_id": "F-ION-02",
+      "relationship_type": "CHAIN",
+      "metadata": {
+        "chain_id": "IONSTACK-2026",
+        "description": "Patching either link breaks the entire attack path without modifying individual scores."
+      }
+    }
+  ]
+}

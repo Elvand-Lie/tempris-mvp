@@ -36,7 +36,7 @@ def _finding_to_dict(f) -> dict:
     }
 
 
-def get_all_findings(db: Session = None) -> list[dict]:
+def get_all_findings(db: Session = None, tenant_id: str = None) -> list[dict]:
     """Backward-compatible wrapper: returns all findings as list of dicts.
 
     Used by ai_context.py, rag_engine.py, and other consumers that need
@@ -50,7 +50,10 @@ def get_all_findings(db: Session = None) -> list[dict]:
         db = SessionLocal()
         should_close = True
     try:
-        findings = db.query(Finding).order_by(Finding.priority, Finding.cvss.desc()).all()
+        query = db.query(Finding)
+        if tenant_id:
+            query = query.filter(Finding.tenant_id == tenant_id)
+        findings = query.order_by(Finding.priority, Finding.cvss.desc()).all()
         return [_finding_to_dict(f) for f in findings]
     finally:
         if should_close:
@@ -66,6 +69,8 @@ def get_findings_paginated(
     decision_filter: str = None,
     vendor: str = None,
     ransomware_only: bool = False,
+    user_tenant_id: str | None = None,
+    is_superadmin: bool = False,
 ) -> tuple[list[dict], int]:
     """DB-level filtered + paginated query. Returns (findings, total_count)."""
     from models import Finding, EdipDecision
@@ -89,12 +94,21 @@ def get_findings_paginated(
         query = query.filter(Finding.ransomware == True)
 
     # Filter by EDIP decision status
-    if decision_filter == "pending":
-        decided_ids = db.query(EdipDecision.finding_id).subquery()
-        query = query.filter(~Finding.id.in_(decided_ids))
-    elif decision_filter == "decided":
-        decided_ids = db.query(EdipDecision.finding_id).subquery()
-        query = query.filter(Finding.id.in_(decided_ids))
+    if decision_filter in ("pending", "decided"):
+        from routers.auth import USERS
+        # Find all matching decided findings for this tenant (or all if superadmin)
+        all_decisions = db.query(EdipDecision).all()
+        decided_ids_list = []
+        for d in all_decisions:
+            decider_info = USERS.get(d.decided_by)
+            decider_tenant = decider_info.get("tenant_id") if decider_info else None
+            if is_superadmin or (user_tenant_id and decider_tenant == user_tenant_id):
+                decided_ids_list.append(d.finding_id)
+                
+        if decision_filter == "pending":
+            query = query.filter(~Finding.id.in_(decided_ids_list))
+        elif decision_filter == "decided":
+            query = query.filter(Finding.id.in_(decided_ids_list))
 
     total = query.count()
 
@@ -121,14 +135,18 @@ def get_finding_by_id(db: Session, finding_id: str) -> dict | None:
     return _finding_to_dict(f) if f else None
 
 
-def get_finding_stats(db: Session) -> dict:
+def get_finding_stats(db: Session, tenant_id: str = None) -> dict:
     """Aggregate counts via SQL — no iteration needed."""
     from models import Finding
-    total = db.query(Finding).count()
-    critical = db.query(Finding).filter(Finding.priority == "P0").count()
-    high = db.query(Finding).filter(Finding.priority == "P1").count()
-    kev = db.query(Finding).filter(Finding.cisa_kev == True).count()
-    ransomware = db.query(Finding).filter(Finding.ransomware == True).count()
+    query = db.query(Finding)
+    if tenant_id:
+        query = query.filter(Finding.tenant_id == tenant_id)
+    
+    total = query.count()
+    critical = query.filter(Finding.priority == "P0").count()
+    high = query.filter(Finding.priority == "P1").count()
+    kev = query.filter(Finding.cisa_kev == True).count()
+    ransomware = query.filter(Finding.ransomware == True).count()
     return {
         "total_findings": total,
         "critical_count": critical,
@@ -145,26 +163,28 @@ def get_unique_vendors(db: Session) -> list[str]:
     return sorted([r[0] for r in rows])
 
 
-def get_top_critical_findings(db: Session, limit: int = 20) -> list[dict]:
+def get_top_critical_findings(db: Session, limit: int = 20, tenant_id: str = None) -> list[dict]:
     """Get top N critical findings for TES calculation."""
     from models import Finding
+    query = db.query(Finding).filter(Finding.priority == "P0")
+    if tenant_id:
+        query = query.filter(Finding.tenant_id == tenant_id)
     findings = (
-        db.query(Finding)
-        .filter(Finding.priority == "P0")
-        .order_by(Finding.cvss.desc())
+        query.order_by(Finding.cvss.desc())
         .limit(limit)
         .all()
     )
     return [_finding_to_dict(f) for f in findings]
 
 
-def get_ransomware_findings(db: Session, limit: int = 5) -> list[dict]:
+def get_ransomware_findings(db: Session, limit: int = 5, tenant_id: str = None) -> list[dict]:
     """Get ransomware-linked findings for alerts."""
     from models import Finding
+    query = db.query(Finding).filter(Finding.ransomware == True)
+    if tenant_id:
+        query = query.filter(Finding.tenant_id == tenant_id)
     findings = (
-        db.query(Finding)
-        .filter(Finding.ransomware == True)
-        .order_by(Finding.cvss.desc())
+        query.order_by(Finding.cvss.desc())
         .limit(limit)
         .all()
     )

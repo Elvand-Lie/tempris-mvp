@@ -8,6 +8,7 @@ AI endpoints get stricter caps to prevent distillation attacks.
 import time
 import logging
 import jwt
+from typing import Any
 from datetime import datetime, timedelta, timezone
 from collections import OrderedDict
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -214,14 +215,18 @@ PROBE_MIN_VARIANTS = 4
 _probe_windows: dict[tuple[str, str], list[tuple[float, tuple]]] = {}
 
 
-def _rounded_fingerprint(payload: dict) -> tuple:
-    items = []
-    for key in sorted(payload):
-        value = payload.get(key)
-        if isinstance(value, (int, float)):
-            value = round(float(value), 1)
-        items.append((key, value))
-    return tuple(items)
+def _rounded_fingerprint(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        items = []
+        for key in sorted(payload):
+            items.append((key, _rounded_fingerprint(payload[key])))
+        return tuple(items)
+    elif isinstance(payload, list):
+        return tuple(_rounded_fingerprint(x) for x in payload)
+    elif isinstance(payload, (int, float)):
+        return round(float(payload), 1)
+    else:
+        return payload
 
 
 def detect_probe_attempt(account: str, path: str, payload: dict) -> bool:
@@ -285,6 +290,42 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             request.state.endpoint_group = group
             if anomaly:
                 persist_daily_stats()
+
+        # ── 3. Structured Probe Detection (CORE-C04) ──────────────────────
+        if request.method == "POST" and "/api/spectrum" in path:
+            try:
+                body = await request.body()
+                async def receive():
+                    return {"type": "http.request", "body": body}
+                request._receive = receive
+                
+                import json
+                payload = json.loads(body) if body else {}
+                if detect_probe_attempt(email or "anonymous", path, payload):
+                    logger.warning(f"STRUCTURED_PROBE_DETECTION: Probe attempt detected for {email or 'anonymous'} on {path}.")
+                    try:
+                        from services.database import SessionLocal
+                        from models import AuditLog
+                        db = SessionLocal()
+                        from routers.audit import append_to_audit_log_db, AuditEntry
+                        append_to_audit_log_db(db, AuditEntry(
+                            user="system:rate_limiter",
+                            action="STRUCTURED_PROBE_DETECTED",
+                            module="RATE_LIMIT",
+                            detail=f"Structured probe query sequence blocked on {path} for account {email or 'anonymous'}."
+                        ))
+                        db.commit()
+                        db.close()
+                    except Exception:
+                        pass
+                        
+                    return JSONResponse(
+                        status_code=429,
+                        content={"detail": "Structured probe sequence detected. Request blocked by security controls."},
+                        headers={"X-Tempris-Block": "PROBE_DETECTION"}
+                    )
+            except Exception:
+                pass
 
         response = await call_next(request)
 

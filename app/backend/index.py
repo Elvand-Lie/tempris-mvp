@@ -21,12 +21,51 @@ logger = logging.getLogger("tempris")
 # Add the api directory to the Python path for Vercel Serverless
 sys.path.append(os.path.dirname(__file__))
 
-from routers import auth, spectrum, audit, synthesis, scout, scanner, strike, standard, assets, grc, edip, surge
+from routers import auth, spectrum, audit, synthesis, scout, scanner, strike, standard, assets, grc, edip, surge, blflaw, partner, reports, aev, ocq, threats
 from routers.audit import append_to_audit_log, AuditEntry
 from routers.auth import get_current_user
 from services.kev_loader import ensure_findings_seeded, get_finding_stats
 from services.database import get_db, init_db, SessionLocal
 from models import SpotlightReport, ChatSession, ChatMessage, TesSnapshot
+
+# Fail-closed check for ENVIRONMENT and AUDIT_HMAC_KEY
+env = os.environ.get("ENVIRONMENT", "").strip().lower()
+ALLOWED_ENVIRONMENTS = {"demo", "test", "development", "staging", "production"}
+if not env:
+    import sys
+    print("FATAL: ENVIRONMENT configuration variable is missing or empty.", file=sys.stderr)
+    sys.exit(1)
+if env not in ALLOWED_ENVIRONMENTS:
+    import sys
+    print(f"FATAL: Unrecognized ENVIRONMENT value: '{env}'", file=sys.stderr)
+    sys.exit(1)
+
+if env in ("staging", "production"):
+    storage_root = os.environ.get("EVIDENCE_STORAGE_ROOT", "").strip()
+    if not storage_root:
+        import sys
+        print("FATAL: EVIDENCE_STORAGE_ROOT is not set in staging/production. Refusing to start.", file=sys.stderr)
+        sys.exit(1)
+    if not os.path.isabs(storage_root):
+        import sys
+        print("FATAL: EVIDENCE_STORAGE_ROOT must be an absolute path in staging/production. Refusing to start.", file=sys.stderr)
+        sys.exit(1)
+
+if env in ("staging", "production"):
+    key_env = os.environ.get("AUDIT_HMAC_KEY", "")
+    if not key_env:
+        import sys
+        print("FATAL: AUDIT_HMAC_KEY is not set in staging/production. Refusing to start.", file=sys.stderr)
+        sys.exit(1)
+    if len(key_env) < 32:
+        import sys
+        print("FATAL: AUDIT_HMAC_KEY must have at least 32 characters in staging/production.", file=sys.stderr)
+        sys.exit(1)
+    if "test_audit_hmac" in key_env or "tempris_dev_audit_hmac" in key_env:
+        import sys
+        print("FATAL: Weak placeholder key is refused in staging/production.", file=sys.stderr)
+        sys.exit(1)
+
 
 app = FastAPI(title="Tempris Wave 1 MVP", version="2.0.0", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -44,8 +83,14 @@ app.include_router(assets.router, prefix="/api/assets", tags=["assets"])
 app.include_router(grc.router, prefix="/api/grc", tags=["grc"])
 app.include_router(edip.router, prefix="/api/edip", tags=["edip"])
 app.include_router(surge.router, prefix="/api/surge", tags=["surge"])
+app.include_router(blflaw.router, prefix="/api/blflaw", tags=["blflaw"])
+app.include_router(partner.router, prefix="/api/partner", tags=["partner"])
+app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
+app.include_router(aev.router, prefix="/api/aev", tags=["aev"])
+app.include_router(ocq.router, prefix="/api/ocq", tags=["ocq"])
+app.include_router(threats.router, prefix="/api/threats", tags=["threats"])
 
-# â”€â”€ Startup: Init DB, Seed data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─ Startup: Init DB, Seed data ──────────────────────────────────────────────────
 
 @app.on_event("startup")
 def startup():
@@ -118,12 +163,44 @@ from starlette.middleware.base import BaseHTTPMiddleware
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         response = await call_next(request)
+        
+        # Global Serializer Redaction Boundary (CORE-C03)
+        content_type = response.headers.get("content-type", "")
+        if "application/json" in content_type:
+            import json
+            from services.redactor import redact_private_fields
+            body = []
+            async for chunk in response.body_iterator:
+                body.append(chunk)
+            body_bytes = b"".join(body)
+            try:
+                data = json.loads(body_bytes.decode("utf-8"))
+                cleaned_data = redact_private_fields(data)
+                new_body = json.dumps(cleaned_data).encode("utf-8")
+                
+                # Rebuild response with new body
+                from fastapi import Response
+                headers = dict(response.headers)
+                headers["content-length"] = str(len(new_body))
+                response = Response(
+                    content=new_body,
+                    status_code=response.status_code,
+                    headers=headers,
+                    media_type="application/json"
+                )
+            except Exception:
+                async def re_iterate():
+                    for chunk in body:
+                        yield chunk
+                response.body_iterator = re_iterate()
+
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'"
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
+        
         # H-10: Strip server fingerprint headers to block reconnaissance
         if "server" in response.headers:
             del response.headers["server"]
@@ -133,8 +210,34 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
+
+class AuditContextASGIMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            from fastapi import Request
+            from routers.audit import audit_request_var
+            request = Request(scope)
+            # Initialize request context
+            req_token = audit_request_var.set(request)
+            # Ensure authenticated user state is clean
+            request.state.authenticated_user = None
+            try:
+                await self.app(scope, receive, send)
+            finally:
+                audit_request_var.reset(req_token)
+        else:
+            await self.app(scope, receive, send)
+
+
+
+app.add_middleware(AuditContextASGIMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(ToSEnforcerMiddleware)
+
+
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -226,6 +329,17 @@ def speak_chat(
     """AI Chatbot Endpoint (SPEAK Module) with full platform awareness."""
     user_email = user.get("sub", "Current User")
     
+    # 1. Early Guardrail Intercept (SEC-I2)
+    from services.llm_client import sanitize_user_input
+    sanitized_msg = sanitize_user_input(chat.message)
+    if sanitized_msg == "__INJECTION_BLOCKED__":
+        append_to_audit_log(AuditEntry(
+            user=user_email, action="SPEAK_GUARDRAIL_TRIGGERED", module="SPEAK",
+            detail="Prompt injection attempt blocked by SPEAK guardrails."
+        ))
+        response = "I'm designed to help with security analysis and threat intelligence. I can't modify my behavior or reveal internal configuration. How can I assist you with your security posture?"
+        return {"response": response, "sources": ["Guardrail"], "session_id": chat.session_id}
+
     # Get or create session
     if chat.session_id:
         session = db.query(ChatSession).filter(ChatSession.id == chat.session_id).first()
@@ -244,8 +358,9 @@ def speak_chat(
     db.add(ChatMessage(session_id=session.id, role="user", content=chat.message))
     db.commit()
     
+    tenant_id = user.get("tenant_id", "tempris")
     from services.ai_context import build_service_ai_context, build_speak_system_prompt
-    ctx = build_service_ai_context(db, chat.message, n_results=5)
+    ctx = build_service_ai_context(db, chat.message, n_results=5, tenant_id=tenant_id)
     context_text = ctx["full_text"]
     structured = ctx["structured"]
     rag_text = ctx["rag_text"]
@@ -265,7 +380,7 @@ def speak_chat(
                 conditions.append(Finding.cve.ilike(pattern))
                 conditions.append(Finding.vendor.ilike(pattern))
                 conditions.append(Finding.title.ilike(pattern))
-            relevant = db.query(Finding).filter(or_(*conditions)).limit(10).all()
+            relevant = db.query(Finding).filter(Finding.tenant_id == tenant_id).filter(or_(*conditions)).limit(10).all()
             if relevant:
                 relevant_text = "\n\nRelevant findings matching your query:\n"
                 for rf in relevant[:5]:

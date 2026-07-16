@@ -1,0 +1,37 @@
+{
+  "pack_name": "jce",
+  "version": "1.0.0",
+  "findings": [
+    {
+      "id": "F-JCE-01",
+      "tenant_id": "tempris",
+      "finding_type": "vulnerability",
+      "subtype": "CVE",
+      "pipeline": "STANDARD",
+      "verification": "CONFIRMED",
+      "cvss": 9.8,
+      "priority": "P0",
+      "status": "unmitigated",
+      "cve": "CVE-2026-48907",
+      "title": "Joomla JCE Remote Code Execution",
+      "vendor": "Joomla",
+      "product": "JCE Editor Extension",
+      "description": "Remote code execution through unrestricted file upload parameter.",
+      "sources": [
+        {
+          "source_id": "SRC-JCE-01",
+          "publisher": "NVD NIST",
+          "verification_state": "CONFIRMED"
+        }
+      ],
+      "controls": [
+        {
+          "title": "Nginx JCE WAF Filtering Rule",
+          "layer_type": "network",
+          "priority": "P0"
+        }
+      ]
+    }
+  ],
+  "relationships": []
+}

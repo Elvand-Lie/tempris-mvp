@@ -1,0 +1,66 @@
+{
+  "pack_name": "ai_supply",
+  "version": "1.0.0",
+  "findings": [
+    {
+      "id": "F-AI-01",
+      "tenant_id": "tempris",
+      "finding_type": "vulnerability",
+      "subtype": "MASTRA",
+      "pipeline": "SYNTHETIC",
+      "verification": "DISPUTED",
+      "cvss": 7.8,
+      "priority": "P1",
+      "status": "unmitigated",
+      "title": "Mastra Synthetic Framework Exposure",
+      "vendor": "Mastra AI",
+      "product": "Core SDK",
+      "description": "Cross-tenant data exposure vulnerability in Mastra orchestration.",
+      "sources": [
+        {
+          "source_id": "SRC-AI-01",
+          "publisher": "OpenAI Security Group",
+          "verification_state": "DISPUTED",
+          "analyst_notes": "Vendor disputes cross-tenant classification."
+        }
+      ],
+      "controls": [
+        {
+          "title": "LiteLLM Scoped Proxies",
+          "layer_type": "compensating",
+          "priority": "P1"
+        }
+      ]
+    },
+    {
+      "id": "F-AI-02",
+      "tenant_id": "tempris",
+      "finding_type": "vulnerability",
+      "subtype": "LiteLLM",
+      "pipeline": "SYNTHETIC",
+      "verification": "CONFIRMED",
+      "cvss": 8.2,
+      "priority": "P1",
+      "status": "unmitigated",
+      "title": "LiteLLM Key Leakage",
+      "vendor": "LiteLLM",
+      "product": "Proxy Gateway",
+      "description": "Insecure key derivation in proxy configurations.",
+      "sources": [
+        {
+          "source_id": "SRC-AI-02",
+          "publisher": "HuggingFace Security",
+          "verification_state": "CONFIRMED"
+        }
+      ],
+      "controls": [
+        {
+          "title": "DEBULL Enrichment Scanning",
+          "layer_type": "identity",
+          "priority": "P1"
+        }
+      ]
+    }
+  ],
+  "relationships": []
+}

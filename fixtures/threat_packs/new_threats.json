@@ -1,0 +1,47 @@
+{
+  "pack_name": "new_threats",
+  "version": "1.0.0",
+  "findings": [
+    {
+      "id": "F-NEW-01",
+      "tenant_id": "tempris",
+      "finding_type": "vulnerability",
+      "subtype": "NHI",
+      "pipeline": "SYNTHETIC",
+      "verification": "CONFIRMED",
+      "cvss": 5.0,
+      "priority": "P2",
+      "status": "unmitigated",
+      "title": "Software Factory NHI Secret Leakage",
+      "vendor": "Internal CI/CD",
+      "product": "CI Pipeline",
+      "description": "Non-Human Identity secret exposure in runner logs.",
+      "sources": [
+        {
+          "source_id": "SRC-NEW-01",
+          "publisher": "Internal Scanner",
+          "verification_state": "CONFIRMED"
+        }
+      ],
+      "controls": []
+    },
+    {
+      "id": "F-NEW-02",
+      "tenant_id": "tempris",
+      "finding_type": "vulnerability",
+      "subtype": "NHI",
+      "pipeline": "SYNTHETIC",
+      "verification": "ENRICHMENT",
+      "cvss": 4.5,
+      "priority": "P2",
+      "status": "unmitigated",
+      "title": "Endpoint Secret-Sprawl Signal",
+      "vendor": "SentinelOne",
+      "product": "EDR Watch",
+      "description": "Watcher detects high-entropy developer secrets on workstation endpoints.",
+      "sources": [],
+      "controls": []
+    }
+  ],
+  "relationships": []
+}

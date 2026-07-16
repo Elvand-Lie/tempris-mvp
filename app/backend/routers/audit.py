@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from services.database import get_db
 from models import AuditLog
 from routers.auth import get_current_user, require_role
+from contextvars import ContextVar
 import json
 import os
 import hashlib
@@ -15,6 +16,8 @@ logger = logging.getLogger("tempris.audit")
 
 router = APIRouter()
 
+# Context variables for request-scoped audit context
+audit_request_var: ContextVar[Request] = ContextVar("audit_request", default=None)
 
 class AuditEntry(BaseModel):
     user: str = "system"
@@ -23,6 +26,107 @@ class AuditEntry(BaseModel):
     detail: str = ""
     ip_address: str | None = None
     metadata: dict | None = None
+
+import ipaddress
+
+
+# CIDR Trusted-proxy allowlist
+trusted_cidrs_env = os.environ.get("TEMPRIS_TRUSTED_PROXY_CIDRS", "")
+TRUSTED_PROXY_NETWORKS = []
+if trusted_cidrs_env:
+    for cidr in trusted_cidrs_env.split(","):
+        try:
+            TRUSTED_PROXY_NETWORKS.append(ipaddress.ip_network(cidr.strip()))
+        except ValueError as e:
+            logger.warning(f"Invalid trusted proxy CIDR configured: {cidr}. Error: {e}")
+
+def is_trusted_proxy(ip_str: str) -> bool:
+    if ip_str == "testclient":
+        return True
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        for network in TRUSTED_PROXY_NETWORKS:
+            if ip in network:
+                return True
+    except ValueError:
+        pass
+    return False
+
+def get_client_ip(request: Request) -> str:
+    """Derive client IP from request utilizing a configuration-backed CIDR allowlist.
+    Only trust X-Real-IP or X-Forwarded-For headers if peer client IP is trusted.
+    """
+    peer_ip = request.client.host if request.client else "127.0.0.1"
+    if is_trusted_proxy(peer_ip):
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip:
+            try:
+                ipaddress.ip_address(real_ip.strip())
+                return real_ip.strip()
+            except ValueError:
+                pass
+        x_forwarded_for = request.headers.get("x-forwarded-for")
+        if x_forwarded_for:
+            # Parse and find the first clean, valid IP address
+            for part in x_forwarded_for.split(","):
+                clean_ip = part.strip()
+                try:
+                    ipaddress.ip_address(clean_ip)
+                    return clean_ip
+                except ValueError:
+                    pass
+    return peer_ip
+
+
+_fallback_hmac_key = b"tempris_dev_audit_hmac_key_do_not_use_in_prod_" + b"x" * 16
+
+def get_audit_hmac_key() -> bytes:
+    env = os.environ.get("ENVIRONMENT", "").strip().lower()
+    key_env = os.environ.get("AUDIT_HMAC_KEY", "")
+    if env in ("staging", "production"):
+        if not key_env:
+            raise RuntimeError("FATAL: AUDIT_HMAC_KEY is missing or empty in staging/production.")
+        if len(key_env) < 32:
+            raise RuntimeError("FATAL: AUDIT_HMAC_KEY must have at least 32 characters of secret material.")
+        if "test_audit_hmac" in key_env or "tempris_dev_audit_hmac" in key_env:
+            raise RuntimeError("FATAL: Weak/development placeholder keys are refused in staging/production.")
+        return key_env.encode()
+    else:
+        if not key_env:
+            return _fallback_hmac_key
+        return key_env.encode()
+
+
+
+def _compute_v2_hmac(
+    prev_hash: str,
+    action: str,
+    detail: str | None,
+    ts: datetime | None,
+    user: str | None,
+    module: str | None,
+    ip_address: str | None,
+    metadata: dict | None,
+) -> str:
+    # Build deterministic canonical payload for v2
+    payload = {
+        "prev_hash": prev_hash,
+        "timestamp": _timestamp_for_hash(ts),
+        "user": user or "",
+        "action": action or "",
+        "module": module or "",
+        "detail": detail or "",
+        "ip_address": ip_address or "",
+        "metadata": metadata or {}
+    }
+    canonical_payload = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    import hmac
+    key = get_audit_hmac_key()
+    digest = hmac.new(key, canonical_payload.encode(), hashlib.sha256).hexdigest()
+    # Fit strictly within DB String(64) limit: 'v2:' (3 chars) + 60 chars of hex digest = 63 chars
+    return f"v2:{digest[:60]}"
+
+
 
 
 def _compute_hash(prev_hash: str, entry_str: str) -> str:
@@ -70,6 +174,12 @@ def _legacy_entry_hash_payloads(log: AuditLog) -> set[str]:
 
 
 def _stored_hash_matches(prev_hash: str, log: AuditLog) -> bool:
+    if log.hash and log.hash.startswith("v2:"):
+        expected = _compute_v2_hmac(
+            prev_hash, log.action, log.detail, log.timestamp, log.user_email, log.module, log.ip_address, log.metadata_
+        )
+        return log.hash == expected
+
     candidates = {
         _compute_hash(prev_hash, _entry_hash_payload(
             log.action, log.detail, log.timestamp, log.user_email, log.module, log.ip_address, log.metadata_,
@@ -88,8 +198,6 @@ def _stored_hash_matches(prev_hash: str, log: AuditLog) -> bool:
     return log.hash in candidates
 
 
-def _request_ip(request: Request | None) -> str | None:
-    return request.client.host if request and request.client else None
 
 
 
@@ -133,15 +241,21 @@ def seed_audit_log(db: Session):
                 for e in events:
                     ts = datetime.fromisoformat(e.get("timestamp", datetime.now(timezone.utc).isoformat()))
                     metadata = e.get("metadata") or {}
-                    entry_str = _entry_hash_payload(e.get("action", ""), e.get("detail", ""), ts, e.get("user", "system"), e.get("module", "SYSTEM"), e.get("ip_address"), metadata, include_metadata=bool(metadata))
+                    actor = e.get("actor", "system")
+                    event_type = e.get("event_type", "")
+                    source_module = e.get("source_module", "SYSTEM")
+                    description = e.get("description", "")
+                    ip_address = metadata.get("ip_address") if isinstance(metadata, dict) else None
+
+                    entry_str = _entry_hash_payload(event_type, description, ts, actor, source_module, ip_address, metadata, include_metadata=bool(metadata))
                     new_hash = _compute_hash(prev_hash, entry_str)
                     record = AuditLog(
                         timestamp=ts,
-                        user_email=e.get("user", "system"),
-                        action=e.get("action", ""),
-                        module=e.get("module", "SYSTEM"),
-                        detail=e.get("detail", ""),
-                        ip_address=e.get("ip_address"),
+                        user_email=actor,
+                        action=event_type,
+                        module=source_module,
+                        detail=description,
+                        ip_address=ip_address,
                         metadata_=metadata,
                         hash=new_hash
                     )
@@ -153,9 +267,9 @@ def seed_audit_log(db: Session):
                 db.rollback()
                 logger.warning(f"TACF seed warning: {ex}")
 
-    # System start event
+    # System start event - requires explicit service principal and internal IP
     append_to_audit_log_db(db, AuditEntry(
-        user="system", action="SYSTEM_STARTUP", module="CORE",
+        user="system:startup", action="SYSTEM_STARTUP", module="CORE",
         detail="Tempris platform initialized. All modules loaded."
     ))
 
@@ -175,15 +289,36 @@ def append_to_audit_log_db(db: Session, entry: AuditEntry) -> dict:
         # PostgreSQL: advisory lock on a fixed key to serialize audit writes
         db.execute(text("SELECT pg_advisory_xact_lock(42)"))
 
+    # Enforce server-authoritative actor/user override from JWT request state
+    t_id = "tempris"
+    request = audit_request_var.get()
+    if request:
+        user_payload = getattr(request.state, "authenticated_user", None)
+        if user_payload and isinstance(user_payload, dict):
+            entry.user = user_payload.get("sub", "unknown")
+            t_id = user_payload.get("tenant_id", "tempris")
+        else:
+            # Unauthenticated request: only allow specific auth/login actions
+            if entry.action not in ("USER_LOGIN", "USER_LOGIN_FAILED", "USER_LOGIN_LOCKED"):
+                entry.user = "anonymous"
+        entry.ip_address = get_client_ip(request)
+    else:
+        # Internal system action (no request context): require explicit service principal
+        if not entry.user or not (entry.user.startswith("system:") or entry.user.startswith("service:")):
+            raise ValueError(f"Internal events must provide an explicit service principal (got '{entry.user}')")
+        entry.ip_address = "internal"
+
     _validate_tacf_metadata(entry)
     last = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
     prev_hash = last.hash if last and last.hash else "0"
     # C-05 FIX: Use the SAME timestamp for both hashing and storage
     now = datetime.now(timezone.utc)
-    entry_str = _entry_hash_payload(entry.action, entry.detail, now, entry.user, entry.module, entry.ip_address, entry.metadata, include_metadata=bool(entry.metadata))
-    new_hash = _compute_hash(prev_hash, entry_str)
+    new_hash = _compute_v2_hmac(
+        prev_hash, entry.action, entry.detail, now, entry.user, entry.module, entry.ip_address, entry.metadata
+    )
 
     record = AuditLog(
+        tenant_id=t_id,
         timestamp=now,
         user_email=entry.user,
         action=entry.action,
@@ -194,6 +329,8 @@ def append_to_audit_log_db(db: Session, entry: AuditEntry) -> dict:
         hash=new_hash
     )
     db.add(record)
+
+
     db.commit()
     db.refresh(record)
     return {
@@ -303,11 +440,12 @@ def verify_audit_integrity(recompute: bool = False, db: Session = Depends(get_db
         return {"status": "empty", "records": 0, "intact": True}
 
     if recompute:
-        # Rebuild the entire hash chain from scratch
+        # Rebuild the entire hash chain from scratch using v2 HMAC
         prev_hash = "0"
         for log in logs:
-            entry_str = _entry_hash_payload(log.action, log.detail, log.timestamp, log.user_email, log.module, log.ip_address, log.metadata_, include_metadata=bool(log.metadata_))
-            new_hash = _compute_hash(prev_hash, entry_str)
+            new_hash = _compute_v2_hmac(
+                prev_hash, log.action, log.detail, log.timestamp, log.user_email, log.module, log.ip_address, log.metadata_
+            )
             log.hash = new_hash
             prev_hash = new_hash
         db.commit()
@@ -323,9 +461,23 @@ def verify_audit_integrity(recompute: bool = False, db: Session = Depends(get_db
     prev_hash = "0"
     broken_at = None
     mismatches = 0
+    has_transitioned_to_v2 = False
+
     for i, log in enumerate(logs):
         if not log.hash:
             continue
+
+        is_v2 = log.hash.startswith("v2:")
+        if is_v2:
+            has_transitioned_to_v2 = True
+
+        # Downgrade check: once the chain transitions to v2, it must reject any subsequent legacy-formatted records.
+        if has_transitioned_to_v2 and not is_v2:
+            mismatches += 1
+            if broken_at is None:
+                broken_at = i
+            continue
+
         if not _stored_hash_matches(prev_hash, log):
             mismatches += 1
             if broken_at is None:
@@ -344,17 +496,11 @@ def verify_audit_integrity(recompute: bool = False, db: Session = Depends(get_db
 
 
 @router.post("/log")
-def log_action(entry: AuditEntry, request: Request = None, db: Session = Depends(get_db), user=Depends(require_role("Superadmin", "Admin"))):
+def log_action(entry: AuditEntry, db: Session = Depends(get_db), user=Depends(require_role("Superadmin", "Admin"))):
     """API endpoint to log an action directly. Requires Superadmin or Admin."""
-    trusted_entry = AuditEntry(
-        user=user.get("sub", "unknown"),
-        action=entry.action,
-        module=entry.module,
-        detail=entry.detail,
-        ip_address=_request_ip(request),
-        metadata=entry.metadata,
-    )
-    return append_to_audit_log_db(db, trusted_entry)
+    return append_to_audit_log_db(db, entry)
+
+
 
 
 

@@ -43,3 +43,11 @@ _vps_live_extract/
 _vps_live_snapshot*
 _deploy_*.tar.gz
 tempris.db
+
+# Baseline artifacts
+artifacts/baseline/
+
+# Local runtime artifacts and backups
+artifacts/
+backups/
+*.db.bak_*

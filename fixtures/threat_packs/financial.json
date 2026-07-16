@@ -1,0 +1,67 @@
+{
+  "pack_name": "financial",
+  "version": "1.0.0",
+  "findings": [
+    {
+      "id": "F-FIN-01",
+      "tenant_id": "tempris",
+      "finding_type": "vulnerability",
+      "subtype": "PaymentSDK",
+      "pipeline": "SYNTHETIC",
+      "verification": "SINGLE_SOURCE",
+      "cvss": 8.8,
+      "priority": "P1",
+      "status": "unmitigated",
+      "title": "PaymentSDK Memory Scraping",
+      "vendor": "AcmePay",
+      "product": "SDK Core",
+      "description": "Sensitive payment token memory leakage during checkout flow.",
+      "sources": [
+        {
+          "source_id": "SRC-FIN-01",
+          "publisher": "Financial Sector Watch",
+          "verification_state": "SINGLE_SOURCE",
+          "analyst_notes": "Awaiting vendor patch confirmation."
+        }
+      ],
+      "controls": [
+        {
+          "title": "Tokenization Egress Validation",
+          "layer_type": "compensating",
+          "priority": "P1"
+        }
+      ]
+    },
+    {
+      "id": "F-FIN-02",
+      "tenant_id": "tempris",
+      "finding_type": "vulnerability",
+      "subtype": "CVE",
+      "pipeline": "STANDARD",
+      "verification": "CONFIRMED",
+      "cvss": 7.5,
+      "priority": "P1",
+      "status": "unmitigated",
+      "cve": "CVE-2026-9181",
+      "title": "ArcGIS Portal SSRF",
+      "vendor": "Esri",
+      "product": "ArcGIS Portal",
+      "description": "Server-side request forgery vulnerability in print proxy service.",
+      "sources": [
+        {
+          "source_id": "SRC-FIN-02",
+          "publisher": "NVD NIST",
+          "verification_state": "CONFIRMED"
+        }
+      ],
+      "controls": [
+        {
+          "title": "Egress Firewall Restricting Print Service",
+          "layer_type": "network",
+          "priority": "P1"
+        }
+      ]
+    }
+  ],
+  "relationships": []
+}

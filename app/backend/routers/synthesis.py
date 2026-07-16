@@ -9,29 +9,29 @@ from datetime import datetime, timedelta, timezone
 
 router = APIRouter()
 
-def get_dashboard_data(db: Session = None):
-    """Generate dashboard telemetry from real data."""
+def get_dashboard_data(db: Session = None, tenant_id: str = "tempris"):
+    """Generate dashboard telemetry from real data scoped to tenant."""
     should_close = False
     if db is None:
         db = SessionLocal()
         should_close = True
 
     try:
-        stats = get_finding_stats(db)
+        stats = get_finding_stats(db, tenant_id=tenant_id)
 
         # Compute aggregate TES from top-20 critical findings, including SSS/NHI paths
-        critical = get_top_critical_findings(db, limit=20)
+        critical = get_top_critical_findings(db, limit=20, tenant_id=tenant_id)
         tes_scores = [calculate_finding_tes(f) for f in critical]
         aggregate_tes = sum(tes_scores) / len(tes_scores) if tes_scores else 0
 
         # Real alerts from ransomware-linked findings
-        ransomware_list = get_ransomware_findings(db, limit=5)
+        ransomware_list = get_ransomware_findings(db, limit=5, tenant_id=tenant_id)
         alerts = []
         for f in ransomware_list:
             alerts.append({
                 "id": hash(f["cve"]) % 10000,
                 "module": "SPECTRUM",
-                "message": f"CISA KEV Alert: {f['cve']} â€” {f['title']} (Ransomware-linked, CVSS {f['cvss']})",
+                "message": f"CISA KEV Alert: {f['cve']} — {f['title']} (Ransomware-linked, CVSS {f['cvss']})",
                 "time": f.get("dateAdded", ""),
                 "type": "critical"
             })
@@ -40,7 +40,7 @@ def get_dashboard_data(db: Session = None):
 
 
         from models import Finding, AuditLog, SurgeSubmission
-        final_rows = db.query(Finding).filter(Finding.id >= "F-7000", Finding.id < "F-8000").all()
+        final_rows = db.query(Finding).filter(Finding.id >= "F-7000", Finding.id < "F-8000", Finding.tenant_id == tenant_id).all()
         nhi_count = 0
         blflaw_count = 0
         for row in final_rows:
@@ -49,7 +49,7 @@ def get_dashboard_data(db: Session = None):
                 nhi_count += 1
             if ftype == "BLFLAW":
                 blflaw_count += 1
-        auto_edip = db.query(AuditLog).filter(AuditLog.module == "EDIP", AuditLog.action.like("AUTO_%")).all()
+        auto_edip = db.query(AuditLog).filter(AuditLog.module == "EDIP", AuditLog.action.like("AUTO_%"), AuditLog.tenant_id == tenant_id).all()
         complete_auto = sum(1 for a in auto_edip if all(k in (a.metadata_ or {}) for k in ("agent_identity", "authority_granted", "tool_used", "evidence_generated", "revocation_path", "under_policy_control")))
         surge_open = db.query(SurgeSubmission).filter(SurgeSubmission.status.in_(["submitted", "triaged"])).count()
         final_update = {
@@ -88,7 +88,8 @@ def get_dashboard_data(db: Session = None):
 
 @router.get("/dashboard")
 def dashboard(db: Session = Depends(get_db), user = Depends(get_current_user)):
-    data = get_dashboard_data(db)
+    tenant_id = user.get("tenant_id", "tempris")
+    data = get_dashboard_data(db, tenant_id=tenant_id)
 
     # Compute TES trend from DB snapshots
     tes_trend = "+0.0"
@@ -110,8 +111,9 @@ def dashboard(db: Session = Depends(get_db), user = Depends(get_current_user)):
 @router.post("/tes-snapshot")
 def take_tes_snapshot(db: Session = Depends(get_db), user = Depends(get_current_user)):
     """Manually trigger a TES snapshot (also called on startup)."""
-    data = get_dashboard_data(db)
-    stats = data.get("_stats", get_finding_stats(db))
+    tenant_id = user.get("tenant_id", "tempris")
+    data = get_dashboard_data(db, tenant_id=tenant_id)
+    stats = data.get("_stats", get_finding_stats(db, tenant_id=tenant_id))
 
     snapshot = TesSnapshot(
         aggregate_tes=data["aggregate_tes"],

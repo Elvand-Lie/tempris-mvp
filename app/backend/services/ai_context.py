@@ -22,7 +22,7 @@ def sanitize_user_focus(text: str, limit: int = 500) -> str:
     return cleaned[:limit]
 
 
-def build_full_context(db: Session) -> dict:
+def build_full_context(db: Session, tenant_id: str = "tempris") -> dict:
     """Build a comprehensive context dict from every Tempris module.
     
     Returns:
@@ -36,7 +36,7 @@ def build_full_context(db: Session) -> dict:
     # â”€â”€ 1. SPECTRUM â€” TES Score â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
         from routers.synthesis import get_dashboard_data
-        dashboard = get_dashboard_data()
+        dashboard = get_dashboard_data(db, tenant_id=tenant_id)
         tes_score = dashboard.get("aggregate_tes", 0)
         module_health = dashboard.get("module_health", [])
         alerts = dashboard.get("alerts", [])
@@ -61,14 +61,14 @@ Active Alerts:
     try:
         from services.kev_loader import get_finding_stats, get_top_critical_findings
 
-        stats = get_finding_stats(db)
+        stats = get_finding_stats(db, tenant_id=tenant_id)
         total = stats["total_findings"]
         kev_count = stats["kev_count"]
         critical_count = stats["critical_count"]
         high_count = stats["high_count"]
         ransomware_count = stats["ransomware_linked"]
 
-        top5_findings = get_top_critical_findings(db, limit=5)
+        top5_findings = get_top_critical_findings(db, limit=5, tenant_id=tenant_id)
         top5 = ""
         for f in top5_findings:
             top5 += f"  - {f['cve']}: {f['title']} (Vendor: {f.get('vendor','?')}, CVSS: {f.get('cvss',0)}, Ransomware: {f.get('ransomware', False)})\n"
@@ -95,7 +95,7 @@ Top 5 Critical CVEs:
     # Final v54 update pack - threat and governance deltas
     try:
         from models import Finding, AuditLog, SurgeSubmission
-        final_rows = db.query(Finding).filter(Finding.id >= "F-7000", Finding.id < "F-8000").all()
+        final_rows = db.query(Finding).filter(Finding.id >= "F-7000", Finding.id < "F-8000", Finding.tenant_id == tenant_id).all()
         nhi = 0
         blflaw = 0
         citrix = 0
@@ -109,7 +109,7 @@ Top 5 Critical CVEs:
                 blflaw += 1
             if source == "CITRIX_BATCH":
                 citrix += 1
-        auto_edip = db.query(AuditLog).filter(AuditLog.module == "EDIP", AuditLog.action.like("AUTO_%")).all()
+        auto_edip = db.query(AuditLog).filter(AuditLog.module == "EDIP", AuditLog.action.like("AUTO_%"), AuditLog.tenant_id == tenant_id).all()
         complete_auto = sum(1 for a in auto_edip if all(k in (a.metadata_ or {}) for k in ("agent_identity", "authority_granted", "tool_used", "evidence_generated", "revocation_path", "under_policy_control")))
         metadata_pct = round((complete_auto / len(auto_edip) * 100), 1) if auto_edip else 100.0
         surge_open = db.query(SurgeSubmission).filter(SurgeSubmission.status.in_(["submitted", "triaged"])).count()
@@ -131,7 +131,7 @@ Top 5 Critical CVEs:
     # â”€â”€ 3. ASSET INVENTORY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
         from models import Asset
-        assets = db.query(Asset).filter(Asset.status == "active").all()
+        assets = db.query(Asset).filter(Asset.status == "active", Asset.tenant_id == tenant_id).all()
         total_assets = len(assets)
 
         by_type = {}
@@ -166,7 +166,7 @@ Critical Assets:
     # â”€â”€ 4. SCANNER FINDINGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
         from models import ScanFinding
-        scan_findings = db.query(ScanFinding).order_by(ScanFinding.discovered_at.desc()).limit(50).all()
+        scan_findings = db.query(ScanFinding).filter(ScanFinding.tenant_id == tenant_id).order_by(ScanFinding.discovered_at.desc()).limit(50).all()
         total_scans = len(scan_findings)
 
         by_risk = {}
@@ -195,7 +195,9 @@ Latest Findings:
     # â”€â”€ 5. STRIKE â€” Adversary Simulations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
         from models import StrikeSimulation, StrikeAuthorization
-        latest_sim = db.query(StrikeSimulation).order_by(
+        latest_sim = db.query(StrikeSimulation).join(StrikeAuthorization).filter(
+            StrikeAuthorization.tenant_id == tenant_id
+        ).order_by(
             StrikeSimulation.started_at.desc()
         ).first()
 
@@ -242,7 +244,7 @@ Technique Breakdown:
         from routers.standard import FRAMEWORKS
         from models import ControlStatus, IncidentReport
 
-        all_statuses = db.query(ControlStatus).all()
+        all_statuses = db.query(ControlStatus).filter(ControlStatus.tenant_id == tenant_id).all()
         status_map = {}
         for cs in all_statuses:
             status_map[(cs.framework_id, cs.control_id)] = cs.status
@@ -284,7 +286,7 @@ Framework Scores:
 Non-compliant Controls:
 {nc_text.rstrip() if nc_text else '  All controls compliant.'}""")
 
-        latest_incident = db.query(IncidentReport).order_by(IncidentReport.generated_at.desc()).first()
+        latest_incident = db.query(IncidentReport).filter(IncidentReport.tenant_id == tenant_id).order_by(IncidentReport.generated_at.desc()).first()
         if latest_incident and latest_incident.payload:
             structured["latest_incident_report"] = latest_incident.payload
 
@@ -441,9 +443,9 @@ def format_rag_context(results: list[dict]) -> str:
     return rag_text
 
 
-def build_service_ai_context(db: Session, query: str = "", n_results: int = 5, extra_query: str = "") -> dict:
+def build_service_ai_context(db: Session, query: str = "", n_results: int = 5, extra_query: str = "", tenant_id: str = "tempris") -> dict:
     """Shared service-wide context bundle for SPEAK and SPOTLIGHT."""
-    ctx = build_full_context(db)
+    ctx = build_full_context(db, tenant_id=tenant_id)
     structured = ctx["structured"]
     live_signal = " ".join([
         f"TES {structured.get('tes_score', 0)}",

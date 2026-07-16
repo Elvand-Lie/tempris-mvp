@@ -1,0 +1,218 @@
+version: "2026-07-16"
+source_of_truth: TEMPRIS_AGENT_EXECUTION_PRD.md
+status_values: [not_started, blocked, in_progress, review, done]
+model_routing:
+  executor: gemini-3.5-flash
+  architect_reviewer: gemini-3.1-pro
+phases:
+  - id: phase-0
+    name: Repository inventory
+    tasks: [T-000]
+  - id: phase-1
+    name: Pentest remediation
+    tasks: [SEC-F1, SEC-I1, SEC-F2, SEC-F3, SEC-F4, SEC-I3, SEC-I4, SEC-H2, SEC-I2]
+  - id: phase-2
+    name: Secure software factory
+    tasks: [SDLC-S01, SDLC-S02, SDLC-S03, SDLC-S04, SDLC-S05]
+  - id: phase-3
+    name: Generic EDIP and SSS core
+    tasks: [CORE-C03, CORE-C01, CORE-C02, CORE-C05, CORE-C04, CORE-C06, CORE-C07, CORE-D03]
+  - id: phase-4
+    name: Business logic flaw intake
+    tasks: [BL-B02, BL-B01]
+  - id: phase-5
+    name: Partner programme and tenancy
+    tasks: [PARTNER-D02, PARTNER-P04, PARTNER-D01, PARTNER-P01, PARTNER-P03]
+  - id: phase-6
+    name: Reporting and demo
+    tasks: [REPORT-C08, PARTNER-P02]
+  - id: phase-7
+    name: Threat data packs
+    tasks: [THREAT-T01, THREAT-T02, PACK-AI-SUPPLY, PACK-JCE, PACK-DEFENSIVE, PACK-ENTRA, PACK-FINANCIAL, PACK-IONSTACK, PACK-NEW-THREATS]
+  - id: phase-8
+    name: AEV
+    tasks: [AEV-D04, AEV-A01]
+  - id: phase-9
+    name: Controlled infrastructure
+    tasks: [OPS-I02, OPS-I01]
+tasks:
+  T-000:
+    priority: P0
+    depends_on: []
+    outcome: Actual repository map and passing baseline recorded.
+  SEC-F1:
+    priority: P0
+    depends_on: [T-000]
+    outcome: Audit actor and IP are server-derived and attribution tampering fails verification.
+  SEC-I1:
+    priority: P0
+    depends_on: [T-000]
+    outcome: Demo credentials cannot be used outside an explicit demo environment.
+  SEC-F2:
+    priority: P2
+    depends_on: [T-000]
+    outcome: Invalid EDIP decisions return 422 without mutation.
+  SEC-F3:
+    priority: P1
+    depends_on: [T-000]
+    outcome: Evidence downloads enforce tenant and object authorization.
+  SEC-F4:
+    priority: P2
+    depends_on: [SEC-F3]
+    outcome: Evidence downloads are attachments with nosniff and safe content types.
+  SEC-I3:
+    priority: P2
+    depends_on: [T-000]
+    outcome: Logout/session revocation invalidates tokens before expiry.
+  SEC-I4:
+    priority: P2
+    depends_on: [T-000]
+    outcome: Known PoC/test artifacts are safely removed from staging.
+  SEC-H2:
+    priority: P2
+    depends_on: [T-000]
+    outcome: CSP script-src no longer requires unsafe-inline.
+  SEC-I2:
+    priority: P2
+    depends_on: [T-000]
+    outcome: SPEAK has second-order prompt-injection regression coverage and data isolation.
+  SDLC-S01:
+    priority: P0
+    depends_on: [T-000]
+    outcome: CI blocks policy-defined vulnerable dependencies.
+  SDLC-S02:
+    priority: P0
+    depends_on: [T-000]
+    outcome: Pre-commit/CI/historical secret scans and rotation playbook exist.
+  SDLC-S03:
+    priority: P0
+    depends_on: [SDLC-S01]
+    outcome: Every release carries a parseable CycloneDX or SPDX SBOM.
+  SDLC-S04:
+    priority: P0
+    depends_on: [SDLC-S03]
+    outcome: Artifacts and provenance are signed and verifiable before deployment.
+  SDLC-S05:
+    priority: P0
+    depends_on: [T-000]
+    outcome: AI-assisted changes require review, tests, source validation, and approval.
+  CORE-C03:
+    priority: P0
+    depends_on: [T-000]
+    outcome: Global allowlist prevents scoring internals in APIs and logs.
+  CORE-C01:
+    priority: P0
+    depends_on: [CORE-C03]
+    outcome: Standard and synthetic findings are first-class generic records.
+  CORE-C02:
+    priority: P0
+    depends_on: [CORE-C01]
+    outcome: Confirmed, disputed, and single-source evidence states are enforced.
+  CORE-C05:
+    priority: P0
+    depends_on: [SEC-F1, CORE-C01]
+    outcome: Automated actions include complete agent-governance audit metadata.
+  CORE-C04:
+    priority: P0
+    depends_on: [CORE-C03, CORE-C05]
+    outcome: Scoring endpoints enforce distributed rate limits and probe detection.
+  CORE-C06:
+    priority: P1
+    depends_on: [CORE-C01]
+    outcome: Generic relationship model supports chain, actor, and meta-pattern grouping.
+  CORE-C07:
+    priority: P1
+    depends_on: [CORE-C01]
+    outcome: Controls are primary visible remediation for no-patch findings.
+  CORE-D03:
+    priority: P0
+    depends_on: [CORE-C01, CORE-C02, CORE-C06, CORE-C07]
+    outcome: One generic FindingDetail renders all supplied threat types.
+  BL-B02:
+    priority: P0
+    depends_on: [CORE-C03]
+    outcome: BL-flaw design uses private scoring and public final outcomes only.
+  BL-B01:
+    priority: P1
+    depends_on: [BL-B02, CORE-C01, CORE-C05]
+    outcome: Tenant-scoped BL-flaw intake and lifecycle work end to end.
+  PARTNER-D02:
+    priority: P0
+    depends_on: [T-000]
+    outcome: Partners use scoped platform accounts; production SSH is internal-only.
+  PARTNER-P04:
+    priority: P1
+    depends_on: [PARTNER-D02, CORE-C01]
+    outcome: Automated tests prove cross-tenant isolation for all sensitive resources.
+  PARTNER-D01:
+    priority: P0
+    depends_on: [PARTNER-P04]
+    outcome: Data-flow and legal-review draft match the implemented operating model.
+  PARTNER-P01:
+    priority: P0
+    depends_on: [T-000]
+    outcome: Partner RACI and escalation ownership are documented.
+  PARTNER-P03:
+    priority: P1
+    depends_on: [PARTNER-D02, PARTNER-P01]
+    outcome: Onboarding, checkpoints, certification, expiry, and renewal are tracked.
+  REPORT-C08:
+    priority: P1
+    depends_on: [CORE-D03, PARTNER-P04]
+    outcome: Versioned tenant-scoped risk, gap, audit, and combined reports are generated.
+  PARTNER-P02:
+    priority: P1
+    depends_on: [REPORT-C08, PARTNER-P03]
+    outcome: Resettable fictional-client CTEM/EDIP demo and script are ready.
+  THREAT-T01:
+    priority: P1
+    depends_on: [CORE-D03]
+    outcome: Versioned idempotent threat-pack importer with validation and rollback exists.
+  THREAT-T02:
+    priority: P1
+    depends_on: [THREAT-T01, CORE-C02]
+    outcome: Sources carry verification and freshness metadata.
+  PACK-AI-SUPPLY:
+    priority: P1
+    depends_on: [THREAT-T01, THREAT-T02]
+    outcome: AI supply-chain findings, claims, and controls are imported as data.
+  PACK-JCE:
+    priority: P1
+    depends_on: [THREAT-T01, THREAT-T02]
+    outcome: JCE finding and authorized-sandbox simulation reference are imported.
+  PACK-DEFENSIVE:
+    priority: P1
+    depends_on: [THREAT-T01, CORE-C06]
+    outcome: Defensive-tooling findings share a meta-pattern relationship.
+  PACK-ENTRA:
+    priority: P1
+    depends_on: [THREAT-T01, CORE-C06]
+    outcome: Entra findings and controls are imported with evidence state.
+  PACK-FINANCIAL:
+    priority: P1
+    depends_on: [THREAT-T01, THREAT-T02]
+    outcome: PaymentSDK and ArcGIS records are imported with controls.
+  PACK-IONSTACK:
+    priority: P1
+    depends_on: [THREAT-T01, CORE-C06]
+    outcome: Two IonStack findings render as one ordered attack chain.
+  PACK-NEW-THREATS:
+    priority: P1
+    depends_on: [THREAT-T01, THREAT-T02]
+    outcome: Confirmed, enrichment, synthetic, and watch records preserve their semantics.
+  AEV-D04:
+    priority: P0
+    depends_on: [PARTNER-P01]
+    outcome: Five AEV module contracts are completed and approved.
+  AEV-A01:
+    priority: P2
+    depends_on: [AEV-D04, CORE-C05, REPORT-C08]
+    outcome: Disabled-by-default AEV registry, lifecycle, safety gate, evidence, and reporting shell exists.
+  OPS-I02:
+    priority: P1
+    depends_on: [T-000]
+    outcome: Product/content tasks and operations changes are separate workflows.
+  OPS-I01:
+    priority: P0
+    depends_on: [OPS-I02]
+    outcome: Approved sandbox hardening runbook executes with backup, rollback, and evidence.

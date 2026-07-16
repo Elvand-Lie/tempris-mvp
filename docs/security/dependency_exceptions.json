@@ -1,0 +1,11 @@
+{
+  "exceptions": [
+    {
+      "package": "requests",
+      "cve": "CVE-2023-32681",
+      "owner": "security-team",
+      "reason": "Internal redirected traffic is trusted; risk accepted.",
+      "expiry": "2026-12-31T23:59:59Z"
+    }
+  ]
+}
