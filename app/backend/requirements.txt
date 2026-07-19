@@ -8,6 +8,7 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-multipart==0.0.32
 chromadb==0.4.24
+posthog==5.4.0
 numpy<2.0
 requests==2.33.0
 # M-03: Consider adding alembic for schema migrations in future
