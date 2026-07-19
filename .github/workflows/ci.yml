@@ -55,25 +55,25 @@ jobs:
           npm test
           npm audit
 
-      - name: SDLC-S01: Dependency Vulnerability Scanning
+      - name: "SDLC-S01: Dependency Vulnerability Scanning"
         run: |
           python scripts/ci/scan_dependencies.py
 
-      - name: SDLC-S02: Secret Scanning
+      - name: "SDLC-S02: Secret Scanning"
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: SDLC-S03: Generate SBOM (CycloneDX JSON)
+      - name: "SDLC-S03: Generate SBOM (CycloneDX JSON)"
         run: |
           python scripts/ci/generate_sbom.py
 
-      - name: SDLC-S04: Provenance Signature Verification
+      - name: "SDLC-S04: Provenance Signature Verification"
         env:
           PROVENANCE_SIGNING_KEY: ${{ secrets.PROVENANCE_SIGNING_KEY }}
         run: |
           python scripts/ci/sign_provenance.py
 
-      - name: SDLC-S05: AI-Assisted Release Gates
+      - name: "SDLC-S05: AI-Assisted Release Gates"
         run: |
           python scripts/ci/ai_review_gate.py
