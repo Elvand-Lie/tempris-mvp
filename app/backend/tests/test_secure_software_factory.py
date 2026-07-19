@@ -16,6 +16,8 @@ def test_secure_software_factory_ci_pipeline():
     env_clean["SCAN_MOCK_FALLBACK"] = "1"
     env_clean["SCAN_MOCK_CLEAN"] = "1"
     env_clean["PROVENANCE_SIGNING_KEY"] = "test-only-provenance-key"
+    env_clean.pop("CI", None)
+    env_clean.pop("GITHUB_ACTIONS", None)
     
     res_dep = subprocess.run(["python", "scripts/ci/scan_dependencies.py"], capture_output=True, text=True, env=env_clean)
     assert res_dep.returncode == 0
@@ -25,6 +27,8 @@ def test_secure_software_factory_ci_pipeline():
     env_fail = os.environ.copy()
     env_fail["SCAN_MOCK_FALLBACK"] = "1"
     env_fail["SCAN_MOCK_CLEAN"] = "0"
+    env_fail.pop("CI", None)
+    env_fail.pop("GITHUB_ACTIONS", None)
     
     res_dep_fail = subprocess.run(["python", "scripts/ci/scan_dependencies.py"], capture_output=True, text=True, env=env_fail)
     assert res_dep_fail.returncode == 1
@@ -115,10 +119,14 @@ def test_scanner_ci_enforcement_and_unavailability():
     env_ci["CI"] = "true"
     env_ci["SCAN_MOCK_FALLBACK"] = "1"
     
-    # Dependencies scanner should try to invoke real pip-audit and fail with TOOL_UNAVAILABLE since it is absent locally
+    # Dependencies scanner must invoke real pip-audit when it is available.
     res_dep = subprocess.run(["python", "scripts/ci/scan_dependencies.py"], capture_output=True, text=True, env=env_ci)
-    assert res_dep.returncode == 1
-    assert "TOOL_UNAVAILABLE" in res_dep.stdout
+    if shutil.which("pip-audit"):
+        assert res_dep.returncode == 0
+        assert "CI Policy Check: PASSED" in res_dep.stdout
+    else:
+        assert res_dep.returncode == 1
+        assert "TOOL_UNAVAILABLE" in res_dep.stdout
     
     # Secrets scanner must invoke the real Gitleaks binary when available.
     res_sec = subprocess.run(["python", "scripts/ci/scan_secrets.py"], capture_output=True, text=True, env=env_ci)
@@ -129,11 +137,16 @@ def test_scanner_ci_enforcement_and_unavailability():
         assert res_sec.returncode == 1
         assert "TOOL_UNAVAILABLE" in res_sec.stdout
 
-    # 2. Ordinary local run without fallback fails with TOOL_UNAVAILABLE
+    # 2. Ordinary local run uses the real scanner when available.
     env_local = os.environ.copy()
     env_local.pop("SCAN_MOCK_FALLBACK", None)
     env_local.pop("CI", None)
+    env_local.pop("GITHUB_ACTIONS", None)
     
     res_dep_local = subprocess.run(["python", "scripts/ci/scan_dependencies.py"], capture_output=True, text=True, env=env_local)
-    assert res_dep_local.returncode == 1
-    assert "TOOL_UNAVAILABLE" in res_dep_local.stdout
+    if shutil.which("pip-audit"):
+        assert res_dep_local.returncode == 0
+        assert "CI Policy Check: PASSED" in res_dep_local.stdout
+    else:
+        assert res_dep_local.returncode == 1
+        assert "TOOL_UNAVAILABLE" in res_dep_local.stdout

@@ -118,14 +118,14 @@ def test_duplicated_passwords_rejected():
     assert "Shared/duplicated passwords are not permitted" in str(excinfo.value)
 
 # 8. Staging and production refuse missing or weak HMAC keys
-def test_staging_production_refuse_weak_hmac_keys():
+def test_staging_production_refuse_weak_hmac_keys(tmp_path):
     os.environ["ENVIRONMENT"] = "production"
     os.environ["TEMPRIS_PASS_SUPERADMIN"] = "sec1"
     os.environ["TEMPRIS_PASS_ADMIN"] = "sec2"
     os.environ["TEMPRIS_PASS_ANALYST"] = "sec3"
     os.environ["TEMPRIS_PASS_VIEWER"] = "sec4"
     os.environ["TEMPRIS_PASS_READONLY"] = "sec5"
-    os.environ["EVIDENCE_STORAGE_ROOT"] = "C:\\tempris_evidence_root"
+    os.environ["EVIDENCE_STORAGE_ROOT"] = str(tmp_path)
     
     # CASE A: Key is missing
     import index
@@ -143,7 +143,7 @@ def test_staging_production_refuse_weak_hmac_keys():
         importlib.reload(index)
 
 # 9. Valid staging and production configuration succeeds
-def test_valid_production_configuration_succeeds():
+def test_valid_production_configuration_succeeds(tmp_path):
     os.environ["ENVIRONMENT"] = "production"
     os.environ["TEMPRIS_PASS_SUPERADMIN"] = "sec1"
     os.environ["TEMPRIS_PASS_ADMIN"] = "sec2"
@@ -151,7 +151,7 @@ def test_valid_production_configuration_succeeds():
     os.environ["TEMPRIS_PASS_VIEWER"] = "sec4"
     os.environ["TEMPRIS_PASS_READONLY"] = "sec5"
     os.environ["AUDIT_HMAC_KEY"] = "very_long_secure_hmac_secret_key_exceeding_32_bytes_long_123"
-    os.environ["EVIDENCE_STORAGE_ROOT"] = "C:\\tempris_evidence_root"
+    os.environ["EVIDENCE_STORAGE_ROOT"] = str(tmp_path)
     
     import routers.auth
     import routers.audit

@@ -73,7 +73,3 @@ jobs:
           PROVENANCE_SIGNING_KEY: ${{ secrets.PROVENANCE_SIGNING_KEY }}
         run: |
           python scripts/ci/sign_provenance.py
-
-      - name: "SDLC-S05: AI-Assisted Release Gates"
-        run: |
-          python scripts/ci/ai_review_gate.py

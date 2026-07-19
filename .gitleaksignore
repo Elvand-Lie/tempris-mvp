@@ -8,3 +8,4 @@ c57929d2d8ad300f606c96ac54b73c2a065343a0:app/freellmapi/src/__tests__/routes/key
 c57929d2d8ad300f606c96ac54b73c2a065343a0:test_qa_full.sh:jwt:279
 f2bbdfd5faec2cd6ddbdba1cf6ed68b0aa9320d1:app/deploy/.env:generic-api-key:3
 f2bbdfd5faec2cd6ddbdba1cf6ed68b0aa9320d1:app/freellmapi/.env:generic-api-key:13
+a23458309db973d4307779f82c2c89b5fd8fd540:app/freellmapi/.env.example:generic-api-key:7

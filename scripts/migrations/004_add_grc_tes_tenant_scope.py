@@ -61,7 +61,7 @@ def database_url(args: argparse.Namespace) -> str:
 
 
 def _stamp() -> str:
-    return datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    return datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
 
 
 def _sqlite_backup_path(source: Path, requested: Path | None) -> Path:
