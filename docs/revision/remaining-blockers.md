@@ -36,3 +36,16 @@ Execution date: 2026-07-19
 ## Verdict
 
 BLOCKED
+
+## Release Update
+
+The historical release blockers above were resolved for the user-authorized 2026-07-19 production deployment.
+
+- Commit `dae867dda7dc603c5b7bb7a3de775b06c2325a07` is pushed and deployed.
+- No runnable staging environment exists, so the production migration used an explicit tenant ID, a verified PostgreSQL backup, a dry-run, post-apply schema/count validation, and an idempotency rerun.
+- The VPS remains a non-Git deployment copy. A verified source archive was used with an application rollback archive and preserved runtime data directories.
+- Local release validation and non-destructive Nginx production smoke checks passed. GitHub Actions was not treated as the deployment gate.
+
+Remaining limitations are product scope limitations, not release blockers: editable product frontend source and official logo assets are absent; package entitlement and PDF export are unavailable; and AEV remains disabled.
+
+RELEASED_AND_VERIFIED

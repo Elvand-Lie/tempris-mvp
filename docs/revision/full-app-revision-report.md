@@ -155,3 +155,20 @@ Execution date: 2026-07-19
 
 Final release verdict: BLOCKED
 - git diff --check: passed after final documentation edits.
+
+## Deployment Completion
+
+Execution date: 2026-07-19
+
+- Release source commit `dae867dda7dc603c5b7bb7a3de775b06c2325a07` was pushed to `vps-prod-complete` and deployed to the approved VPS.
+- The GitHub workflow retains deterministic build, test, dependency, secret, SBOM, and provenance checks. The keyword-based AI walkthrough gate was removed. GitHub Actions was not used as the production deployment gate for this user-authorized release.
+- Local validation passed: compileall; 154 backend tests; temporary-database smoke test; FreeLLMAPI npm ci, build, 137 tests, and npm audit; pip-audit; full-history Gitleaks; SBOM generation; and local HMAC provenance verification.
+- Full-history Gitleaks scanned 26 commits with no leaks. The only new baseline entry is an exact fingerprint for an invalid historical `.env.example` placeholder, not a secret value.
+- Migration 004 used the explicit legacy tenant ID `tempris`. Its production dry-run found 136 unassigned legacy rows with no ownership hints. After a verified PostgreSQL backup, apply created all four tenant columns and indexes, assigned every row, preserved row counts, and a second apply verified idempotency.
+- The deployment source archive SHA-256 was verified on the VPS. It excluded `backend/data` and `freellmapi/data`, preserving mounted production evidence, database, and vector data.
+- The first guarded deployment rolled back after the static frontend mount inherited restrictive permissions from a backup extraction. The prior source was restored, normal static read permissions were restored, and the corrected retry deployed successfully. No database rollback was required.
+- Post-deployment Nginx smoke test passed: static UI 200, health 200, login 200, protected Synthesis 200, CISO summary 200, audit log 200, logout 200, and revoked-token reuse 401. Backend restart count, traceback count, tenant-scope failure count, and secret-pattern log count were all zero at verification.
+- The production smoke test did not create fictional cross-tenant objects or reports. Those write paths and cross-tenant rejection are covered by the automatic temporary-database smoke test.
+- `app/frontend/index.html` remains an unrelated uncommitted compiled-bundle pointer change. It was excluded from the Git commit and source archive.
+
+Current release verdict: RELEASED_AND_VERIFIED
