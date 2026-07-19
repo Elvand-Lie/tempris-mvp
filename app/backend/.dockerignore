@@ -13,3 +13,6 @@ __pycache__
 .idea
 tempris.db
 node_modules
+data/
+backups/
+.pytest_cache/
