@@ -2,9 +2,9 @@ name: Tempris Unified CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, vps-prod-complete ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, vps-prod-complete ]
 
 jobs:
   validate-and-scan:
