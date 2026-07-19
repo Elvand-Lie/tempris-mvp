@@ -37,3 +37,23 @@ def test_direct_index_and_spa_fallback_are_not_cached():
 
     assert client.get("/index.html").headers["cache-control"] == "no-store, max-age=0"
     assert client.get("/synthesis").headers["cache-control"] == "no-store, max-age=0"
+
+
+def test_legacy_frontend_serves_native_style_module_extension_and_branding():
+    client = TestClient(app)
+
+    index = client.get("/")
+    script = client.get("/extensions/tempris-modules.js")
+    stylesheet = client.get("/extensions/tempris-modules.css")
+    logo = client.get("/brand/tempris-logo-light.png")
+
+    assert 'src="/assets/index-DUrFdX-d.js"' in index.text
+    assert 'src="/extensions/tempris-modules.js"' in index.text
+    assert 'href="/extensions/tempris-modules.css"' in index.text
+    assert script.status_code == 200
+    assert "'/api/ciso/summary'" in script.text
+    assert "'/packages'" in script.text
+    assert stylesheet.status_code == 200
+    assert ".tmx-page" in stylesheet.text
+    assert logo.status_code == 200
+    assert logo.headers["content-type"] == "image/png"
