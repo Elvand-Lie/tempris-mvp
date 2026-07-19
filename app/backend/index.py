@@ -675,10 +675,17 @@ if FRONTEND_DIR.exists():
     # Serve static assets (JS, CSS, images)
     app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR / "assets")), name="static_assets")
 
+    # The HTML bootstrap selects a hashed client bundle. Never let an older
+    # bootstrap page keep selecting a retired bundle after a deployment.
+    SPA_INDEX_HEADERS = {"Cache-Control": "no-store, max-age=0"}
+
+    def serve_spa_index() -> FileResponse:
+        return FileResponse(str(FRONTEND_DIR / "index.html"), headers=SPA_INDEX_HEADERS)
+
     # Serve root as SPA index
     @app.get("/")
     async def serve_root():
-        return FileResponse(str(FRONTEND_DIR / "index.html"))
+        return serve_spa_index()
     # Serve VDP policy page at /security (public, no auth)
     DOCS_DIR = Path(__file__).resolve().parent / "docs"
     if not DOCS_DIR.exists():
@@ -709,8 +716,10 @@ if FRONTEND_DIR.exists():
         if not str(file_path).startswith(str(FRONTEND_DIR.resolve())):
             raise HTTPException(status_code=403, detail="Forbidden")
         if file_path.is_file():
+            if file_path == (FRONTEND_DIR / "index.html").resolve():
+                return serve_spa_index()
             return FileResponse(str(file_path))
-        return FileResponse(str(FRONTEND_DIR / "index.html"))
+        return serve_spa_index()
 
 if __name__ == "__main__":
     import uvicorn
