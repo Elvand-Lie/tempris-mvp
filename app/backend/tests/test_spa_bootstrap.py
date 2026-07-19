@@ -29,7 +29,10 @@ def test_spa_bootstrap_is_not_cached_and_uses_token_persisting_bundle():
     bundle = client.get(bundle_match.group(1))
 
     assert bundle.status_code == 200
-    assert "localStorage.setItem(`tempris_token`" in bundle.text
+    # Bundlers may hoist the key into a minified constant. Assert the session
+    # contract rather than one emitted JavaScript expression.
+    assert "tempris_token" in bundle.text
+    assert "localStorage.setItem" in bundle.text
 
 
 def test_direct_index_and_spa_fallback_are_not_cached():
