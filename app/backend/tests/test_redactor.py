@@ -117,3 +117,16 @@ def test_global_redactor_strips_private_fields():
         assert "cve" in f
         assert "tes_score" in f
         assert "tes_decision" in f
+
+
+def test_global_redactor_strips_scoring_keys_case_insensitively():
+    from services.redactor import redact_private_fields
+
+    result = redact_private_fields({
+        "agm": 1.1,
+        "DRF": 0.8,
+        "TeF": 0.6,
+        "nested": {"AGM": 1.2, "safe": "kept"},
+    })
+
+    assert result == {"nested": {"safe": "kept"}}

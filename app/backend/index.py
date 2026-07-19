@@ -21,7 +21,7 @@ logger = logging.getLogger("tempris")
 # Add the api directory to the Python path for Vercel Serverless
 sys.path.append(os.path.dirname(__file__))
 
-from routers import auth, spectrum, audit, synthesis, scout, scanner, strike, standard, assets, grc, edip, surge, blflaw, partner, reports, aev, ocq, threats
+from routers import auth, spectrum, audit, synthesis, scout, scanner, strike, standard, assets, grc, edip, surge, blflaw, partner, reports, aev, ocq, threats, ciso
 from routers.audit import append_to_audit_log, AuditEntry
 from routers.auth import get_current_user
 from services.kev_loader import ensure_findings_seeded, get_finding_stats
@@ -89,6 +89,7 @@ app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
 app.include_router(aev.router, prefix="/api/aev", tags=["aev"])
 app.include_router(ocq.router, prefix="/api/ocq", tags=["ocq"])
 app.include_router(threats.router, prefix="/api/threats", tags=["threats"])
+app.include_router(ciso.router, prefix="/api/ciso", tags=["ciso"])
 
 # ─ Startup: Init DB, Seed data ──────────────────────────────────────────────────
 
@@ -123,10 +124,11 @@ def startup():
                 data = get_dashboard_data(db)
             else:
                 data = get_dashboard_data()
-            existing = db.query(TesSnapshot).count()
+            existing = db.query(TesSnapshot).filter(TesSnapshot.tenant_id == 'tempris').count()
             if existing == 0:
                 stats = get_finding_stats(db)
                 db.add(TesSnapshot(
+                    tenant_id='tempris',
                     aggregate_tes=data["aggregate_tes"],
                     finding_count=stats["total_findings"],
                     critical_count=stats["critical_count"]
@@ -404,7 +406,7 @@ def speak_chat(
         db.commit()
         append_to_audit_log(AuditEntry(
             user=user_email, action="SPEAK_AI_CALL", module="SPEAK",
-            detail=f"AI query: '{chat.message[:80]}' â€” responded successfully"
+            detail=f"AI query: '{chat.message[:80]}' - responded successfully"
         ))
         return {"response": response, "sources": ["All Modules", "FreeLLMAPI", *rag_sources], "session_id": session.id}
     except Exception as e:
@@ -423,7 +425,7 @@ def speak_chat(
             by_type = structured.get("assets_by_type", {})
             critical_assets = structured.get("critical_assets", [])
             type_text = ", ".join([f"{k}: {v}" for k, v in by_type.items()])
-            asset_lines = "\n".join([f"- **{a['id']}**: {a['name']} ({a['type']}) â€” IP: {a.get('ip', 'N/A')}" for a in critical_assets[:5]])
+            asset_lines = "\n".join([f"- **{a['id']}**: {a['name']} ({a['type']}) - IP: {a.get('ip', 'N/A')}" for a in critical_assets[:5]])
             fallback = f"Your asset inventory contains **{asset_count} active assets** ({type_text}). Here are the critical-rated assets:\n\n{asset_lines}\n\nUse the Asset Inventory module for full details, or ask me about a specific asset."
         elif "strike" in query_lower or "simulation" in query_lower or "red team" in query_lower:
             sim_id = structured.get("strike_sim_id")
@@ -450,7 +452,7 @@ def speak_chat(
             total_controls = structured.get("compliance_total_controls", 0)
             compliant = structured.get("compliance_compliant", 0)
             non_compliant = structured.get("compliance_non_compliant", 0)
-            gaps_text = "\n".join([f"- âš  {g}" for g in compliance_gaps[:5]])
+            gaps_text = "\n".join([f"- WARNING: {g}" for g in compliance_gaps[:5]])
             fallback = f"Across **8 regulatory frameworks**, you have **{compliant}/{total_controls} controls compliant** with **{non_compliant} non-compliant**.\n\nNon-compliant controls:\n{gaps_text}\n\nRemediation priority: Focus on MAS TRM 11.1.1 (patching) and IM8A AM-3 (patch management) which carry regulatory penalties."
         elif "grc" in query_lower or "iso 42001" in query_lower or "ai governance" in query_lower:
             grc = structured.get("grc_tes", {})
@@ -527,7 +529,7 @@ def generate_spotlight_report(
     if rag_text:
         system_prompt += f"\n\n{rag_text}"
     if req.custom_focus.strip():
-        system_prompt += f"\n\nâ•â•â• USER FOCUS AREA â•â•â•\nThe user has specifically requested: {req.custom_focus.strip()}\nPrioritize this area in your report while still covering all sections."
+        system_prompt += f"\n\n=== USER FOCUS AREA ===\nThe user has specifically requested: {req.custom_focus.strip()}\nPrioritize this area in your report while still covering all sections."
 
     try:
         from services.llm_client import chat_completion
@@ -568,7 +570,7 @@ def generate_spotlight_report(
         # Build compliance gap text
         gaps_text = ""
         for g in compliance_gaps[:5]:
-            gaps_text += f"\nâ€¢ {g}"
+            gaps_text += f"\n- {g}"
 
         narrative = f"""## Security Posture Overview
 
@@ -578,7 +580,7 @@ The organization manages **{asset_count} active assets** across its infrastructu
 
 ## Key Risk Highlights
 
-The primary driver of elevated risk is **{top_cve.get('cve', 'N/A')}** â€” {top_cve.get('title', 'N/A')}, affecting {top_cve.get('vendor', 'N/A')} with a CVSS score of **{top_cve.get('cvss', 0.0):.1f}**.
+The primary driver of elevated risk is **{top_cve.get('cve', 'N/A')}** - {top_cve.get('title', 'N/A')}, affecting {top_cve.get('vendor', 'N/A')} with a CVSS score of **{top_cve.get('cvss', 0.0):.1f}**.
 
 STRIKE adversary simulations identified **{strike_exploitable} exploitable techniques** out of {strike_exploitable + strike_blocked} tested, indicating {'significant' if strike_exploitable > 2 else 'moderate' if strike_exploitable > 0 else 'minimal'} attack surface exposure.
 

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from services.database import get_db
 from models import GeneratedReport, Finding, ControlEvidence
@@ -15,18 +15,26 @@ class ReportRegisterReq(BaseModel):
     report_type: str  # risk, gap, evidence, combined, json
     generator_version: str
     approved_by: str | None = None
-    source_finding_ids: list[str] = []
-    source_evidence_ids: list[str] = []
-    framework_configuration: dict = {}
-    content_hash: str
+    source_finding_ids: list[str] = Field(default_factory=list)
+    source_evidence_ids: list[str] = Field(default_factory=list)
+    framework_configuration: dict = Field(default_factory=dict)
+    content_hash: str = Field(pattern=r'^[a-fA-F0-9]{64}$')
     artifact_location: str
 
 class ReportGenerateReq(BaseModel):
     report_type: str  # risk, gap, evidence, combined, json
     approved_by: str | None = None
-    source_finding_ids: list[str] = []
-    source_evidence_ids: list[str] = []
-    framework_configuration: dict = {}
+    source_finding_ids: list[str] = Field(default_factory=list)
+    source_evidence_ids: list[str] = Field(default_factory=list)
+    framework_configuration: dict = Field(default_factory=dict)
+
+
+def _verified_approval(approved_by: str | None, auth_ctx) -> str | None:
+    if not approved_by:
+        return None
+    if auth_ctx.role not in ('Superadmin', 'Admin'):
+        raise HTTPException(status_code=403, detail='Report approval requires Admin or Superadmin')
+    return auth_ctx.user_id
 
 @router.post("/register")
 def register_report(
@@ -37,6 +45,9 @@ def register_report(
     auth_ctx = get_auth_context(user)
     user_email = auth_ctx.user_id
     tenant_id = auth_ctx.tenant_id
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail='Missing tenant context')
+    approved_by = _verified_approval(req.approved_by, auth_ctx)
     
     # --- Data Anomalies Check ---
     # 1. Validate source findings exist and belong to correct tenant
@@ -82,7 +93,7 @@ def register_report(
         report_type=req.report_type,
         generator_version=req.generator_version,
         requested_by=user_email,
-        approved_by=req.approved_by,
+        approved_by=approved_by,
         source_finding_ids=req.source_finding_ids,
         source_evidence_ids=req.source_evidence_ids,
         framework_configuration=req.framework_configuration,
@@ -111,6 +122,9 @@ def generate_report(
     auth_ctx = get_auth_context(user)
     user_email = auth_ctx.user_id
     tenant_id = auth_ctx.tenant_id
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail='Missing tenant context')
+    approved_by = _verified_approval(req.approved_by, auth_ctx)
     
     from services.reporting_engine import generate_report_pipeline
     try:
@@ -119,14 +133,16 @@ def generate_report(
             tenant_id=tenant_id,
             report_type=req.report_type,
             requested_by=user_email,
-            approved_by=req.approved_by,
+            approved_by=approved_by,
             source_finding_ids=req.source_finding_ids,
             source_evidence_ids=req.source_evidence_ids,
             framework_configuration=req.framework_configuration
         )
         return res
-    except Exception as e:
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=500, detail='Report generation failed')
 
 @router.get("")
 def list_reports(
@@ -135,9 +151,11 @@ def list_reports(
 ):
     auth_ctx = get_auth_context(user)
     
-    query = db.query(GeneratedReport)
-    if not auth_ctx.is_superadmin:
-        query = query.filter(GeneratedReport.tenant_id == auth_ctx.tenant_id)
+    if not auth_ctx.tenant_id:
+        raise HTTPException(status_code=400, detail='Missing tenant context')
+    query = db.query(GeneratedReport).filter(
+        GeneratedReport.tenant_id == auth_ctx.tenant_id
+    )
         
     return query.all()
 
@@ -149,12 +167,12 @@ def get_raw_report(
 ):
     auth_ctx = get_auth_context(user)
     
-    report = db.query(GeneratedReport).filter(GeneratedReport.id == report_id).first()
+    report = db.query(GeneratedReport).filter(
+        GeneratedReport.id == report_id,
+        GeneratedReport.tenant_id == auth_ctx.tenant_id,
+    ).first()
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
-        
-    if not auth_ctx.is_superadmin and report.tenant_id != auth_ctx.tenant_id:
-        raise HTTPException(status_code=403, detail="Access denied")
         
     # Return as clean JSON (raw payload metadata)
     return {
@@ -168,6 +186,5 @@ def get_raw_report(
         "source_finding_ids": report.source_finding_ids,
         "source_evidence_ids": report.source_evidence_ids,
         "content_hash": report.content_hash,
-        "artifact_location": report.artifact_location,
         "created_at": report.created_at.isoformat() if report.created_at else None
     }

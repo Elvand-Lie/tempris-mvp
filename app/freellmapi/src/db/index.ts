@@ -1235,7 +1235,7 @@ function ensureUnifiedKey(db: Database.Database) {
   if (!existing) {
     const key = `freellmapi-${crypto.randomBytes(24).toString('hex')}`;
     db.prepare("INSERT INTO settings (key, value) VALUES ('unified_api_key', ?)").run(key);
-    console.log(`\n  Your unified API key: ${key}\n`);
+    console.log('Unified API key initialized.');
   }
 }
 

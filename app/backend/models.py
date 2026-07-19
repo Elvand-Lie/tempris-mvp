@@ -160,6 +160,7 @@ class ChatMessage(Base):
 class TesSnapshot(Base):
     __tablename__ = "tes_snapshots"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(50), nullable=False, default='tempris', index=True)
     aggregate_tes = Column(Float, nullable=False)
     finding_count = Column(Integer)
     critical_count = Column(Integer)
@@ -203,6 +204,7 @@ class ScanFinding(Base):
 class GrcState(Base):
     __tablename__ = "grc_states"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(50), nullable=False, default='tempris', index=True)
     toggles = Column(JSON)  # {agm: [bool], drf: [bool], tef: [bool]}
     sop_state = Column(JSON)  # [{id, pic, notes, endUserAgreed, picAgreed}]
     updated_by = Column(String(255))
@@ -212,6 +214,7 @@ class GrcState(Base):
 class GrcSignoff(Base):
     __tablename__ = "grc_signoffs"
     id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(50), nullable=False, default='tempris', index=True)
     control_id = Column(String(20), nullable=False)
     signoff_type = Column(String(20), nullable=False)  # 'end_user' or 'pic'
     signed_by = Column(String(255))
@@ -222,6 +225,7 @@ class GrcSignoff(Base):
 class GrcPolicyDocument(Base):
     __tablename__ = "grc_policy_documents"
     id = Column(String(80), primary_key=True)
+    tenant_id = Column(String(50), nullable=False, default='tempris', index=True)
     title = Column(String(255), nullable=False)
     category = Column(String(100), default="Custom")
     version = Column(String(20), default="1.0")

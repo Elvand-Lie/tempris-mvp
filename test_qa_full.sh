@@ -271,12 +271,12 @@ echo ""
 echo "═══ PHASE 7: SECURITY PENETRATION TESTS ═══"
 
 # SEC-01: Expired JWT
-expired_jwt="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaGVyaWVAdGVtcHJpcy5jb20iLCJyb2xlIjoiU3VwZXJhZG1pbiIsImV4cCI6MTAwMDAwMDAwMH0.fake"
+expired_jwt="expired-invalid-token"
 code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $expired_jwt" "$BASE/api/spectrum/findings")
 log_result "SEC-01: Expired/fake JWT rejected" "401" "$code"
 
 # SEC-02: Tampered JWT (modify payload)
-tampered="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJoYWNrZXJAZXZpbC5jb20iLCJyb2xlIjoiU3VwZXJhZG1pbiIsImV4cCI6OTk5OTk5OTk5OX0.tampered_signature"
+tampered="tampered-invalid-token"
 code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $tampered" "$BASE/api/spectrum/findings")
 log_result "SEC-02: Tampered JWT rejected" "401" "$code"
 

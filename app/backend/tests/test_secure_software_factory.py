@@ -1,6 +1,7 @@
 import subprocess
 import os
 import json
+import shutil
 import sys
 
 # Find project root robustly using absolute __file__ path
@@ -14,6 +15,7 @@ def test_secure_software_factory_ci_pipeline():
     env_clean = os.environ.copy()
     env_clean["SCAN_MOCK_FALLBACK"] = "1"
     env_clean["SCAN_MOCK_CLEAN"] = "1"
+    env_clean["PROVENANCE_SIGNING_KEY"] = "test-only-provenance-key"
     
     res_dep = subprocess.run(["python", "scripts/ci/scan_dependencies.py"], capture_output=True, text=True, env=env_clean)
     assert res_dep.returncode == 0
@@ -51,9 +53,14 @@ def test_secure_software_factory_ci_pipeline():
     assert len(sbom_data["components"]) > 0
 
     # 4. Test Provenance Signing & Cryptographic Validation
-    res_prov = subprocess.run(["python", "scripts/ci/sign_provenance.py"], capture_output=True, text=True)
+    res_prov = subprocess.run(
+        ["python", "scripts/ci/sign_provenance.py"],
+        capture_output=True,
+        text=True,
+        env=env_clean,
+    )
     assert res_prov.returncode == 0
-    assert "Verification SUCCESS" in res_prov.stdout
+    assert "HMAC and artifact hashes verified" in res_prov.stdout
     prov_file = "artifacts/security/provenance/provenance.json"
     assert os.path.exists(prov_file)
     
@@ -77,13 +84,20 @@ def test_secure_software_factory_ci_pipeline():
                 sys.path.remove(project_root)
             sys.path.insert(0, project_root)
             
-        # Run verification using tampered file (mocking loaded verification)
+        # Verify the tampered signature against the same test-only key.
         import hmac
         import hashlib
-        from scripts.ci.sign_provenance import PROVENANCE_KEY, hash_file
-        
-        serialized = json.dumps(prov_data["manifest"], sort_keys=True)
-        computed_sig = hmac.new(PROVENANCE_KEY, serialized.encode("utf-8"), hashlib.sha256).hexdigest()
+
+        serialized = json.dumps(
+            prov_data["manifest"],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        computed_sig = hmac.new(
+            env_clean["PROVENANCE_SIGNING_KEY"].encode("utf-8"),
+            serialized.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
         assert not hmac.compare_digest(prov_data["signature"], computed_sig)
     finally:
         if os.path.exists(tampered_file):
@@ -106,10 +120,14 @@ def test_scanner_ci_enforcement_and_unavailability():
     assert res_dep.returncode == 1
     assert "TOOL_UNAVAILABLE" in res_dep.stdout
     
-    # Secrets scanner should try to invoke real Gitleaks and fail with TOOL_UNAVAILABLE
+    # Secrets scanner must invoke the real Gitleaks binary when available.
     res_sec = subprocess.run(["python", "scripts/ci/scan_secrets.py"], capture_output=True, text=True, env=env_ci)
-    assert res_sec.returncode == 1
-    assert "TOOL_UNAVAILABLE" in res_sec.stdout
+    if shutil.which("gitleaks"):
+        assert res_sec.returncode == 0
+        assert "CI Secrets Check: PASSED" in res_sec.stdout
+    else:
+        assert res_sec.returncode == 1
+        assert "TOOL_UNAVAILABLE" in res_sec.stdout
 
     # 2. Ordinary local run without fallback fails with TOOL_UNAVAILABLE
     env_local = os.environ.copy()
@@ -119,4 +137,3 @@ def test_scanner_ci_enforcement_and_unavailability():
     res_dep_local = subprocess.run(["python", "scripts/ci/scan_dependencies.py"], capture_output=True, text=True, env=env_local)
     assert res_dep_local.returncode == 1
     assert "TOOL_UNAVAILABLE" in res_dep_local.stdout
-

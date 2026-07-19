@@ -1,5 +1,5 @@
 """
-GRC Router — ISO/IEC 42001:2023 AI Management System
+GRC Router - ISO/IEC 42001:2023 AI Management System
 Handles GRC state persistence, TES composite scoring, and SOP sign-offs.
 
 References:
@@ -94,26 +94,33 @@ def log_evidence_action(
         action=action,
         module=module,
         detail=detail,
-        metadata_=metadata
+        metadata=metadata
     ))
 
 
 
 router = APIRouter()
 
-# ── ISO 42001 Control definitions ─────────────────────────────────────────────
+
+def _verified_tenant_id(user: dict) -> str:
+    tenant_id = get_auth_context(user).tenant_id
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail='Missing tenant context')
+    return tenant_id
+
+# Ã¢â€â‚¬Ã¢â€â‚¬ ISO 42001 Control definitions Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 GRC_CONTROLS = [
     {"id": "A.2.2", "domain": "AI Policy", "title": "Document AI Policy for Development / Use",
-     "sg_ref": "PDPA · MAS FEAT Principles", "tes_modifier": "AGM"},
+     "sg_ref": "PDPA / MAS FEAT Principles", "tes_modifier": "AGM"},
     {"id": "A.3.2", "domain": "Internal Org", "title": "Define & Allocate AI Roles and Responsibilities",
      "sg_ref": "MAS TRM Guidelines Section 4", "tes_modifier": "AGM"},
     {"id": "A.5.2", "domain": "Impact Assessment", "title": "Establish AI System Impact Assessment Process",
-     "sg_ref": "PDPA DPIA · MAS FEAT", "tes_modifier": "AGM"},
+     "sg_ref": "PDPA DPIA / MAS FEAT", "tes_modifier": "AGM"},
     {"id": "A.6.2.2", "domain": "AI Lifecycle", "title": "Specify & Document AI System Requirements",
      "sg_ref": "IMDA AI Governance Framework v2", "tes_modifier": "AGM"},
     {"id": "A.7.4", "domain": "Data Quality", "title": "Define Data Quality Requirements for AI Systems",
-     "sg_ref": "MAS Notice 655 · ISO/IEC 25024", "tes_modifier": "DRF"},
+     "sg_ref": "MAS Notice 655 / ISO/IEC 25024", "tes_modifier": "DRF"},
     {"id": "A.9.2", "domain": "Responsible Use", "title": "Define Processes for Responsible AI Use",
      "sg_ref": "IMDA Model AI Governance Framework", "tes_modifier": "AGM"},
     {"id": "A.10.3", "domain": "Third-party", "title": "Ensure Supplier AI Alignment with Org Policy",
@@ -126,6 +133,27 @@ DEFAULT_TOGGLES = {
     "drf": [True, False, True],
     "tef": [True, False],
 }
+
+
+TOGGLE_GROUP_LENGTHS = {"agm": 5, "drf": 3, "tef": 2}
+
+
+def _normalize_toggles(toggles) -> dict:
+    """Return the complete, typed toggle contract for legacy or malformed rows."""
+    source = toggles if isinstance(toggles, dict) else {}
+    normalized = {}
+    for key, default_values in DEFAULT_TOGGLES.items():
+        values = source.get(key)
+        if (
+            isinstance(values, list)
+            and len(values) == TOGGLE_GROUP_LENGTHS[key]
+            and all(isinstance(value, bool) for value in values)
+        ):
+            normalized[key] = list(values)
+        else:
+            normalized[key] = list(default_values)
+    return normalized
+
 
 DEFAULT_SOP_STATE = [
     {"id": c["id"], "pic": "", "notes": "", "endUserAgreed": False, "picAgreed": False}
@@ -168,16 +196,26 @@ def _normalize_sop_state(sop_state, fallback=None) -> list[dict]:
     return normalized
 
 
-def _latest_sop_state_from_db(db: Session) -> list[dict]:
-    state = db.query(GrcState).order_by(GrcState.id.desc()).first()
+def _latest_sop_state_from_db(db: Session, tenant_id: str) -> list[dict]:
+    state = (
+        db.query(GrcState)
+        .filter(GrcState.tenant_id == tenant_id)
+        .order_by(GrcState.id.desc())
+        .first()
+    )
     if state and isinstance(state.sop_state, list) and len(state.sop_state) == len(GRC_CONTROLS):
         return _normalize_sop_state(state.sop_state)
     return _clone_default_sop_state()
 
 
-def _signoff_state_from_db(db: Session) -> dict[str, set[str]]:
+def _signoff_state_from_db(db: Session, tenant_id: str) -> dict[str, set[str]]:
     signoffs: dict[str, set[str]] = {}
-    rows = db.query(GrcSignoff).order_by(GrcSignoff.id.asc()).all()
+    rows = (
+        db.query(GrcSignoff)
+        .filter(GrcSignoff.tenant_id == tenant_id)
+        .order_by(GrcSignoff.id.asc())
+        .all()
+    )
     for row in rows:
         if row.signoff_type not in SOP_SIGNOFF_FIELDS:
             continue
@@ -185,9 +223,9 @@ def _signoff_state_from_db(db: Session) -> dict[str, set[str]]:
     return signoffs
 
 
-def _effective_sop_state(db: Session) -> list[dict]:
-    base_state = _latest_sop_state_from_db(db)
-    signoff_state = _signoff_state_from_db(db)
+def _effective_sop_state(db: Session, tenant_id: str) -> list[dict]:
+    base_state = _latest_sop_state_from_db(db, tenant_id)
+    signoff_state = _signoff_state_from_db(db, tenant_id)
     merged = []
     for entry in base_state:
         control_signoffs = signoff_state.get(entry["id"], set())
@@ -201,6 +239,7 @@ def _effective_sop_state(db: Session) -> list[dict]:
 
 def _sync_signoff_record(
     db: Session,
+    tenant_id: str,
     control_id: str,
     signoff_type: str,
     signed: bool,
@@ -208,6 +247,7 @@ def _sync_signoff_record(
     notes: Optional[str] = None,
 ) -> str:
     rows = db.query(GrcSignoff).filter(
+        GrcSignoff.tenant_id == tenant_id,
         GrcSignoff.control_id == control_id,
         GrcSignoff.signoff_type == signoff_type,
     ).order_by(GrcSignoff.id.asc()).all()
@@ -215,6 +255,7 @@ def _sync_signoff_record(
     if signed:
         if not rows:
             db.add(GrcSignoff(
+                tenant_id=tenant_id,
                 control_id=control_id,
                 signoff_type=signoff_type,
                 signed_by=signed_by,
@@ -230,12 +271,18 @@ def _sync_signoff_record(
     return "signed" if signed else "revoked"
 
 
-def _sync_signoffs_from_sop_state(db: Session, sop_state: list[dict], signed_by: str) -> None:
+def _sync_signoffs_from_sop_state(
+    db: Session,
+    tenant_id: str,
+    sop_state: list[dict],
+    signed_by: str,
+) -> None:
     normalized = _normalize_sop_state(sop_state)
     for entry in normalized:
         for signoff_type, field in SOP_SIGNOFF_FIELDS.items():
             _sync_signoff_record(
                 db=db,
+                tenant_id=tenant_id,
                 control_id=entry["id"],
                 signoff_type=signoff_type,
                 signed=_coerce_bool(entry.get(field, False)),
@@ -243,7 +290,7 @@ def _sync_signoffs_from_sop_state(db: Session, sop_state: list[dict], signed_by:
                 notes=entry.get("notes") or None,
             )
 
-# ── TES Composite Calculation (matches client's panel formula) ────────────────
+# Ã¢â€â‚¬Ã¢â€â‚¬ TES Composite Calculation (matches client's panel formula) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 BASE_VULN = 8.5
 BASE_EXPOSURE = 0.7
@@ -280,6 +327,7 @@ def _calc_tef(toggles: dict) -> float:
 
 
 def _calc_composite_tes(toggles: dict) -> dict:
+    toggles = _normalize_toggles(toggles)
     agm = _calc_agm(toggles)
     drf = _calc_drf(toggles)
     tef = _calc_tef(toggles)
@@ -310,7 +358,7 @@ def _calc_composite_tes(toggles: dict) -> dict:
     }
 
 
-# ── Request Models ────────────────────────────────────────────────────────────
+# Ã¢â€â‚¬Ã¢â€â‚¬ Request Models Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 class GrcStateRequest(BaseModel):
     toggles: dict
@@ -321,7 +369,7 @@ class SignoffRequest(BaseModel):
     signed: bool = True
     notes: Optional[str] = None
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# Ã¢â€â‚¬Ã¢â€â‚¬ Endpoints Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 @router.get("/state")
 def get_grc_state(
@@ -329,17 +377,23 @@ def get_grc_state(
     user = Depends(get_current_user),
 ):
     """Load the most recent GRC state. Returns defaults if none saved."""
-    state = db.query(GrcState).order_by(GrcState.id.desc()).first()
-    sop_state = _effective_sop_state(db)
+    tenant_id = _verified_tenant_id(user)
+    state = (
+        db.query(GrcState)
+        .filter(GrcState.tenant_id == tenant_id)
+        .order_by(GrcState.id.desc())
+        .first()
+    )
+    sop_state = _effective_sop_state(db, tenant_id)
     if state:
         return {
-            "toggles": state.toggles or DEFAULT_TOGGLES,
+            "toggles": _normalize_toggles(state.toggles),
             "sop_state": sop_state,
             "updated_by": state.updated_by,
             "updated_at": state.updated_at.isoformat() if state.updated_at else None,
         }
     return {
-        "toggles": DEFAULT_TOGGLES,
+        "toggles": _normalize_toggles(None),
         "sop_state": sop_state,
         "updated_by": None,
         "updated_at": None,
@@ -356,7 +410,8 @@ def save_grc_state(
     Server-side validation: toggles must have correct structure and boolean values.
     TES is always recalculated server-side to prevent score manipulation.
     """
-    # ── Validate toggle structure ─────────────────────────────────────────
+    # Ã¢â€â‚¬Ã¢â€â‚¬ Validate toggle structure Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+    tenant_id = _verified_tenant_id(user)
     toggles = req.toggles
     EXPECTED_LENGTHS = {"agm": 5, "drf": 3, "tef": 2}
     
@@ -377,11 +432,13 @@ def save_grc_state(
 
     _sync_signoffs_from_sop_state(
         db=db,
+        tenant_id=tenant_id,
         sop_state=validated_sop_state,
         signed_by=user.get("sub", "unknown"),
     )
     
     state = GrcState(
+        tenant_id=tenant_id,
         toggles=validated_toggles,
         sop_state=validated_sop_state,
         updated_by=user.get("sub", "unknown"),
@@ -408,8 +465,14 @@ def get_tes_score(
     user = Depends(get_current_user),
 ):
     """Calculate composite TES from saved toggles."""
-    state = db.query(GrcState).order_by(GrcState.id.desc()).first()
-    toggles = state.toggles if state else DEFAULT_TOGGLES
+    tenant_id = _verified_tenant_id(user)
+    state = (
+        db.query(GrcState)
+        .filter(GrcState.tenant_id == tenant_id)
+        .order_by(GrcState.id.desc())
+        .first()
+    )
+    toggles = _normalize_toggles(state.toggles if state else None)
     return _calc_composite_tes(toggles)
 
 @router.get("/controls")
@@ -432,8 +495,10 @@ def record_signoff(
     if req.signoff_type not in ("end_user", "pic"):
         raise HTTPException(status_code=400, detail="signoff_type must be 'end_user' or 'pic'")
 
+    tenant_id = _verified_tenant_id(user)
     action = _sync_signoff_record(
         db=db,
+        tenant_id=tenant_id,
         control_id=control_id,
         signoff_type=req.signoff_type,
         signed=req.signed,
@@ -457,7 +522,7 @@ def get_gap_analysis(
     user = Depends(get_current_user),
 ):
     """Return gap analysis derived from SOP state."""
-    sop_state = _effective_sop_state(db)
+    sop_state = _effective_sop_state(db, _verified_tenant_id(user))
     
     results = []
     completed = 0
@@ -498,7 +563,7 @@ def get_gap_analysis(
     }
 
 
-# ── ISO 42001 AI System Inventory & Policy Status ─────────────────────────────
+# Ã¢â€â‚¬Ã¢â€â‚¬ ISO 42001 AI System Inventory & Policy Status Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 AI_SYSTEMS = [
     {
@@ -510,7 +575,7 @@ AI_SYSTEMS = [
         "data_outputs": ["Natural language responses", "Security recommendations"],
         "risk_level": "Medium",
         "owner": "CSRO",
-        "human_oversight": "Advisory only — no automated actions triggered by AI output",
+        "human_oversight": "Advisory only; no automated actions triggered by AI output",
         "pii_processed": False,
         "audit_logged": True,
         "fallback": "Regex-based mock response engine when LLM unavailable",
@@ -582,12 +647,18 @@ def get_ai_policy_status(
 ):
     """ISO 42001 compliance dashboard: returns overall AI governance posture."""
     # Get current GRC state for toggle-based scoring
-    state = db.query(GrcState).order_by(GrcState.id.desc()).first()
-    toggles = state.toggles if state else DEFAULT_TOGGLES
+    tenant_id = _verified_tenant_id(user)
+    state = (
+        db.query(GrcState)
+        .filter(GrcState.tenant_id == tenant_id)
+        .order_by(GrcState.id.desc())
+        .first()
+    )
+    toggles = _normalize_toggles(state.toggles if state else None)
     tes = _calc_composite_tes(toggles)
 
     # Get signoff progress
-    signoff_state = _signoff_state_from_db(db)
+    signoff_state = _signoff_state_from_db(db, tenant_id)
 
     ai_controls = [c for c in GRC_CONTROLS]
     ai_compliance = []
@@ -624,7 +695,7 @@ def get_ai_policy_status(
     }
 
 
-# ── Policy Document Serving ───────────────────────────────────────────────────
+# Ã¢â€â‚¬Ã¢â€â‚¬ Policy Document Serving Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 import os
 import re
@@ -632,7 +703,7 @@ import re
 POLICY_REGISTRY = {
     "iso42001": {
         "filename": "iso42001_ai_policy.md",
-        "title": "ISO/IEC 42001:2023 — AI Management System Policy",
+        "title": "ISO/IEC 42001:2023 - AI Management System Policy",
         "category": "AI Governance",
         "version": "1.0",
         "status": "Active",
@@ -699,6 +770,7 @@ def _policy_row_to_dict(row: GrcPolicyDocument) -> dict:
 @router.get("/policies")
 def list_policies(db: Session = Depends(get_db), user=Depends(get_current_user)):
     """List all available policy documents with metadata."""
+    tenant_id = _verified_tenant_id(user)
     policies = []
     for key, meta in POLICY_REGISTRY.items():
         filepath = _policy_path(meta)
@@ -716,7 +788,13 @@ def list_policies(db: Session = Depends(get_db), user=Depends(get_current_user))
             "source": "bundled",
             "size_bytes": size,
         })
-    policies.extend(_policy_row_to_dict(row) for row in db.query(GrcPolicyDocument).order_by(GrcPolicyDocument.created_at.desc()).all())
+    custom_rows = (
+        db.query(GrcPolicyDocument)
+        .filter(GrcPolicyDocument.tenant_id == tenant_id)
+        .order_by(GrcPolicyDocument.created_at.desc())
+        .all()
+    )
+    policies.extend(_policy_row_to_dict(row) for row in custom_rows)
     return {"policies": policies, "total": len(policies)}
 
 
@@ -733,6 +811,7 @@ class PolicyCreate(BaseModel):
 @router.post("/policies")
 def create_policy(payload: PolicyCreate, db: Session = Depends(get_db), user=Depends(require_role("Superadmin", "Admin"))):
     """Create a custom policy document in the GRC library."""
+    tenant_id = _verified_tenant_id(user)
     title = payload.title.strip()
     if not title:
         raise HTTPException(status_code=400, detail="Policy title is required")
@@ -748,6 +827,7 @@ def create_policy(payload: PolicyCreate, db: Session = Depends(get_db), user=Dep
 
     row = GrcPolicyDocument(
         id=policy_id,
+        tenant_id=tenant_id,
         title=title,
         category=payload.category.strip() or "Custom",
         version=payload.version.strip() or "1.0",
@@ -773,9 +853,13 @@ def create_policy(payload: PolicyCreate, db: Session = Depends(get_db), user=Dep
 @router.get("/policies/{policy_id}")
 def get_policy(policy_id: str, db: Session = Depends(get_db), user=Depends(get_current_user)):
     """Serve a policy document's markdown content."""
+    tenant_id = _verified_tenant_id(user)
     meta = POLICY_REGISTRY.get(policy_id)
     if not meta:
-        row = db.query(GrcPolicyDocument).filter(GrcPolicyDocument.id == policy_id).first()
+        row = db.query(GrcPolicyDocument).filter(
+            GrcPolicyDocument.id == policy_id,
+            GrcPolicyDocument.tenant_id == tenant_id,
+        ).first()
         if not row:
             raise HTTPException(status_code=404, detail=f"Policy '{policy_id}' not found")
         append_to_audit_log(AuditEntry(
@@ -822,9 +906,18 @@ class PolicyUpdate(BaseModel):
 @router.put("/policies/{policy_id}")
 def update_policy(policy_id: str, payload: PolicyUpdate, db: Session = Depends(get_db), user=Depends(require_role("Superadmin", "Admin"))):
     """Update a policy document's content."""
+    tenant_id = _verified_tenant_id(user)
     meta = POLICY_REGISTRY.get(policy_id)
+    if meta:
+        raise HTTPException(
+            status_code=409,
+            detail='Bundled policies are read-only; create a tenant policy to customize content',
+        )
     if not meta:
-        row = db.query(GrcPolicyDocument).filter(GrcPolicyDocument.id == policy_id).first()
+        row = db.query(GrcPolicyDocument).filter(
+            GrcPolicyDocument.id == policy_id,
+            GrcPolicyDocument.tenant_id == tenant_id,
+        ).first()
         if not row:
             raise HTTPException(status_code=404, detail=f"Policy '{policy_id}' not found")
         if len(payload.content) > MAX_POLICY_SIZE:
@@ -858,7 +951,7 @@ def update_policy(policy_id: str, payload: PolicyUpdate, db: Session = Depends(g
     return {"message": "Policy updated successfully"}
 
 
-# ── Evidence Upload / Download / Delete ────────────────────────────────────────
+# Ã¢â€â‚¬Ã¢â€â‚¬ Evidence Upload / Download / Delete Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 ALLOWED_EVIDENCE_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".docx", ".xlsx", ".txt", ".md"}
 MAX_EVIDENCE_SIZE = 10 * 1024 * 1024  # 10 MB
@@ -966,9 +1059,9 @@ async def upload_evidence(
         }
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Evidence upload failed: {str(e)}")
+        raise HTTPException(status_code=500, detail='Evidence upload failed')
 
 
 @router.get("/evidence/{control_id}")
@@ -1263,5 +1356,3 @@ def delete_evidence(
     )
 
     return {"status": "deleted", "evidence_id": evidence_id, "control_id": control_id}
-
-

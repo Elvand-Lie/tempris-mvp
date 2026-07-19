@@ -18,7 +18,7 @@ class TESBreakdown(BaseModel):
 def calculate_tes(inputs: TESInputs) -> TESBreakdown:
     """
     Calculates the Tempris Exposure Score based on the formula from the Wave 1 MVP Proposal:
-    TES = (CVSS Ã· 10 Ã— 0.35) + (Exploitability Ã— 0.25) + (Business Impact Ã— 0.20) + (Asset Criticality Ã— 0.12) + (Threat Actor Activity Ã— 0.08)
+    TES = (CVSS ÃƒÂ· 10 Ãƒâ€” 0.35) + (Exploitability Ãƒâ€” 0.25) + (Business Impact Ãƒâ€” 0.20) + (Asset Criticality Ãƒâ€” 0.12) + (Threat Actor Activity Ãƒâ€” 0.08)
     
     Note: The proposal has CVSS / 10 * 0.35, which yields a max of 0.35 if CVSS is 10.
     Since the other factors are raw scores 0-10, we need to normalize them to max 10 overall.
@@ -111,7 +111,11 @@ def public_severity(finding: dict) -> dict:
     scoring = sss.get("scoring") or {}
     source = (finding.get("source") or "").lower()
     is_sss = source == "sss" or not str(finding.get("cve", "")).startswith("CVE-")
-    score = float(scoring.get("base_severity") if is_sss else finding.get("cvss") or 0.0)
+    raw_score = scoring.get("base_severity") if is_sss else finding.get("cvss")
+    try:
+        score = float(raw_score) if raw_score is not None else 0.0
+    except (TypeError, ValueError):
+        score = 0.0
     return {
         "score": round(score, 2),
         "label": severity_from_score(score),

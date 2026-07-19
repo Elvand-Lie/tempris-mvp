@@ -47,6 +47,43 @@ def init_db():
                 print("FATAL: Database schema is out of date. Required column 'tenant_id' or index is missing. "
                       "Please run: python scripts/migrations/001_add_evidence_tenant.py --legacy-tenant-id <tenant_id>", file=sys.stderr)
                 sys.exit(1)
+
+        tenant_scoped_tables = (
+            'grc_states',
+            'grc_signoffs',
+            'grc_policy_documents',
+            'tes_snapshots',
+        )
+        tenant_scope_failures = []
+        with engine.connect() as connection:
+            for table in tenant_scoped_tables:
+                if table not in tables:
+                    continue
+                columns = {column['name'] for column in inspector.get_columns(table)}
+                indexes = {index['name'] for index in inspector.get_indexes(table)}
+                if 'tenant_id' not in columns:
+                    tenant_scope_failures.append(f'{table} (tenant_id column missing)')
+                    continue
+                if f'ix_{table}_tenant_id' not in indexes:
+                    tenant_scope_failures.append(f'{table} (tenant index missing)')
+                    continue
+                unassigned = connection.execute(
+                    __import__('sqlalchemy').text(
+                        f'SELECT COUNT(*) FROM {table} '
+                        "WHERE tenant_id IS NULL OR TRIM(tenant_id) = ''"
+                    )
+                ).scalar_one()
+                if unassigned:
+                    tenant_scope_failures.append(f'{table} ({unassigned} unassigned rows)')
+        if tenant_scope_failures:
+            print(
+                'FATAL: Database tenant scope validation failed: '
+                + ', '.join(tenant_scope_failures)
+                + '. Run scripts/migrations/004_add_grc_tes_tenant_scope.py '
+                  '--legacy-tenant-id <tenant_id> with a verified backup.',
+                file=sys.stderr,
+            )
+            sys.exit(1)
     except Exception as e:
         logger.error(f"Startup validation failed: {e}")
         sys.exit(1)

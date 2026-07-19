@@ -35,11 +35,7 @@ def get_dashboard_data(db: Session = None, tenant_id: str = "tempris"):
                 "time": f.get("dateAdded", ""),
                 "type": "critical"
             })
-        alerts.append({"id": 98, "module": "STRIKE", "message": "Simulation #211 confirmed exploit path to internal DMZ.", "time": "15 mins ago", "type": "warning"})
-        alerts.append({"id": 99, "module": "STANDARD", "message": "MAS TRM 11.1.1 SLA breached for FortiGate patching.", "time": "1 hour ago", "type": "warning"})
-
-
-        from models import Finding, AuditLog, SurgeSubmission
+        from models import Finding, AuditLog
         final_rows = db.query(Finding).filter(Finding.id >= "F-7000", Finding.id < "F-8000", Finding.tenant_id == tenant_id).all()
         nhi_count = 0
         blflaw_count = 0
@@ -51,28 +47,18 @@ def get_dashboard_data(db: Session = None, tenant_id: str = "tempris"):
                 blflaw_count += 1
         auto_edip = db.query(AuditLog).filter(AuditLog.module == "EDIP", AuditLog.action.like("AUTO_%"), AuditLog.tenant_id == tenant_id).all()
         complete_auto = sum(1 for a in auto_edip if all(k in (a.metadata_ or {}) for k in ("agent_identity", "authority_granted", "tool_used", "evidence_generated", "revocation_path", "under_policy_control")))
-        surge_open = db.query(SurgeSubmission).filter(SurgeSubmission.status.in_(["submitted", "triaged"])).count()
         final_update = {
             "v54_findings": len(final_rows),
             "nhi_authority_findings": nhi_count,
             "blflaw_findings": blflaw_count,
             "auto_edip_metadata_pct": round((complete_auto / len(auto_edip) * 100), 1) if auto_edip else 100.0,
-            "surge_open_submissions": surge_open,
+            "surge_open_submissions": None,
+            "surge_scope_status": "unavailable",
         }
-        # Dynamic module health based on actual state
-        critical_count = stats["critical_count"]
-        total = stats["total_findings"]
-        spectrum_status = "healthy" if critical_count < 500 else "warning" if critical_count < 1000 else "degraded"
-        scout_status = "healthy" if total > 0 else "offline"
-
+        # No module telemetry source exists in the repository.
         module_health = [
-            {"name": "SPECTRUM", "status": spectrum_status},
-            {"name": "SCOUT", "status": scout_status},
-            {"name": "STRIKE", "status": "healthy"},
-            {"name": "STANDARD", "status": "warning" if critical_count > 100 else "healthy"},
-            {"name": "SPOTLIGHT", "status": "healthy"},
-            {"name": "SPEAK", "status": "healthy"},
-            {"name": "SURGE", "status": "healthy" if final_update["surge_open_submissions"] < 20 else "warning"},
+            {"name": name, "status": "unavailable"}
+            for name in ("SPECTRUM", "SCOUT", "STRIKE", "STANDARD", "SPOTLIGHT", "SPEAK", "SURGE")
         ]
 
         return {
@@ -95,6 +81,7 @@ def dashboard(db: Session = Depends(get_db), user = Depends(get_current_user)):
     tes_trend = "+0.0"
     thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
     old_snapshot = db.query(TesSnapshot).filter(
+        TesSnapshot.tenant_id == tenant_id,
         TesSnapshot.snapshot_at >= thirty_days_ago
     ).order_by(TesSnapshot.snapshot_at.asc()).first()
 
@@ -116,6 +103,7 @@ def take_tes_snapshot(db: Session = Depends(get_db), user = Depends(get_current_
     stats = data.get("_stats", get_finding_stats(db, tenant_id=tenant_id))
 
     snapshot = TesSnapshot(
+        tenant_id=tenant_id,
         aggregate_tes=data["aggregate_tes"],
         finding_count=stats["total_findings"],
         critical_count=stats["critical_count"]

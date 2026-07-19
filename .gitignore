@@ -46,8 +46,11 @@ tempris.db
 
 # Baseline artifacts
 artifacts/baseline/
+graphify-out/
+.tmp/
 
 # Local runtime artifacts and backups
 artifacts/
 backups/
 *.db.bak_*
+*.migration-004-*.bak

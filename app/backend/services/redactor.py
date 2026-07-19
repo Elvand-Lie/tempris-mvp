@@ -4,9 +4,9 @@ Provides recursion-based redaction of private scoring internals and allowlist en
 """
 
 PRIVATE_KEYS = {
-    "raw_inputs", "sss_data", "tes_breakdown", "agm", "drf", "tef", 
-    "tes_raw", "tes_intermediate", "formula_version", "modifier_table_ref", 
-    "sss_base_raw", "AGM", "DRF", "TEF"
+    "raw_inputs", "sss_data", "tes_breakdown",
+    "tes_raw", "tes_intermediate", "formula_version", "modifier_table_ref",
+    "sss_base_raw", "agm", "drf", "tef"
 }
 
 PUBLIC_ALLOWLIST = {
@@ -28,7 +28,7 @@ def redact_private_fields(data):
     if isinstance(data, dict):
         cleaned = {}
         for k, v in data.items():
-            if k in PRIVATE_KEYS:
+            if isinstance(k, str) and k.lower() in PRIVATE_KEYS:
                 continue
             # For finding dicts specifically, we can enforce allowlist if needed.
             # But let's keep all keys that are in the PUBLIC_ALLOWLIST or not explicitly blocked.

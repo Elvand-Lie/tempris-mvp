@@ -8,6 +8,9 @@ from passlib.hash import bcrypt
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+os.environ['ENVIRONMENT'] = 'test'
+os.environ['AUDIT_HMAC_KEY'] = 'test_audit_hmac_secret_key_12345678'
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from services.database import Base, get_db
@@ -95,8 +98,14 @@ def test_reporting_pipeline_and_isolation():
         id="F-B1", tenant_id="tenantB", title="Tenant B Finding", vendor="V", product="P",
         cvss=8.0, priority="P1", status="unmitigated", short_description="Desc"
     )
+    f_formula = Finding(
+        id='F-FORMULA', tenant_id='tenantA', title='=SUM(1,1)',
+        vendor='+formula', product='@formula', cvss=5.0, priority='P2',
+        status='unmitigated', short_description='Fictional formula-shaped content'
+    )
     db.add(f_a)
     db.add(f_b)
+    db.add(f_formula)
     
     e_a = ControlEvidence(id=1, tenant_id="tenantA", framework_id="ISO42001", control_id="A.1", filename="ev_a.txt", file_path="/tmp/a.txt")
     e_b = ControlEvidence(id=2, tenant_id="tenantB", framework_id="ISO42001", control_id="A.1", filename="ev_b.txt", file_path="/tmp/b.txt")
@@ -112,12 +121,47 @@ def test_reporting_pipeline_and_isolation():
         "report_type": "risk",
         "generator_version": "v1.0",
         "source_finding_ids": ["F-B1"],
-        "content_hash": "abc",
+        "content_hash": "a" * 64,
         "artifact_location": "/tmp/a.csv"
     }
     resp_reg_bad = client.post("/api/reports/register", json=register_data_bad, headers=headers_a)
     assert resp_reg_bad.status_code == 400
     assert "belongs to a different tenant" in resp_reg_bad.json()["detail"]
+
+    generate_bad = client.post(
+        '/api/reports/generate',
+        json={'report_type': 'risk', 'source_finding_ids': ['F-B1']},
+        headers=headers_a,
+    )
+    assert generate_bad.status_code == 400
+    assert 'unavailable for this tenant' in generate_bad.json()['detail']
+
+    formula_response = client.post(
+        '/api/reports/generate',
+        json={
+            'report_type': 'risk',
+            'source_finding_ids': ['F-FORMULA'],
+            'framework_configuration': {
+                'engagement_id': 'ENG-FORMULA',
+                'agm': 9.9,
+                'nested': {'drf': 8.8},
+            },
+        },
+        headers=headers_a,
+    )
+    assert formula_response.status_code == 200
+    formula_manifest = formula_response.json()['manifest']
+    assert formula_manifest['framework_configuration'] == {
+        'engagement_id': 'ENG-FORMULA',
+        'nested': {},
+    }
+    formula_path = formula_manifest['artifact_location']
+    with open(formula_path, newline='', encoding='utf-8') as formula_file:
+        formula_rows = list(csv.reader(formula_file))
+    assert formula_rows[1][2].startswith(chr(39) + '=')
+    assert formula_rows[1][3].startswith(chr(39) + '+')
+    assert formula_rows[1][4].startswith(chr(39) + '@')
+    os.remove(formula_path)
 
     # 2. Reporter A generates report referencing Tenant A finding & evidence -> 200
     gen_data = {

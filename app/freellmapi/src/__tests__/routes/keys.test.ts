@@ -42,7 +42,7 @@ describe('Keys API', () => {
   it('POST /api/keys creates a new key', async () => {
     const { status, body } = await request(app, 'POST', '/api/keys', {
       platform: 'groq',
-      key: 'gsk_test123456789',
+      key: 'fixture-key-alpha',
       label: 'My Groq Key',
     });
 
@@ -53,10 +53,9 @@ describe('Keys API', () => {
   });
 
   it('GET /api/keys returns the created key', async () => {
-    // First create a key
     await request(app, 'POST', '/api/keys', {
       platform: 'groq',
-      key: 'gsk_test123456789',
+      key: 'fixture-key-beta',
     });
 
     const { status, body } = await request(app, 'GET', '/api/keys');
@@ -83,7 +82,7 @@ describe('Keys API', () => {
   it('DELETE /api/keys/:id removes a key', async () => {
     const { body: created } = await request(app, 'POST', '/api/keys', {
       platform: 'groq',
-      key: 'gsk_test123456789',
+      key: 'fixture-key-gamma',
     });
 
     const { status } = await request(app, 'DELETE', `/api/keys/${created.id}`);

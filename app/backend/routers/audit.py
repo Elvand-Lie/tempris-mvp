@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from sqlalchemy import or_
@@ -309,7 +309,12 @@ def append_to_audit_log_db(db: Session, entry: AuditEntry) -> dict:
         entry.ip_address = "internal"
 
     _validate_tacf_metadata(entry)
-    last = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
+    last = (
+        db.query(AuditLog)
+        .filter(AuditLog.tenant_id == t_id)
+        .order_by(AuditLog.id.desc())
+        .first()
+    )
     prev_hash = last.hash if last and last.hash else "0"
     # C-05 FIX: Use the SAME timestamp for both hashing and storage
     now = datetime.now(timezone.utc)
@@ -395,7 +400,10 @@ def get_audit_log(
     sort_col = sort_map.get(sort_by, AuditLog.timestamp)
     sort_expr = sort_col.asc() if order.lower() == "asc" else sort_col.desc()
 
-    query = db.query(AuditLog)
+    tenant_id = user.get('tenant_id')
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail='Missing tenant context')
+    query = db.query(AuditLog).filter(AuditLog.tenant_id == tenant_id)
     if module and module.upper() != "ALL":
         query = query.filter(AuditLog.module == module.upper())
     if q.strip():
@@ -435,7 +443,15 @@ def verify_audit_integrity(recompute: bool = False, db: Session = Depends(get_db
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="Audit recompute requires Superadmin or Admin")
 
-    logs = db.query(AuditLog).order_by(AuditLog.id.asc()).all()
+    tenant_id = user.get('tenant_id')
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail='Missing tenant context')
+    logs = (
+        db.query(AuditLog)
+        .filter(AuditLog.tenant_id == tenant_id)
+        .order_by(AuditLog.id.asc())
+        .all()
+    )
     if not logs:
         return {"status": "empty", "records": 0, "intact": True}
 

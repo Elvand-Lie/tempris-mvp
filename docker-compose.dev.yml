@@ -37,8 +37,9 @@ services:
     container_name: tempris_llm_dev
     ports:
       - "3001:3001"
+    env_file:
+      - ./app/freellmapi/.env
     environment:
-      - ENCRYPTION_KEY=dev_only_encryption_key_0000000000000000000000000000000000000000
       - PORT=3001
     volumes:
       - freellm_data:/app/data

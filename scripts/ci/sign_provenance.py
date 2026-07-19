@@ -1,102 +1,119 @@
 #!/usr/bin/env python3
-#  SDLC-S04: MVP shared-secret provenance authentication.
-# Calculates SHA-256 hashes of build files, signs the manifest, and provides verification.
-import os
-import sys
-import json
+'''Generate and verify an HMAC-protected Tempris provenance manifest.
+
+This is shared-secret integrity verification. It is not identity-backed
+digital signing and must only run with an injected CI or release secret.
+'''
+
+import argparse
 import hashlib
 import hmac
+import json
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 
-# Simple HMAC secret used for local build signing. In real CI, this is loaded from secret environment variables.
-PROVENANCE_KEY = os.environ.get("PROVENANCE_SIGNING_KEY", "local_development_provenance_secret_key_123").encode("utf-8")
 
-def hash_file(file_path):
-    h = hashlib.sha256()
+DEFAULT_MANIFEST = Path('artifacts/security/provenance/provenance.json')
+FILES_TO_HASH = (
+    Path('app/backend/requirements.txt'),
+    Path('app/backend/models.py'),
+    Path('app/backend/index.py'),
+    Path('app/freellmapi/package-lock.json'),
+    Path('app/freellmapi/src/db/index.ts'),
+    Path('artifacts/security/sbom/bom.json'),
+)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--manifest', type=Path, default=DEFAULT_MANIFEST)
+    parser.add_argument('--verify-only', action='store_true')
+    return parser.parse_args()
+
+
+def signing_key() -> bytes:
+    value = os.environ.get('PROVENANCE_SIGNING_KEY')
+    if not value:
+        raise RuntimeError('PROVENANCE_SIGNING_KEY is required')
+    return value.encode('utf-8')
+
+
+def hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open('rb') as handle:
+        for chunk in iter(lambda: handle.read(8192), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def canonical_manifest(manifest: dict) -> bytes:
+    return json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode('utf-8')
+
+
+def build_manifest() -> dict:
+    missing = [str(path) for path in FILES_TO_HASH if not path.is_file()]
+    if missing:
+        raise RuntimeError('Required provenance input is missing: ' + ', '.join(missing))
+    return {
+        'build_tool': 'Tempris HMAC provenance manifest',
+        'provenance_method': 'HMAC-SHA256 shared-secret integrity verification',
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+        'artifacts': {
+            path.as_posix(): hash_file(path)
+            for path in FILES_TO_HASH
+        },
+    }
+
+
+def build_bundle(key: bytes) -> dict:
+    manifest = build_manifest()
+    return {
+        'manifest': manifest,
+        'signature': hmac.new(key, canonical_manifest(manifest), hashlib.sha256).hexdigest(),
+        'signing_algorithm': 'HMAC-SHA256',
+    }
+
+
+def verify_bundle(bundle: dict, key: bytes) -> tuple[bool, str]:
+    manifest = bundle.get('manifest')
+    signature = bundle.get('signature')
+    if not isinstance(manifest, dict) or not isinstance(signature, str):
+        return False, 'Manifest is malformed'
+    expected = hmac.new(key, canonical_manifest(manifest), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return False, 'HMAC verification failed'
+    artifacts = manifest.get('artifacts')
+    if not isinstance(artifacts, dict):
+        return False, 'Artifact list is malformed'
+    for raw_path, expected_hash in artifacts.items():
+        artifact = Path(raw_path)
+        if not artifact.is_file() or hash_file(artifact) != expected_hash:
+            return False, 'Artifact hash verification failed for ' + raw_path
+    return True, 'HMAC and artifact hashes verified'
+
+
+def main() -> int:
+    args = parse_args()
     try:
-        with open(file_path, "rb") as f:
-            chunk = f.read(8192)
-            while chunk:
-                h.update(chunk)
-                chunk = f.read(8192)
-        return h.hexdigest()
-    except Exception:
-        return None
+        key = signing_key()
+        if args.verify_only:
+            bundle = json.loads(args.manifest.read_text(encoding='utf-8'))
+            verified, message = verify_bundle(bundle, key)
+            print(message)
+            return 0 if verified else 1
 
-def main():
-    print("--- SDLC-S04: Generating MVP Shared-Secret Provenance Authentication Manifest ---")
-    
-    # Files to include in build provenance
-    files_to_hash = [
-        os.path.join("app", "backend", "requirements.txt"),
-        os.path.join("app", "backend", "models.py"),
-        os.path.join("app", "backend", "index.py"),
-        os.path.join("artifacts", "security", "sbom", "bom.json")
-    ]
-    
-    timestamp_str = datetime.now(timezone.utc).isoformat()
-    manifest = {
-        "build_tool": "Tempris Secure Software Factory (MVP Shared-Secret Authentication)",
-        "timestamp": timestamp_str,
-        "artifacts": {}
-    }
-    
-    # Calculate checksums
-    for f_path in files_to_hash:
-        if os.path.exists(f_path):
-            f_hash = hash_file(f_path)
-            if f_hash:
-                # Normalize path for compatibility
-                norm_path = f_path.replace("\\", "/")
-                manifest["artifacts"][norm_path] = f_hash
-                
-    # Generate signature using HMAC-SHA256
-    serialized = json.dumps(manifest, sort_keys=True)
-    signature = hmac.new(PROVENANCE_KEY, serialized.encode("utf-8"), hashlib.sha256).hexdigest()
-    
-    provenance_bundle = {
-        "manifest": manifest,
-        "signature": signature,
-        "signing_algorithm": "HMAC-SHA256"
-    }
-    
-    # Save provenance file
-    output_path = os.path.join("artifacts", "security", "provenance", "provenance.json")
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(provenance_bundle, f, indent=2)
-        
-    print(f"Build provenance authentication manifest generated successfully at: {output_path}")
-    
-    # Verify the signature immediately to validate build verification logic
-    print("\nVerifying build provenance authentication authenticity...")
-    with open(output_path, "r", encoding="utf-8") as f:
-        loaded = json.load(f)
-        
-    loaded_manifest = loaded["manifest"]
-    loaded_sig = loaded["signature"]
-    
-    serialized_loaded = json.dumps(loaded_manifest, sort_keys=True)
-    computed_sig = hmac.new(PROVENANCE_KEY, serialized_loaded.encode("utf-8"), hashlib.sha256).hexdigest()
-    
-    if hmac.compare_digest(loaded_sig, computed_sig):
-        print("Verification SUCCESS: MVP shared-secret provenance signature is valid.")
-        # Re-verify file checksums
-        all_checksums_valid = True
-        for path, expected_hash in loaded_manifest["artifacts"].items():
-            actual_hash = hash_file(path)
-            if actual_hash != expected_hash:
-                print(f"  * Checksum mismatch for file: {path} (Expected: {expected_hash}, Actual: {actual_hash})")
-                all_checksums_valid = False
-        if all_checksums_valid:
-            print("Verification SUCCESS: All build artifact hashes are verified.")
-            return 0
-        else:
-            print("Verification FAILED: Artifact hash mismatch detected.")
-            return 1
-    else:
-        print("Verification FAILED: Invalid provenance signature.")
+        bundle = build_bundle(key)
+        args.manifest.parent.mkdir(parents=True, exist_ok=True)
+        args.manifest.write_text(json.dumps(bundle, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+        verified, message = verify_bundle(bundle, key)
+        print('Provenance manifest generated at ' + str(args.manifest))
+        print(message)
+        return 0 if verified else 1
+    except (OSError, RuntimeError, json.JSONDecodeError) as error:
+        print('Provenance verification failed: ' + str(error))
         return 1
 
-if __name__ == "__main__":
-    sys.exit(main())
+
+if __name__ == '__main__':
+    raise SystemExit(main())
