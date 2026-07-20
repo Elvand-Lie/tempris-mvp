@@ -58,6 +58,7 @@ def setup_db(monkeypatch):
     # Seed test findings
     finding1 = Finding(
         id="F-1234",
+        tenant_id="tenantA",
         cve="CVE-2026-9999",
         title="Test KEV Finding",
         vendor="Test Vendor",
@@ -77,6 +78,7 @@ def setup_db(monkeypatch):
     )
     finding2 = Finding(
         id="F-5678",
+        tenant_id="tenantA",
         cve="CVE-2026-8888",
         title="Another KEV Finding",
         vendor="Test Vendor 2",
@@ -139,6 +141,7 @@ def test_valid_decisions_accepted():
         # Seed fresh finding
         f = Finding(
             id=finding_id,
+            tenant_id="tenantA",
             cve=f"CVE-2026-000{idx}",
             title=f"Valid {decision} Finding",
             vendor="Test Vendor",

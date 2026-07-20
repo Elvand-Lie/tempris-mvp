@@ -26,15 +26,19 @@ class PublicTESResponse(BaseModel):
 
 def _load_edip_decisions(db: Session, user_tenant_id: str | None, is_superadmin: bool) -> dict:
     """Load all EDIP decisions from DB into a lookup dict, filtered by tenant."""
-    from routers.auth import USERS
-    decisions = db.query(EdipDecision).all()
-    res = {}
-    for d in decisions:
-        decider_info = USERS.get(d.decided_by)
-        decider_tenant = decider_info.get("tenant_id") if decider_info else None
-        if is_superadmin or (user_tenant_id and decider_tenant == user_tenant_id):
-            res[d.finding_id] = {"decision": d.decision, "rationale": d.rationale, "decided_by": d.decided_by}
-    return res
+    if not user_tenant_id:
+        return {}
+    decisions = db.query(EdipDecision).filter(
+        EdipDecision.tenant_id == user_tenant_id
+    ).all()
+    return {
+        d.finding_id: {
+            "decision": d.decision,
+            "rationale": d.rationale,
+            "decided_by": d.decided_by,
+        }
+        for d in decisions
+    }
 
 
 
@@ -140,7 +144,7 @@ async def record_edip_decision(
     """Records an EDIP decision for a finding — persisted to PostgreSQL.
     Requires Superadmin, Admin, or Analyst role.
     """
-    from routers.auth import get_auth_context, USERS
+    from routers.auth import get_auth_context
     from services.edip_validator import EDIPDecision, validate_edip_transition
     from routers.audit import append_to_audit_log_db, AuditEntry
     from models import AuditLog, Finding
@@ -148,6 +152,8 @@ async def record_edip_decision(
     from fastapi.responses import JSONResponse
 
     auth_ctx = get_auth_context(user)
+    if not auth_ctx.tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant context")
     user_email = auth_ctx.user_id
 
     # 1. Parse request body manually
@@ -276,17 +282,17 @@ async def record_edip_decision(
 
     # 3. Target resource lookup (tenant scoped check for existing decision)
     # Check if finding exists
-    finding = db.query(Finding).filter(Finding.id == finding_id).first()
+    finding = db.query(Finding).filter(
+        Finding.id == finding_id,
+        Finding.tenant_id == auth_ctx.tenant_id,
+    ).first()
     if not finding:
         raise HTTPException(status_code=404, detail="Finding not found")
 
-    existing = db.query(EdipDecision).filter(EdipDecision.finding_id == finding_id).first()
-    if existing:
-        decider_info = USERS.get(existing.decided_by)
-        decider_tenant = decider_info.get("tenant_id") if decider_info else None
-        if not auth_ctx.is_superadmin and auth_ctx.tenant_id != decider_tenant:
-            # Conceal the resource
-            raise HTTPException(status_code=404, detail="Finding not found")
+    existing = db.query(EdipDecision).filter(
+        EdipDecision.finding_id == finding_id,
+        EdipDecision.tenant_id == auth_ctx.tenant_id,
+    ).first()
 
     # 4. Transition legality check
     current_decision = existing.decision if existing else None
@@ -324,6 +330,7 @@ async def record_edip_decision(
             existing.decided_at = func.now()
         else:
             db.add(EdipDecision(
+                tenant_id=auth_ctx.tenant_id,
                 finding_id=finding_id,
                 cve=finding.cve or "",
                 decision=cleaned_decision,
@@ -338,7 +345,7 @@ async def record_edip_decision(
             action="EDIP_DECISION",
             module="SPECTRUM",
             detail=f"Applied '{cleaned_decision}' to {finding_id} ({finding.cve or ''}). Rationale: {rationale or 'None provided'}"
-        ))
+        ), commit=False)
 
         db.commit()
     except Exception as e:
@@ -384,6 +391,20 @@ def calculate_custom_tes(
 
 from models import FindingRelationship, FindingSource, FindingDisputedClaim, FindingControl, FindingEvidence, FindingStatusHistory, Finding
 
+
+def _tenant_finding(db: Session, finding_id: str, user: dict) -> Finding:
+    from routers.auth import get_auth_context
+    tenant_id = get_auth_context(user).tenant_id
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant context")
+    finding = db.query(Finding).filter(
+        Finding.id == finding_id,
+        Finding.tenant_id == tenant_id,
+    ).first()
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    return finding
+
 # ── Finding Relationships (CORE-C06) ─────────────────────────────────────────
 
 class FindingRelationshipReq(BaseModel):
@@ -398,18 +419,8 @@ def create_relationship(
     db: Session = Depends(get_db),
     user = Depends(require_role("Superadmin", "Admin", "Analyst"))
 ):
-    from routers.auth import get_auth_context
-    auth_ctx = get_auth_context(user)
-    
-    # Verify tenant isolation for source and target findings
-    source_f = db.query(Finding).filter(Finding.id == req.source_id).first()
-    target_f = db.query(Finding).filter(Finding.id == req.target_id).first()
-    if not source_f or not target_f:
-        raise HTTPException(status_code=404, detail="Source or Target finding not found")
-        
-    if not auth_ctx.is_superadmin:
-        if source_f.tenant_id != auth_ctx.tenant_id or target_f.tenant_id != auth_ctx.tenant_id:
-            raise HTTPException(status_code=403, detail="Access denied to tenant findings")
+    _tenant_finding(db, req.source_id, user)
+    _tenant_finding(db, req.target_id, user)
             
     rel = FindingRelationship(
         source_id=req.source_id,
@@ -428,15 +439,7 @@ def get_relationships(
     db: Session = Depends(get_db),
     user = Depends(get_current_user)
 ):
-    from routers.auth import get_auth_context
-    auth_ctx = get_auth_context(user)
-    
-    finding = db.query(Finding).filter(Finding.id == finding_id).first()
-    if not finding:
-        raise HTTPException(status_code=404, detail="Finding not found")
-        
-    if not auth_ctx.is_superadmin and finding.tenant_id != auth_ctx.tenant_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    _tenant_finding(db, finding_id, user)
         
     # Get all relationships where finding is source or target
     from sqlalchemy import or_
@@ -463,16 +466,8 @@ def add_finding_source(
     db: Session = Depends(get_db),
     user = Depends(require_role("Superadmin", "Admin", "Analyst"))
 ):
-    from routers.auth import get_auth_context
     from datetime import datetime
-    auth_ctx = get_auth_context(user)
-    
-    finding = db.query(Finding).filter(Finding.id == finding_id).first()
-    if not finding:
-        raise HTTPException(status_code=404, detail="Finding not found")
-        
-    if not auth_ctx.is_superadmin and finding.tenant_id != auth_ctx.tenant_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    _tenant_finding(db, finding_id, user)
         
     src = FindingSource(
         finding_id=finding_id,
@@ -495,15 +490,7 @@ def get_finding_sources(
     db: Session = Depends(get_db),
     user = Depends(get_current_user)
 ):
-    from routers.auth import get_auth_context
-    auth_ctx = get_auth_context(user)
-    
-    finding = db.query(Finding).filter(Finding.id == finding_id).first()
-    if not finding:
-        raise HTTPException(status_code=404, detail="Finding not found")
-        
-    if not auth_ctx.is_superadmin and finding.tenant_id != auth_ctx.tenant_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    _tenant_finding(db, finding_id, user)
         
     return db.query(FindingSource).filter(FindingSource.finding_id == finding_id).all()
 
@@ -522,15 +509,7 @@ def add_disputed_claim(
     db: Session = Depends(get_db),
     user = Depends(require_role("Superadmin", "Admin", "Analyst"))
 ):
-    from routers.auth import get_auth_context
-    auth_ctx = get_auth_context(user)
-    
-    finding = db.query(Finding).filter(Finding.id == finding_id).first()
-    if not finding:
-        raise HTTPException(status_code=404, detail="Finding not found")
-        
-    if not auth_ctx.is_superadmin and finding.tenant_id != auth_ctx.tenant_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    finding = _tenant_finding(db, finding_id, user)
         
     claim = FindingDisputedClaim(
         finding_id=finding_id,
@@ -552,15 +531,7 @@ def get_disputed_claims(
     db: Session = Depends(get_db),
     user = Depends(get_current_user)
 ):
-    from routers.auth import get_auth_context
-    auth_ctx = get_auth_context(user)
-    
-    finding = db.query(Finding).filter(Finding.id == finding_id).first()
-    if not finding:
-        raise HTTPException(status_code=404, detail="Finding not found")
-        
-    if not auth_ctx.is_superadmin and finding.tenant_id != auth_ctx.tenant_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    _tenant_finding(db, finding_id, user)
         
     return db.query(FindingDisputedClaim).filter(FindingDisputedClaim.finding_id == finding_id).all()
 
@@ -580,15 +551,7 @@ def add_finding_control(
     db: Session = Depends(get_db),
     user = Depends(require_role("Superadmin", "Admin", "Analyst"))
 ):
-    from routers.auth import get_auth_context
-    auth_ctx = get_auth_context(user)
-    
-    finding = db.query(Finding).filter(Finding.id == finding_id).first()
-    if not finding:
-        raise HTTPException(status_code=404, detail="Finding not found")
-        
-    if not auth_ctx.is_superadmin and finding.tenant_id != auth_ctx.tenant_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    _tenant_finding(db, finding_id, user)
         
     ctrl = FindingControl(
         finding_id=finding_id,
@@ -609,15 +572,7 @@ def get_finding_controls(
     db: Session = Depends(get_db),
     user = Depends(get_current_user)
 ):
-    from routers.auth import get_auth_context
-    auth_ctx = get_auth_context(user)
-    
-    finding = db.query(Finding).filter(Finding.id == finding_id).first()
-    if not finding:
-        raise HTTPException(status_code=404, detail="Finding not found")
-        
-    if not auth_ctx.is_superadmin and finding.tenant_id != auth_ctx.tenant_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    _tenant_finding(db, finding_id, user)
         
     return db.query(FindingControl).filter(FindingControl.finding_id == finding_id).all()
 
@@ -629,15 +584,7 @@ def get_finding_history(
     db: Session = Depends(get_db),
     user = Depends(get_current_user)
 ):
-    from routers.auth import get_auth_context
-    auth_ctx = get_auth_context(user)
-    
-    finding = db.query(Finding).filter(Finding.id == finding_id).first()
-    if not finding:
-        raise HTTPException(status_code=404, detail="Finding not found")
-        
-    if not auth_ctx.is_superadmin and finding.tenant_id != auth_ctx.tenant_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    _tenant_finding(db, finding_id, user)
         
     return db.query(FindingStatusHistory).filter(FindingStatusHistory.finding_id == finding_id).all()
 

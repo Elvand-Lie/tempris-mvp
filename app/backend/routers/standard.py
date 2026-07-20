@@ -9,7 +9,12 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from services.database import get_db
 from models import ControlStatus, ControlEvidence, IncidentReport
-from routers.audit import append_to_audit_log, AuditEntry
+from routers.audit import (
+    append_to_audit_log,
+    append_to_audit_log_db,
+    verify_audit_chain,
+    AuditEntry,
+)
 from routers.auth import get_current_user, require_role, get_auth_context, scoped_evidence_query, EvidencePermission
 from typing import Optional
 import os
@@ -74,7 +79,9 @@ def log_evidence_action(
     module: str,
     outcome: str,
     reason_code: str,
-    owning_tenant: Optional[str] = None
+    owning_tenant: Optional[str] = None,
+    db: Optional[Session] = None,
+    commit: bool = True,
 ):
     detail = f"User {user_ctx.user_id} ({user_ctx.role}) performed {action} on evidence {evidence_id}. Outcome: {outcome}. Reason: {reason_code}."
     metadata = {
@@ -87,13 +94,17 @@ def log_evidence_action(
         "reason_code": reason_code,
         "request_id": uuid.uuid4().hex
     }
-    append_to_audit_log(AuditEntry(
+    entry = AuditEntry(
         user=user_ctx.user_id,
         action=action,
         module=module,
         detail=detail,
-        metadata_=metadata
-    ))
+        metadata=metadata,
+    )
+    if db is None:
+        append_to_audit_log(entry)
+    else:
+        append_to_audit_log_db(db, entry, commit=commit)
 
 
 # ── Framework Definitions ────────────────────────────────────────────────────
@@ -172,11 +183,16 @@ FRAMEWORKS = {
     }
 }
 
+# An absent assessment record cannot truthfully imply compliance.
+for _framework in FRAMEWORKS.values():
+    for _control in _framework["controls"]:
+        _control["default_status"] = "not_assessed"
+
 # ── Advisory Alert Engine ────────────────────────────────────────────────────
 # Maps control IDs to functions that check live data and return advisory alerts.
 # These do NOT change statuses — they provide warnings for analyst review.
 
-def _get_live_advisories(db: Session) -> dict:
+def _get_live_advisories(db: Session, tenant_id: str) -> dict:
     """Check live system data and return advisory alerts per control.
     Returns: {control_id: {"level": "warning"|"critical", "message": str}}
     """
@@ -186,24 +202,31 @@ def _get_live_advisories(db: Session) -> dict:
     from models import ScanFinding
     try:
         critical_findings = db.query(ScanFinding).filter(
+            ScanFinding.tenant_id == tenant_id,
             ScanFinding.risk.in_(["Critical", "High"])
         ).count()
-        total_findings = db.query(ScanFinding).count()
+        total_findings = db.query(ScanFinding).filter(
+            ScanFinding.tenant_id == tenant_id
+        ).count()
     except Exception:
         critical_findings = 0
         total_findings = 0
 
     # Check KEV data for vulnerability counts
     from services.kev_loader import get_finding_stats
-    kev_stats = get_finding_stats(db)
+    kev_stats = get_finding_stats(db, tenant_id=tenant_id)
     p0_count = kev_stats["critical_count"]
     ransomware_count = kev_stats["ransomware_linked"]
 
     # Check STRIKE simulation results
-    from models import StrikeSimulation
+    from models import StrikeAuthorization, StrikeSimulation
     try:
-        latest_sim = db.query(StrikeSimulation).filter(
-            StrikeSimulation.status == "completed"
+        latest_sim = db.query(StrikeSimulation).join(
+            StrikeAuthorization,
+            StrikeSimulation.authorization_id == StrikeAuthorization.id,
+        ).filter(
+            StrikeSimulation.status == "completed",
+            StrikeAuthorization.tenant_id == tenant_id,
         ).order_by(StrikeSimulation.completed_at.desc()).first()
         exploitable_count = 0
         if latest_sim and latest_sim.results:
@@ -213,20 +236,25 @@ def _get_live_advisories(db: Session) -> dict:
 
     # Check if scanner has been run recently
     try:
-        latest_scan = db.query(ScanFinding).order_by(ScanFinding.discovered_at.desc()).first()
+        latest_scan = db.query(ScanFinding).filter(
+            ScanFinding.tenant_id == tenant_id
+        ).order_by(ScanFinding.discovered_at.desc()).first()
         has_recent_scan = latest_scan is not None
     except Exception:
         has_recent_scan = False
 
     # ── Patching Controls ──
     if p0_count > 0:
-        patch_msg = f"{p0_count} critical (P0) CVEs from CISA KEV remain unpatched. {ransomware_count} linked to ransomware."
+        patch_msg = (
+            f"{p0_count} tracked P0 findings require applicability and remediation review. "
+            f"{ransomware_count} are ransomware-linked."
+        )
         advisories["MAS-TRM-11.1.1"] = {"level": "critical", "message": patch_msg}
         advisories["IM8A-AM-3"] = {"level": "critical", "message": patch_msg}
         advisories["NIST-PR.PS-1"] = {"level": "warning", "message": patch_msg}
         advisories["PCI-6.3.3"] = {"level": "warning", "message": f"{p0_count} critical CVEs may exceed PCI patching SLA."}
         advisories["ISO-A.8.8"] = {"level": "warning", "message": f"{p0_count} critical vulnerabilities require management attention."}
-        advisories["CT-PRO-3"] = {"level": "warning", "message": f"{p0_count} unpatched critical vulnerabilities detected."}
+        advisories["CT-PRO-3"] = {"level": "warning", "message": f"{p0_count} tracked P0 findings require review."}
 
     # ── Vulnerability Scanning Controls ──
     if has_recent_scan:
@@ -244,42 +272,60 @@ def _get_live_advisories(db: Session) -> dict:
     # ── Monitoring Controls ──
     from models import AuditLog
     try:
-        audit_count = db.query(AuditLog).count()
+        audit_count = db.query(AuditLog).filter(AuditLog.tenant_id == tenant_id).count()
         if audit_count > 0:
-            advisories["MAS-TRM-9.1.1"] = {"level": "ok", "message": f"TACF audit trail active with {audit_count} records and hash chain integrity."}
-            advisories["ISO-A.8.15"] = {"level": "ok", "message": f"{audit_count} audit log entries with tamper-proof hash chain."}
-            advisories["SOC2-CC7.1"] = {"level": "ok", "message": "System monitoring active via TACF audit trail."}
+            verification = verify_audit_chain(db, tenant_id)
+            if verification["intact"]:
+                message = f"TACF audit trail has {audit_count} records with a verified tamper-evident chain."
+                advisories["MAS-TRM-9.1.1"] = {"level": "ok", "message": message}
+                advisories["ISO-A.8.15"] = {"level": "ok", "message": message}
+                advisories["SOC2-CC7.1"] = {"level": "ok", "message": "TACF audit-chain verification passed."}
+            else:
+                message = "TACF audit-chain verification failed for this tenant."
+                advisories["MAS-TRM-9.1.1"] = {"level": "critical", "message": message}
+                advisories["ISO-A.8.15"] = {"level": "critical", "message": message}
+                advisories["SOC2-CC7.1"] = {"level": "critical", "message": message}
     except Exception:
         pass
 
     return advisories
 
 
-def _get_control_status(db: Session, framework_id: str, control_id: str, default: str) -> str:
+def _get_control_status(db: Session, tenant_id: str, framework_id: str, control_id: str, default: str) -> str:
     """Get control status from DB, falling back to default."""
     row = db.query(ControlStatus).filter(
+        ControlStatus.tenant_id == tenant_id,
         ControlStatus.framework_id == framework_id,
         ControlStatus.control_id == control_id
     ).first()
     return row.status if row else default
 
-def _get_evidence_count(db: Session, framework_id: str, control_id: str) -> int:
+def _get_evidence_count(db: Session, tenant_id: str, framework_id: str, control_id: str) -> int:
     return db.query(ControlEvidence).filter(
+        ControlEvidence.tenant_id == tenant_id,
         ControlEvidence.framework_id == framework_id,
         ControlEvidence.control_id == control_id
     ).count()
+
+
+def _principal_tenant(user: dict) -> str:
+    tenant_id = get_auth_context(user).tenant_id
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant context")
+    return tenant_id
 
 
 # ── API Endpoints ────────────────────────────────────────────────────────────
 
 @router.get("/frameworks")
 def get_frameworks(db: Session = Depends(get_db), user = Depends(get_current_user)):
-    advisories = _get_live_advisories(db)
+    tenant_id = _principal_tenant(user)
+    advisories = _get_live_advisories(db, tenant_id)
     result = []
     for key, fw in FRAMEWORKS.items():
         controls = fw["controls"]
         total = len(controls)
-        statuses = [_get_control_status(db, key, c["id"], c["default_status"]) for c in controls]
+        statuses = [_get_control_status(db, tenant_id, key, c["id"], c["default_status"]) for c in controls]
         compliant = sum(1 for s in statuses if s == "compliant")
         partial = sum(1 for s in statuses if s == "partial")
         non_compliant = sum(1 for s in statuses if s == "non_compliant")
@@ -302,11 +348,12 @@ def get_framework_controls(framework_id: str, db: Session = Depends(get_db), use
     fw = FRAMEWORKS.get(framework_id)
     if not fw:
         raise HTTPException(status_code=404, detail="Framework not found")
-    advisories = _get_live_advisories(db)
+    tenant_id = _principal_tenant(user)
+    advisories = _get_live_advisories(db, tenant_id)
     controls = []
     for c in fw["controls"]:
-        status = _get_control_status(db, framework_id, c["id"], c["default_status"])
-        ev_count = _get_evidence_count(db, framework_id, c["id"])
+        status = _get_control_status(db, tenant_id, framework_id, c["id"], c["default_status"])
+        ev_count = _get_evidence_count(db, tenant_id, framework_id, c["id"])
         ctrl_data = {
             "id": c["id"], "title": c["title"], "description": c["description"],
             "status": status, "evidence_count": ev_count
@@ -320,7 +367,7 @@ def get_framework_controls(framework_id: str, db: Session = Depends(get_db), use
 @router.get("/advisories")
 def get_all_advisories(db: Session = Depends(get_db), user = Depends(get_current_user)):
     """Return all active compliance advisory alerts from live system data."""
-    return _get_live_advisories(db)
+    return _get_live_advisories(db, _principal_tenant(user))
 
 
 class ControlStatusUpdate(BaseModel):
@@ -337,7 +384,9 @@ def update_control_status(framework_id: str, control_id: str, update: ControlSta
     if not ctrl:
         raise HTTPException(status_code=404, detail="Control not found")
 
+    tenant_id = _principal_tenant(user)
     existing = db.query(ControlStatus).filter(
+        ControlStatus.tenant_id == tenant_id,
         ControlStatus.framework_id == framework_id,
         ControlStatus.control_id == control_id
     ).first()
@@ -349,16 +398,20 @@ def update_control_status(framework_id: str, control_id: str, update: ControlSta
         existing.updated_by = user.get("sub", "unknown")
     else:
         db.add(ControlStatus(
+            tenant_id=tenant_id,
             framework_id=framework_id, control_id=control_id,
             status=update.status, updated_by=user.get("sub", "unknown")
         ))
-    db.commit()
-
     user_email = user.get("sub", "unknown")
-    append_to_audit_log(AuditEntry(
-        user=user_email, action="CONTROL_STATUS_UPDATE", module="STANDARD",
-        detail=f"Control {control_id} ({ctrl['title']}) in {fw['name']}: {old_status} → {update.status}"
-    ))
+    try:
+        append_to_audit_log_db(db, AuditEntry(
+            user=user_email, action="CONTROL_STATUS_UPDATE", module="STANDARD",
+            detail=f"Control {control_id} ({ctrl['title']}) in {fw['name']}: {old_status} to {update.status}",
+        ), commit=False)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Control status update failed")
     return {"status": "updated", "control": {"id": control_id, "title": ctrl["title"], "status": update.status}}
 
 
@@ -372,7 +425,7 @@ async def upload_evidence(
     user = Depends(get_current_user),
 ):
     """Upload evidence for a compliance control. Accepts file upload or creates a marker record."""
-    import os, traceback
+    import os
     from uuid import uuid4
 
     if ".." in framework_id or "/" in framework_id or "\\" in framework_id:
@@ -426,7 +479,9 @@ async def upload_evidence(
                 raise HTTPException(status_code=400, detail="File exceeds 10 MB limit.")
 
             root_dir = get_evidence_storage_root()
-            evidence_dir = os.path.join(root_dir, 'standard', framework_id, control_id)
+            evidence_dir = os.path.join(
+                root_dir, "standard", assigned_tenant_id, framework_id, control_id
+            )
             
             if os.path.islink(evidence_dir):
                 raise HTTPException(status_code=400, detail="Symlinks not allowed in storage directory path")
@@ -456,19 +511,32 @@ async def upload_evidence(
             uploaded_by=auth_ctx.user_id
         )
         db.add(ev)
-        db.commit()
-        db.refresh(ev)
+        db.flush()
 
         log_evidence_action(
             auth_ctx, ev.id, "EVIDENCE_UPLOADED", "STANDARD",
-            "success", "authorized", assigned_tenant_id
+            "success", "authorized", assigned_tenant_id,
+            db=db, commit=False,
         )
+        db.commit()
+        db.refresh(ev)
         return {"status": "uploaded", "evidence": {"id": ev.id, "filename": filename, "uploaded_at": ev.uploaded_at.isoformat() if ev.uploaded_at else ""}}
     except HTTPException:
+        db.rollback()
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
         raise
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Evidence upload failed: {str(e)}")
+    except Exception:
+        db.rollback()
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+        raise HTTPException(status_code=500, detail="Evidence upload failed")
 
 
 @router.get("/frameworks/{framework_id}/controls/{control_id}/evidence")
@@ -781,7 +849,10 @@ def _iso_z(dt: datetime) -> str:
 
 @router.get("/mas-trm/incident-reports/latest")
 def get_latest_incident_report(db: Session = Depends(get_db), user = Depends(get_current_user)):
-    latest = db.query(IncidentReport).order_by(IncidentReport.generated_at.desc()).first()
+    tenant_id = _principal_tenant(user)
+    latest = db.query(IncidentReport).filter(
+        IncidentReport.tenant_id == tenant_id
+    ).order_by(IncidentReport.generated_at.desc()).first()
     return latest.payload if latest else None
 
 
@@ -796,7 +867,9 @@ def list_incident_reports(
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
     sort_expr = IncidentReport.generated_at.asc() if order.lower() == "asc" else IncidentReport.generated_at.desc()
-    query = db.query(IncidentReport)
+    query = db.query(IncidentReport).filter(
+        IncidentReport.tenant_id == _principal_tenant(user)
+    )
     total = query.count()
     rows = query.order_by(sort_expr).offset(offset).limit(limit).all()
     return {
@@ -819,11 +892,12 @@ def generate_incident_report(
     1 hour of discovering a relevant cyber security incident.
     """
     user_email = user.get("sub", "unknown")
+    tenant_id = _principal_tenant(user)
     now = datetime.now(timezone.utc)
 
     # Gather live threat context
     from services.kev_loader import get_finding_stats
-    kev_stats = get_finding_stats(db)
+    kev_stats = get_finding_stats(db, tenant_id=tenant_id)
     p0_count = kev_stats["critical_count"]
     ransomware_count = kev_stats["ransomware_linked"]
 
@@ -831,6 +905,7 @@ def generate_incident_report(
     from models import ScanFinding
     try:
         recent_critical = db.query(ScanFinding).filter(
+            ScanFinding.tenant_id == tenant_id,
             ScanFinding.risk.in_(["Critical", "High"])
         ).order_by(ScanFinding.discovered_at.desc()).limit(10).all()
         scanner_findings = [{
@@ -841,10 +916,14 @@ def generate_incident_report(
         scanner_findings = []
 
     # Get latest STRIKE results
-    from models import StrikeSimulation
+    from models import StrikeAuthorization, StrikeSimulation
     try:
-        latest_sim = db.query(StrikeSimulation).filter(
-            StrikeSimulation.status == "completed"
+        latest_sim = db.query(StrikeSimulation).join(
+            StrikeAuthorization,
+            StrikeSimulation.authorization_id == StrikeAuthorization.id,
+        ).filter(
+            StrikeSimulation.status == "completed",
+            StrikeAuthorization.tenant_id == tenant_id,
         ).order_by(StrikeSimulation.completed_at.desc()).first()
         strike_summary = None
         if latest_sim and latest_sim.results:
@@ -860,7 +939,7 @@ def generate_incident_report(
 
     # Get TES score
     from routers.synthesis import get_dashboard_data
-    dashboard = get_dashboard_data(db)
+    dashboard = get_dashboard_data(db, tenant_id=tenant_id)
     tes_score = dashboard.get("aggregate_tes", 0)
 
     # Build the structured report
@@ -911,6 +990,7 @@ def generate_incident_report(
 
     db.add(IncidentReport(
         report_id=report_id,
+        tenant_id=tenant_id,
         report_type=report["type"],
         status=report["status"],
         severity=req.severity,
@@ -919,12 +999,14 @@ def generate_incident_report(
         notification_deadline=deadline,
         payload=report,
     ))
-    db.commit()
-
-    # Log to TACF audit trail
-    append_to_audit_log(AuditEntry(
-        user=user_email, action="MAS_TRM_INCIDENT_REPORT_GENERATED", module="STANDARD",
-        detail=f"Incident report {report_id} generated and stored. Severity: {req.severity}. TES: {tes_score:.2f}. Deadline: {_iso_z(deadline)}"
-    ))
+    try:
+        append_to_audit_log_db(db, AuditEntry(
+            user=user_email, action="MAS_TRM_INCIDENT_REPORT_GENERATED", module="STANDARD",
+            detail=f"Incident report {report_id} generated and stored. Severity: {req.severity}. TES: {tes_score:.2f}. Deadline: {_iso_z(deadline)}",
+        ), commit=False)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Incident report generation failed")
 
     return report

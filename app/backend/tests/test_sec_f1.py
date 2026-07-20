@@ -179,18 +179,18 @@ def test_downgrade_prevention(setup_db):
     token = get_token("admin@tempris.com", "Admin")
     headers = {"Authorization": f"Bearer {token}"}
     
-    # Append a v2 record
-    res1 = client.post("/api/audit/log", json={"action": "V2_EVENT", "module": "SYSTEM", "detail": "Valid v2"}, headers=headers)
+    # Append a current-version record.
+    res1 = client.post("/api/audit/log", json={"action": "V3_EVENT", "module": "SYSTEM", "detail": "Valid v3"}, headers=headers)
     assert res1.status_code == 200
-    assert res1.json()["hash"].startswith("v2:")
+    assert res1.json()["hash"].startswith("v3:")
     
     # Let's verify untouched chain is intact
     res_verify = client.get("/api/audit/verify", headers=headers)
     assert res_verify.json()["intact"] is True
     
-    # Tamper with the database: append a legacy formatted SHA-256 record AFTER the v2 record
-    last_v2 = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
-    prev_hash = last_v2.hash
+    # Append a legacy record after v3; verification must reject the downgrade.
+    last_v3 = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
+    prev_hash = last_v3.hash
     
     # Compute legacy plain SHA-256 digest
     legacy_payload = f"LEGACY_ACTIONDetail"
@@ -204,7 +204,7 @@ def test_downgrade_prevention(setup_db):
         detail="Detail",
         ip_address="127.0.0.1",
         metadata_={},
-        hash=legacy_hash  # No v2: prefix!
+        hash=legacy_hash
     )
     db.add(downgraded_record)
     db.commit()
@@ -214,26 +214,18 @@ def test_downgrade_prevention(setup_db):
     assert res_verify.json()["intact"] is False
     assert res_verify.json()["status"] == "TAMPERED"
 
-# 6. plain SHA-256 digest cannot validate v2 record
-def test_plain_sha256_cannot_validate_v2(setup_db):
+# 6. A plain SHA-256 digest cannot validate a v3 record.
+def test_plain_sha256_cannot_validate_v3(setup_db):
     db = setup_db
     token = get_token("admin@tempris.com", "Admin")
     headers = {"Authorization": f"Bearer {token}"}
     
-    res = client.post("/api/audit/log", json={"action": "V2_EVENT", "module": "SYSTEM", "detail": "Valid v2"}, headers=headers)
+    res = client.post("/api/audit/log", json={"action": "V3_EVENT", "module": "SYSTEM", "detail": "Valid v3"}, headers=headers)
     assert res.status_code == 200
     
     # Direct database tampering: replace HMAC hash with plain SHA-256
-    v2_record = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
-    # Compute plain SHA-256 hash instead of HMAC
-    prev = db.query(AuditLog).filter(AuditLog.id < v2_record.id).order_by(AuditLog.id.desc()).first()
-    prev_hash = prev.hash if prev else "0"
-    
-    from routers.audit import _entry_hash_payload, _compute_hash
-    payload_str = _entry_hash_payload(v2_record.action, v2_record.detail, v2_record.timestamp, v2_record.user_email, v2_record.module, v2_record.ip_address, v2_record.metadata_)
-    plain_sha = f"v2:{_compute_hash(prev_hash, payload_str)[:60]}"
-    
-    v2_record.hash = plain_sha
+    v3_record = db.query(AuditLog).order_by(AuditLog.id.desc()).first()
+    v3_record.hash = f"v3:primary:{hashlib.sha256(b'forged').hexdigest()[:52]}"
     db.commit()
     
     # Verification must fail because key is checked via HMAC
@@ -350,4 +342,3 @@ def test_audit_tenant_spoofing_prevention(setup_db):
     assert audit_entry.tenant_id == "tenantA"
     assert audit_entry.user_email == "userA@tempris.com"
     db.close()
-

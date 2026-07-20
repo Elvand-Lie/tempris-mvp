@@ -233,6 +233,14 @@ def login(req: LoginRequest, request: Request, response: Response, db: Session =
     if user.get("disabled") is True:
         raise HTTPException(status_code=403, detail="Account is disabled")
 
+    # Password verification establishes the server-side principal for the
+    # transactional login audit; no actor or tenant comes from request data.
+    request.state.authenticated_user = {
+        "sub": req.email,
+        "tenant_id": user.get("tenant_id"),
+        "role": user.get("role"),
+    }
+
     # Generate session parameters
     sid = str(uuid.uuid4())
     jti = uuid.uuid4().hex
@@ -262,7 +270,7 @@ def login(req: LoginRequest, request: Request, response: Response, db: Session =
             module="AUTH",
             detail=f"User logged in successfully. Session created: {sid}",
             ip_address=client_ip
-        ))
+        ), commit=False)
 
         db.commit()
     except Exception as e:
@@ -351,7 +359,7 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
             action="USER_LOGOUT",
             module="AUTH",
             detail=f"User logged out successfully. Session revoked: {sid}"
-        ))
+        ), commit=False)
         db.commit()
     except Exception:
         db.rollback()
@@ -603,7 +611,7 @@ def revoke_session(
             action=audit_action,
             module="AUTH",
             detail=f"Session {session_id} for user {target_sub} revoked by {caller_sub} ({caller_role})"
-        ))
+        ), commit=False)
         db.commit()
     except Exception:
         db.rollback()
@@ -658,11 +666,15 @@ ROLE_PERMISSIONS = {
     "Superadmin": frozenset({"list", "read", "preview", "download", "delete"}),
     "Admin": frozenset({"list", "read", "preview", "download", "delete"}),
     "Analyst": frozenset({"list", "read", "preview", "download"}),
-    "Viewer": frozenset({"list", "read", "preview", "download"}),
+    "Viewer": frozenset({"list", "read"}),
     "Read-only": frozenset({"list"}),
     "partner-admin": frozenset({"list", "read", "preview", "download", "delete"}),
     "partner-analyst": frozenset({"list", "read", "preview", "download"}),
 }
+
+EVIDENCE_CONTENT_ROLES = frozenset({
+    "Superadmin", "Admin", "Analyst", "partner-admin", "partner-analyst",
+})
 
 def get_auth_context(user_payload: dict) -> AuthContext:
     email = user_payload.get("sub", "")
@@ -698,9 +710,9 @@ def scoped_evidence_query(
     if required_permission == EvidencePermission.DELETE and user.role not in ("Superadmin", "Admin", "partner-admin"):
         raise HTTPException(status_code=403, detail="Permission denied")
 
-    # 3. Framework-specific role requirements (Standard framework requires Analyst+)
+    # 3. Evidence contents require Analyst+ for every compliance framework.
     if required_permission in (EvidencePermission.DOWNLOAD, EvidencePermission.PREVIEW):
-        if framework_id != "ISO42001" and user.role not in ("Superadmin", "Admin", "Analyst", "partner-admin", "partner-analyst"):
+        if user.role not in EVIDENCE_CONTENT_ROLES:
             raise HTTPException(status_code=403, detail="Permission denied")
 
     # 4. Build Scoped Query

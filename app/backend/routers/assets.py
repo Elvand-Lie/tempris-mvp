@@ -8,11 +8,19 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from services.database import get_db
 from models import Asset
-from routers.audit import append_to_audit_log, AuditEntry
-from routers.auth import get_current_user, require_role
+from routers.audit import append_to_audit_log_db, AuditEntry
+from routers.auth import get_auth_context, get_current_user, require_role
 from datetime import datetime, timezone
+from uuid import uuid4
 
 router = APIRouter()
+
+
+def _verified_tenant_id(user: dict) -> str:
+    tenant_id = get_auth_context(user).tenant_id
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant context")
+    return tenant_id
 
 # ── Request Models ────────────────────────────────────────────────────────────
 
@@ -53,7 +61,7 @@ def list_assets(
     user = Depends(get_current_user),
 ):
     """List all assets with optional filters and pagination."""
-    query = db.query(Asset)
+    query = db.query(Asset).filter(Asset.tenant_id == _verified_tenant_id(user))
     
     if status:
         query = query.filter(Asset.status == status)
@@ -84,7 +92,10 @@ def get_asset_stats(
     user = Depends(get_current_user),
 ):
     """Summary counts by criticality and type."""
-    all_assets = db.query(Asset).filter(Asset.status != "decommissioned").all()
+    all_assets = db.query(Asset).filter(
+        Asset.tenant_id == _verified_tenant_id(user),
+        Asset.status != "decommissioned",
+    ).all()
     
     by_criticality = {"critical": 0, "high": 0, "medium": 0, "low": 0}
     by_type = {}
@@ -107,7 +118,10 @@ def get_asset(
     user = Depends(get_current_user),
 ):
     """Get a single asset by ID."""
-    asset = db.query(Asset).filter(Asset.id == asset_id).first()
+    asset = db.query(Asset).filter(
+        Asset.id == asset_id,
+        Asset.tenant_id == _verified_tenant_id(user),
+    ).first()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
     return _serialize_asset(asset)
@@ -119,12 +133,12 @@ def create_asset(
     user = Depends(require_role("Superadmin", "Admin", "Analyst")),
 ):
     """Create a new asset. Requires Analyst+ role."""
-    # Auto-generate ID
-    count = db.query(Asset).count()
-    asset_id = f"ASSET-{count + 1:04d}"
+    tenant_id = _verified_tenant_id(user)
+    asset_id = f"ASSET-{uuid4().hex[:12].upper()}"
     
     asset = Asset(
         id=asset_id,
+        tenant_id=tenant_id,
         name=req.name,
         asset_type=req.asset_type,
         ip_address=req.ip_address,
@@ -135,16 +149,20 @@ def create_asset(
         tags=req.tags,
         notes=req.notes,
     )
-    db.add(asset)
-    db.commit()
-    db.refresh(asset)
-    
-    append_to_audit_log(AuditEntry(
-        user=user.get("sub", "unknown"),
-        action="ASSET_CREATED",
-        module="ASSETS",
-        detail=f"Created asset {asset_id}: {req.name} ({req.criticality} criticality)"
-    ))
+    try:
+        db.add(asset)
+        db.flush()
+        append_to_audit_log_db(db, AuditEntry(
+            user=user.get("sub", "unknown"),
+            action="ASSET_CREATED",
+            module="ASSETS",
+            detail=f"Created asset {asset_id}: {req.name} ({req.criticality} criticality)"
+        ), commit=False)
+        db.commit()
+        db.refresh(asset)
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Asset creation failed")
     
     return _serialize_asset(asset)
 
@@ -156,7 +174,10 @@ def update_asset(
     user = Depends(require_role("Superadmin", "Admin", "Analyst")),
 ):
     """Update an existing asset. Requires Analyst+ role."""
-    asset = db.query(Asset).filter(Asset.id == asset_id).first()
+    asset = db.query(Asset).filter(
+        Asset.id == asset_id,
+        Asset.tenant_id == _verified_tenant_id(user),
+    ).first()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
     
@@ -168,15 +189,19 @@ def update_asset(
             setattr(asset, field, value)
     
     if changes:
-        asset.updated_at = datetime.now(timezone.utc)
-        db.commit()
-        
-        append_to_audit_log(AuditEntry(
-            user=user.get("sub", "unknown"),
-            action="ASSET_UPDATED",
-            module="ASSETS",
-            detail=f"Updated {asset_id}: {'; '.join(changes[:5])}"
-        ))
+        try:
+            asset.updated_at = datetime.now(timezone.utc)
+            db.flush()
+            append_to_audit_log_db(db, AuditEntry(
+                user=user.get("sub", "unknown"),
+                action="ASSET_UPDATED",
+                module="ASSETS",
+                detail=f"Updated {asset_id}: {'; '.join(changes[:5])}"
+            ), commit=False)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="Asset update failed")
     
     return _serialize_asset(asset)
 
@@ -187,20 +212,27 @@ def decommission_asset(
     user = Depends(require_role("Superadmin", "Admin")),
 ):
     """Soft-delete (decommission) an asset. Requires Admin+ role."""
-    asset = db.query(Asset).filter(Asset.id == asset_id).first()
+    asset = db.query(Asset).filter(
+        Asset.id == asset_id,
+        Asset.tenant_id == _verified_tenant_id(user),
+    ).first()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
     
-    asset.status = "decommissioned"
-    asset.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    
-    append_to_audit_log(AuditEntry(
-        user=user.get("sub", "unknown"),
-        action="ASSET_DECOMMISSIONED",
-        module="ASSETS",
-        detail=f"Decommissioned asset {asset_id}: {asset.name}"
-    ))
+    try:
+        asset.status = "decommissioned"
+        asset.updated_at = datetime.now(timezone.utc)
+        db.flush()
+        append_to_audit_log_db(db, AuditEntry(
+            user=user.get("sub", "unknown"),
+            action="ASSET_DECOMMISSIONED",
+            module="ASSETS",
+            detail=f"Decommissioned asset {asset_id}: {asset.name}"
+        ), commit=False)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Asset decommission failed")
     
     return {"status": "decommissioned", "asset_id": asset_id}
 

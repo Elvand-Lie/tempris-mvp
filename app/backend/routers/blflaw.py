@@ -48,6 +48,8 @@ def intake_blflaw(
     auth_ctx = get_auth_context(user)
     user_email = auth_ctx.user_id
     tenant_id = auth_ctx.tenant_id
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant context")
     
     # Enforce approved flaw types
     if req.flaw_type.upper() not in APPROVED_FLAW_TYPES:
@@ -118,15 +120,18 @@ def intake_blflaw(
     )
     db.add(history)
     
-    append_to_audit_log_db(db, AuditEntry(
-        user=user_email,
-        action="BLFLAW_INTAKE",
-        module="SURGE",
-        detail=f"Intake business logic flaw {finding_id} scoped to tenant {tenant_id}."
-    ))
-    
-    db.commit()
-    db.refresh(finding)
+    try:
+        append_to_audit_log_db(db, AuditEntry(
+            user=user_email,
+            action="BLFLAW_INTAKE",
+            module="SURGE",
+            detail=f"Intake business logic flaw {finding_id} scoped to tenant {tenant_id}."
+        ), commit=False)
+        db.commit()
+        db.refresh(finding)
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Business logic flaw intake failed")
     return finding
 
 @router.get("")
@@ -136,9 +141,12 @@ def list_blflaws(
 ):
     auth_ctx = get_auth_context(user)
     
-    query = db.query(Finding).filter(Finding.finding_type == "business_logic")
-    if not auth_ctx.is_superadmin:
-        query = query.filter(Finding.tenant_id == auth_ctx.tenant_id)
+    if not auth_ctx.tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant context")
+    query = db.query(Finding).filter(
+        Finding.finding_type == "business_logic",
+        Finding.tenant_id == auth_ctx.tenant_id,
+    )
         
     return query.all()
 
@@ -152,12 +160,15 @@ def transition_blflaw(
     auth_ctx = get_auth_context(user)
     user_email = auth_ctx.user_id
     
-    finding = db.query(Finding).filter(Finding.id == finding_id, Finding.finding_type == "business_logic").first()
+    if not auth_ctx.tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant context")
+    finding = db.query(Finding).filter(
+        Finding.id == finding_id,
+        Finding.finding_type == "business_logic",
+        Finding.tenant_id == auth_ctx.tenant_id,
+    ).first()
     if not finding:
         raise HTTPException(status_code=404, detail="Business logic flaw not found")
-        
-    if not auth_ctx.is_superadmin and finding.tenant_id != auth_ctx.tenant_id:
-        raise HTTPException(status_code=403, detail="Access denied")
         
     current_status = finding.status or "OPEN"
     target_status = req.new_status.upper()
@@ -184,13 +195,16 @@ def transition_blflaw(
         )
         db.add(history)
         
-        append_to_audit_log_db(db, AuditEntry(
-            user=user_email,
-            action="BLFLAW_TRANSITION",
-            module="SURGE",
-            detail=f"Transitioned {finding_id} status from {current_status} to {target_status}."
-        ))
-        
-        db.commit()
+        try:
+            append_to_audit_log_db(db, AuditEntry(
+                user=user_email,
+                action="BLFLAW_TRANSITION",
+                module="SURGE",
+                detail=f"Transitioned {finding_id} status from {current_status} to {target_status}."
+            ), commit=False)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="Business logic flaw transition failed")
         
     return {"status": "success", "current_status": finding.status}

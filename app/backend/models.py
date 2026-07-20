@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime, Boolean, JSON, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime, Boolean, JSON, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.sql import func
 from services.database import Base
 
@@ -32,6 +32,10 @@ class EdipDecision(Base):
     explanation = Column(Text)
     original_decision = Column(String(20))  # for tracking overrides
     override_reason = Column(Text)
+
+    __table_args__ = (
+        UniqueConstraint(tenant_id, finding_id, name="uq_edip_decisions_tenant_finding"),
+    )
 
 
 class StrikeAuthorization(Base):
@@ -70,6 +74,15 @@ class ControlStatus(Base):
     status = Column(String(20), default="not_assessed")
     updated_by = Column(String(255))
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            tenant_id,
+            framework_id,
+            control_id,
+            name="uq_control_statuses_tenant_framework_control",
+        ),
+    )
 
 
 class ControlEvidence(Base):

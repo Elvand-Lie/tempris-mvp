@@ -50,7 +50,7 @@ def create_ticket(
         action="OCQ_TICKET_CREATED",
         module="OCQ",
         detail=f"Created change ticket {ticket_id}: {req.title}."
-    ))
+    ), commit=False)
     db.commit()
     db.refresh(ticket)
     return ticket
@@ -109,7 +109,7 @@ def approve_ticket(
         action="OCQ_TICKET_APPROVED",
         module="OCQ",
         detail=f"Approved change ticket {ticket_id}."
-    ))
+    ), commit=False)
     db.commit()
     return {"status": "APPROVED"}
 
@@ -139,7 +139,7 @@ def execute_ticket(
         action="OCQ_TICKET_EXECUTED",
         module="OCQ",
         detail=f"Executed change ticket {ticket_id}."
-    ))
+    ), commit=False)
     db.commit()
     return {"status": "EXECUTED"}
 

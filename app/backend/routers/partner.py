@@ -94,16 +94,14 @@ def onboard_partner(
         )
         db.add(existing)
         
-    db.commit()
-    db.refresh(existing)
-    
     append_to_audit_log_db(db, AuditEntry(
         user=user_email,
         action="PARTNER_ONBOARD",
         module="PARTNER",
         detail=f"Onboarded/updated partner certification track for tenant {target_tenant}."
-    ))
+    ), commit=False)
     db.commit()
+    db.refresh(existing)
     return existing
 
 @router.get("/onboard/{tenant_id}", response_model=PartnerOnboardResponse)
@@ -236,7 +234,7 @@ def reset_sandbox(
             action="SANDBOX_RESET",
             module="PARTNER",
             detail=f"Reset training sandbox database for tenant {target_tenant}."
-        ))
+        ), commit=False)
         
         db.commit()
     except Exception as e:

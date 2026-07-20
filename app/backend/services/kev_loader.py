@@ -77,6 +77,10 @@ def get_findings_paginated(
 
     query = db.query(Finding)
 
+    if not user_tenant_id:
+        raise ValueError("A verified tenant ID is required for paginated finding access")
+    query = query.filter(Finding.tenant_id == user_tenant_id)
+
     if priority:
         query = query.filter(Finding.priority == priority)
     if search:
@@ -95,15 +99,12 @@ def get_findings_paginated(
 
     # Filter by EDIP decision status
     if decision_filter in ("pending", "decided"):
-        from routers.auth import USERS
-        # Find all matching decided findings for this tenant (or all if superadmin)
-        all_decisions = db.query(EdipDecision).all()
-        decided_ids_list = []
-        for d in all_decisions:
-            decider_info = USERS.get(d.decided_by)
-            decider_tenant = decider_info.get("tenant_id") if decider_info else None
-            if is_superadmin or (user_tenant_id and decider_tenant == user_tenant_id):
-                decided_ids_list.append(d.finding_id)
+        decided_ids_list = [
+            row[0]
+            for row in db.query(EdipDecision.finding_id).filter(
+                EdipDecision.tenant_id == user_tenant_id
+            ).all()
+        ]
                 
         if decision_filter == "pending":
             query = query.filter(~Finding.id.in_(decided_ids_list))
@@ -128,10 +129,13 @@ def get_findings_paginated(
     return [_finding_to_dict(f) for f in results], total
 
 
-def get_finding_by_id(db: Session, finding_id: str) -> dict | None:
+def get_finding_by_id(db: Session, finding_id: str, tenant_id: str | None = None) -> dict | None:
     """Look up a single finding by ID."""
     from models import Finding
-    f = db.query(Finding).filter(Finding.id == finding_id).first()
+    query = db.query(Finding).filter(Finding.id == finding_id)
+    if tenant_id:
+        query = query.filter(Finding.tenant_id == tenant_id)
+    f = query.first()
     return _finding_to_dict(f) if f else None
 
 
@@ -156,10 +160,13 @@ def get_finding_stats(db: Session, tenant_id: str = None) -> dict:
     }
 
 
-def get_unique_vendors(db: Session) -> list[str]:
+def get_unique_vendors(db: Session, tenant_id: str | None = None) -> list[str]:
     """Get distinct vendor names for filter dropdowns."""
     from models import Finding
-    rows = db.query(Finding.vendor).distinct().filter(Finding.vendor.isnot(None)).all()
+    query = db.query(Finding.vendor).distinct().filter(Finding.vendor.isnot(None))
+    if tenant_id:
+        query = query.filter(Finding.tenant_id == tenant_id)
+    rows = query.all()
     return sorted([r[0] for r in rows])
 
 

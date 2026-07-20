@@ -133,7 +133,7 @@ def test_blflaw_lifecycle_and_security_rules():
     assert len(resp_view_b.json()) == 0
 
     resp_trans_b = client.post(f"/api/blflaw/{flaw_id}/transition", json={"new_status": "TRIAGED"}, headers=headers_b)
-    assert resp_trans_b.status_code == 403
+    assert resp_trans_b.status_code == 404
 
     # 4. Role restrictions: User A (role User) cannot transition Flaw A
     resp_trans_u = client.post(f"/api/blflaw/{flaw_id}/transition", json={"new_status": "TRIAGED"}, headers=headers_u)

@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from models import Finding
-from routers.audit import AuditEntry, append_to_audit_log
-from routers.auth import require_role
+from routers.audit import AuditEntry, append_to_audit_log_db
+from routers.auth import get_auth_context, require_role
 from services.database import get_db
 from services.tes_engine import calculate_sss_tes, priority_from_tes, public_decision_for_finding, public_severity
 
@@ -47,15 +47,23 @@ def _tacf_metadata(kind: str, evidence: str) -> dict:
     }
 
 
-def _create_finding(db: Session, req: SssIntake, kind: str) -> Finding:
+def _tenant_id(user: dict) -> str:
+    tenant_id = get_auth_context(user).tenant_id
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant context")
+    return tenant_id
+
+
+def _create_finding(db: Session, req: SssIntake, kind: str, tenant_id: str) -> Finding:
     fid = req.finding_id or f"SSS-{datetime.now(timezone.utc).year}-{kind}-{uuid4().hex[:6].upper()}"
-    if db.query(Finding).filter(Finding.cve == fid).first():
+    if db.query(Finding).filter(Finding.cve == fid, Finding.tenant_id == tenant_id).first():
         raise HTTPException(status_code=409, detail="Finding already exists")
 
     scoring = {"base_severity": req.base_severity, "AGM": req.agm, "DRF": req.drf, "TEF": req.tef}
     tes = calculate_sss_tes(scoring)
     finding = Finding(
         id=_new_id("ED"),
+        tenant_id=tenant_id,
         cve=fid,
         title=req.title,
         vendor=req.affected_ecosystem,
@@ -88,8 +96,7 @@ def _create_finding(db: Session, req: SssIntake, kind: str) -> Finding:
         source="sss",
     )
     db.add(finding)
-    db.commit()
-    db.refresh(finding)
+    db.flush()
     return finding
 
 
@@ -114,31 +121,46 @@ def _public(f: Finding) -> dict:
     return data
 
 
-def _list_findings(db: Session, kind: str) -> list[dict]:
-    rows = db.query(Finding).filter(Finding.source == "sss").order_by(Finding.created_at.desc()).limit(300).all()
+def _list_findings(db: Session, kind: str, tenant_id: str) -> list[dict]:
+    rows = db.query(Finding).filter(
+        Finding.source == "sss",
+        Finding.tenant_id == tenant_id,
+    ).order_by(Finding.created_at.desc()).limit(300).all()
     return [_public(f) for f in rows if ((f.sss_data or {}).get("source") == kind or (f.sss_data or {}).get("type") == kind)]
 
 
 @router.post("/intake/blflaw")
 def create_blflaw(req: SssIntake, request: Request, db: Session = Depends(get_db), user=Depends(require_role("Superadmin", "Admin", "Analyst"))):
     req.finding_type = req.finding_type or "BLFLAW"
-    finding = _create_finding(db, req, "BLFLAW")
-    append_to_audit_log(AuditEntry(
-        user=user.get("sub", "unknown"), action="AUTO_EDIP_INTAKE", module="EDIP",
-        detail=f"BLFLAW intake created {finding.cve}", ip_address=request.client.host if request.client else None,
-        metadata=_tacf_metadata("blflaw", finding.cve),
-    ))
+    try:
+        finding = _create_finding(db, req, "BLFLAW", _tenant_id(user))
+        append_to_audit_log_db(db, AuditEntry(
+            user=user.get("sub", "unknown"), action="AUTO_EDIP_INTAKE", module="EDIP",
+            detail=f"BLFLAW intake created {finding.cve}", ip_address=request.client.host if request.client else None,
+            metadata=_tacf_metadata("blflaw", finding.cve),
+        ), commit=False)
+        db.commit()
+        db.refresh(finding)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="EDIP intake failed")
     return _public(finding)
 
 
 @router.get("/intake/blflaw")
 def list_blflaw(db: Session = Depends(get_db), user=Depends(require_role("Superadmin", "Admin", "Analyst", "Viewer"))):
-    return {"data": _list_findings(db, "BLFLAW")}
+    return {"data": _list_findings(db, "BLFLAW", _tenant_id(user))}
 
 
 @router.put("/intake/blflaw/{finding_id}")
 def update_blflaw(finding_id: str, req: SssIntake, db: Session = Depends(get_db), user=Depends(require_role("Superadmin", "Admin", "Analyst"))):
-    f = db.query(Finding).filter(Finding.id == finding_id).first()
+    f = db.query(Finding).filter(
+        Finding.id == finding_id,
+        Finding.tenant_id == _tenant_id(user),
+    ).first()
     if not f:
         raise HTTPException(status_code=404, detail="Finding not found")
     f.title = req.title
@@ -158,16 +180,28 @@ def update_blflaw(finding_id: str, req: SssIntake, db: Session = Depends(get_db)
 @router.post("/intake/nhi")
 def create_nhi(req: SssIntake, request: Request, db: Session = Depends(get_db), user=Depends(require_role("Superadmin", "Admin", "Analyst"))):
     req.finding_type = req.finding_type if req.finding_type.startswith("NHI") else "NHI_AUTHORITY"
-    finding = _create_finding(db, req, "NHI")
-    append_to_audit_log(AuditEntry(
-        user=user.get("sub", "unknown"), action="AUTO_EDIP_INTAKE", module="EDIP",
-        detail=f"NHI intake created {finding.cve}", ip_address=request.client.host if request.client else None,
-        metadata=_tacf_metadata("nhi", finding.cve),
-    ))
+    try:
+        finding = _create_finding(db, req, "NHI", _tenant_id(user))
+        append_to_audit_log_db(db, AuditEntry(
+            user=user.get("sub", "unknown"), action="AUTO_EDIP_INTAKE", module="EDIP",
+            detail=f"NHI intake created {finding.cve}", ip_address=request.client.host if request.client else None,
+            metadata=_tacf_metadata("nhi", finding.cve),
+        ), commit=False)
+        db.commit()
+        db.refresh(finding)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="EDIP intake failed")
     return _public(finding)
 
 
 @router.get("/intake/nhi")
 def list_nhi(db: Session = Depends(get_db), user=Depends(require_role("Superadmin", "Admin", "Analyst", "Viewer"))):
-    rows = db.query(Finding).filter(Finding.source == "sss").order_by(Finding.created_at.desc()).limit(300).all()
+    rows = db.query(Finding).filter(
+        Finding.source == "sss",
+        Finding.tenant_id == _tenant_id(user),
+    ).order_by(Finding.created_at.desc()).limit(300).all()
     return {"data": [_public(f) for f in rows if str((f.sss_data or {}).get("type", "")).startswith("NHI") or (f.sss_data or {}).get("source") == "NHI"]}

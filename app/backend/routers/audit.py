@@ -97,6 +97,63 @@ def get_audit_hmac_key() -> bytes:
         return key_env.encode()
 
 
+def get_audit_hmac_key_id() -> str:
+    key_id = os.environ.get("AUDIT_HMAC_KEY_ID", "primary").strip()
+    if not key_id or len(key_id) > 8 or not all(c.isalnum() or c in "._-" for c in key_id):
+        raise RuntimeError("AUDIT_HMAC_KEY_ID must be 1-8 safe identifier characters")
+    return key_id
+
+
+def get_audit_verification_keys() -> dict[str, bytes]:
+    keys = {get_audit_hmac_key_id(): get_audit_hmac_key()}
+    raw_previous = os.environ.get("AUDIT_HMAC_PREVIOUS_KEYS", "{}").strip() or "{}"
+    try:
+        previous = json.loads(raw_previous)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("AUDIT_HMAC_PREVIOUS_KEYS must be a JSON object") from exc
+    if not isinstance(previous, dict):
+        raise RuntimeError("AUDIT_HMAC_PREVIOUS_KEYS must be a JSON object")
+    for key_id, value in previous.items():
+        if not isinstance(key_id, str) or not isinstance(value, str):
+            raise RuntimeError("Audit verification key IDs and values must be strings")
+        if not key_id or len(key_id) > 8 or not all(c.isalnum() or c in "._-" for c in key_id):
+            raise RuntimeError("Historical audit key ID is invalid")
+        if len(value) < 32:
+            raise RuntimeError("Historical audit verification keys require 32 characters")
+        if key_id in keys and keys[key_id] != value.encode():
+            raise RuntimeError("Historical audit key ID conflicts with the active key")
+        keys[key_id] = value.encode()
+    return keys
+
+
+def _compute_v3_hmac(
+    key_id: str,
+    key: bytes,
+    prev_hash: str,
+    action: str,
+    detail: str | None,
+    ts: datetime | None,
+    user: str | None,
+    module: str | None,
+    ip_address: str | None,
+    metadata: dict | None,
+) -> str:
+    payload = {
+        "prev_hash": prev_hash,
+        "timestamp": _timestamp_for_hash(ts),
+        "user": user or "",
+        "action": action or "",
+        "module": module or "",
+        "detail": detail or "",
+        "ip_address": ip_address or "",
+        "metadata": metadata or {},
+    }
+    canonical_payload = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    import hmac
+    digest = hmac.new(key, canonical_payload.encode(), hashlib.sha256).hexdigest()
+    return f"v3:{key_id}:{digest[:52]}"
+
+
 
 def _compute_v2_hmac(
     prev_hash: str,
@@ -107,6 +164,7 @@ def _compute_v2_hmac(
     module: str | None,
     ip_address: str | None,
     metadata: dict | None,
+    key: bytes | None = None,
 ) -> str:
     # Build deterministic canonical payload for v2
     payload = {
@@ -121,8 +179,8 @@ def _compute_v2_hmac(
     }
     canonical_payload = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     import hmac
-    key = get_audit_hmac_key()
-    digest = hmac.new(key, canonical_payload.encode(), hashlib.sha256).hexdigest()
+    signing_key = key or get_audit_hmac_key()
+    digest = hmac.new(signing_key, canonical_payload.encode(), hashlib.sha256).hexdigest()
     # Fit strictly within DB String(64) limit: 'v2:' (3 chars) + 60 chars of hex digest = 63 chars
     return f"v2:{digest[:60]}"
 
@@ -174,11 +232,27 @@ def _legacy_entry_hash_payloads(log: AuditLog) -> set[str]:
 
 
 def _stored_hash_matches(prev_hash: str, log: AuditLog) -> bool:
-    if log.hash and log.hash.startswith("v2:"):
-        expected = _compute_v2_hmac(
-            prev_hash, log.action, log.detail, log.timestamp, log.user_email, log.module, log.ip_address, log.metadata_
+    if log.hash and log.hash.startswith("v3:"):
+        parts = log.hash.split(":", 2)
+        if len(parts) != 3:
+            return False
+        key_id = parts[1]
+        key = get_audit_verification_keys().get(key_id)
+        if not key:
+            return False
+        expected = _compute_v3_hmac(
+            key_id, key, prev_hash, log.action, log.detail, log.timestamp,
+            log.user_email, log.module, log.ip_address, log.metadata_,
         )
         return log.hash == expected
+    if log.hash and log.hash.startswith("v2:"):
+        return any(
+            log.hash == _compute_v2_hmac(
+                prev_hash, log.action, log.detail, log.timestamp,
+                log.user_email, log.module, log.ip_address, log.metadata_, key,
+            )
+            for key in get_audit_verification_keys().values()
+        )
 
     candidates = {
         _compute_hash(prev_hash, _entry_hash_payload(
@@ -274,8 +348,8 @@ def seed_audit_log(db: Session):
     ))
 
 
-def append_to_audit_log_db(db: Session, entry: AuditEntry) -> dict:
-    """Append to DB-backed audit log with hash chain integrity.
+def append_to_audit_log_db(db: Session, entry: AuditEntry, *, commit: bool = True) -> dict:
+    """Append to the tenant's tamper-evident audit chain.
     
     Uses row-level locking (SELECT FOR UPDATE) on PostgreSQL to prevent
     concurrent writers from grabbing the same prev_hash, which would break
@@ -318,8 +392,10 @@ def append_to_audit_log_db(db: Session, entry: AuditEntry) -> dict:
     prev_hash = last.hash if last and last.hash else "0"
     # C-05 FIX: Use the SAME timestamp for both hashing and storage
     now = datetime.now(timezone.utc)
-    new_hash = _compute_v2_hmac(
-        prev_hash, entry.action, entry.detail, now, entry.user, entry.module, entry.ip_address, entry.metadata
+    key_id = get_audit_hmac_key_id()
+    new_hash = _compute_v3_hmac(
+        key_id, get_audit_hmac_key(), prev_hash, entry.action, entry.detail, now,
+        entry.user, entry.module, entry.ip_address, entry.metadata,
     )
 
     record = AuditLog(
@@ -334,9 +410,9 @@ def append_to_audit_log_db(db: Session, entry: AuditEntry) -> dict:
         hash=new_hash
     )
     db.add(record)
-
-
-    db.commit()
+    db.flush()
+    if commit:
+        db.commit()
     db.refresh(record)
     return {
         "id": f"A-{record.id}",
@@ -435,17 +511,8 @@ def get_audit_log(
     return {"data": data, "total": total, "limit": limit, "offset": offset}
 
 
-@router.get("/verify")
-def verify_audit_integrity(recompute: bool = False, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    """L4-14: Walk the hash chain and verify audit log integrity.
-    If recompute=true, rebuild the hash chain (admin use after data migration)."""
-    if recompute and user.get("role") not in ("Superadmin", "Admin"):
-        from fastapi import HTTPException
-        raise HTTPException(status_code=403, detail="Audit recompute requires Superadmin or Admin")
-
-    tenant_id = user.get('tenant_id')
-    if not tenant_id:
-        raise HTTPException(status_code=400, detail='Missing tenant context')
+def verify_audit_chain(db: Session, tenant_id: str) -> dict:
+    """Verify one tenant's chain without modifying stored audit evidence."""
     logs = (
         db.query(AuditLog)
         .filter(AuditLog.tenant_id == tenant_id)
@@ -453,46 +520,34 @@ def verify_audit_integrity(recompute: bool = False, db: Session = Depends(get_db
         .all()
     )
     if not logs:
-        return {"status": "empty", "records": 0, "intact": True}
-
-    if recompute:
-        # Rebuild the entire hash chain from scratch using v2 HMAC
-        prev_hash = "0"
-        for log in logs:
-            new_hash = _compute_v2_hmac(
-                prev_hash, log.action, log.detail, log.timestamp, log.user_email, log.module, log.ip_address, log.metadata_
-            )
-            log.hash = new_hash
-            prev_hash = new_hash
-        db.commit()
         return {
-            "status": "recomputed",
-            "records": len(logs),
+            "status": "empty",
+            "records": 0,
             "intact": True,
             "mismatches": 0,
             "first_break_at_index": None,
-            "latest_hash": logs[-1].hash if logs else None,
+            "latest_hash": None,
         }
 
     prev_hash = "0"
     broken_at = None
     mismatches = 0
-    has_transitioned_to_v2 = False
+    strongest_version = 1
 
     for i, log in enumerate(logs):
         if not log.hash:
-            continue
-
-        is_v2 = log.hash.startswith("v2:")
-        if is_v2:
-            has_transitioned_to_v2 = True
-
-        # Downgrade check: once the chain transitions to v2, it must reject any subsequent legacy-formatted records.
-        if has_transitioned_to_v2 and not is_v2:
             mismatches += 1
             if broken_at is None:
                 broken_at = i
             continue
+
+        version = 3 if log.hash.startswith("v3:") else 2 if log.hash.startswith("v2:") else 1
+        if version < strongest_version:
+            mismatches += 1
+            if broken_at is None:
+                broken_at = i
+            continue
+        strongest_version = max(strongest_version, version)
 
         if not _stored_hash_matches(prev_hash, log):
             mismatches += 1
@@ -509,6 +564,24 @@ def verify_audit_integrity(recompute: bool = False, db: Session = Depends(get_db
         "first_break_at_index": broken_at,
         "latest_hash": logs[-1].hash if logs else None,
     }
+
+
+@router.get("/verify")
+def verify_audit_integrity(
+    recompute: bool = False,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Return read-only verification of the caller tenant's audit chain."""
+    if recompute:
+        raise HTTPException(
+            status_code=405,
+            detail="Audit-chain recomputation is not available through the API",
+        )
+    tenant_id = user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant context")
+    return verify_audit_chain(db, tenant_id)
 
 
 @router.post("/log")

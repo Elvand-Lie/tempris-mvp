@@ -107,7 +107,7 @@ def register_report(
         action="REPORT_REGISTERED",
         module="SYNTHESIS",
         detail=f"Registered report {req.id} of type {req.report_type}. Hash: {req.content_hash}."
-    ))
+    ), commit=False)
     
     db.commit()
     db.refresh(report)

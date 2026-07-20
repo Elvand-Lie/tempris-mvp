@@ -102,7 +102,7 @@ def test_generic_findings_endpoints():
         "relationship_type": "CHAIN"
     }
     resp_bad = client.post("/api/spectrum/findings/relationships", json=bad_rel_data, headers=headers)
-    assert resp_bad.status_code == 403
+    assert resp_bad.status_code == 404
 
     # 3. Add Source Freshness
     source_data = {
