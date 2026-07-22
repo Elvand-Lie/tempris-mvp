@@ -75,7 +75,7 @@ mkdir -p "`$(dirname "`$source_backup")" "`$(dirname "`$db_backup")"
 tar -C "`$root" -czf "`$source_backup" --exclude='app/deploy/.env' --exclude='app/freellmapi/.env' --exclude='app/backend/data' app
 tar -C "`$stage" -xzf "`$archive"
 
-docker exec "`$pg_container" sh -lc 'pg_dump -U "`$POSTGRES_USER" -d "`$POSTGRES_DB" -Fc -f /tmp/`$release.dump && pg_restore --list /tmp/`$release.dump >/dev/null'
+docker exec -e RELEASE="`$release" "`$pg_container" sh -lc 'pg_dump -U "`$POSTGRES_USER" -d "`$POSTGRES_DB" -Fc -f /tmp/`$RELEASE.dump && pg_restore --list /tmp/`$RELEASE.dump >/dev/null'
 docker cp "`$pg_container:/tmp/`$release.dump" "`$db_backup"
 docker exec "`$pg_container" rm -f "/tmp/`$release.dump"
 test -s "`$db_backup"
