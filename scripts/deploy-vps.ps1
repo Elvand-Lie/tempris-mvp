@@ -83,10 +83,11 @@ test -s "`$db_backup"
 docker cp "`$stage/scripts/migrations/006_add_sss_sub_class.py" tempris_backend:/tmp/006_add_sss_sub_class.py
 docker cp "`$db_backup" "tempris_backend:/tmp/`$release.dump"
 docker exec tempris_backend python /tmp/006_add_sss_sub_class.py --database-url-env --backup-file "/tmp/`$release.dump" --externally-verified-backup
+docker exec tempris_backend rm -f /tmp/006_add_sss_sub_class.py "/tmp/`$release.dump"
 
-rsync -a --delete --exclude='deploy/.env' --exclude='freellmapi/.env' --exclude='backend/data/' "`$stage/app/" "`$root/app/"
-install -m 0644 "`$stage/app/backend/data/v62_debrief_findings.json" "`$root/app/backend/data/v62_debrief_findings.json"
 source_changed=1
+rsync -a --delete --exclude='deploy/.env' --exclude='freellmapi/.env' --exclude='backend/data/' "`$stage/app/" "`$root/app/"
+docker cp "`$stage/app/backend/data/v62_debrief_findings.json" tempris_backend:/app/data/v62_debrief_findings.json
 
 cd "`$root/app/deploy"
 docker compose -f docker-compose.prod.yml up -d --build
