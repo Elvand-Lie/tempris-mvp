@@ -3,6 +3,7 @@
 
   const TOKEN_KEY = 'tempris_token';
   const EXTENSION_ROUTES = new Set(['/ciso', '/packages', '/sss-intake']);
+  const EXTENSION_HOST_ID = 'tempris-extension-host';
   const RETRY_DELAYS = [1000, 3000, 8000];
   let scheduled = false;
   let cisoAccess = null;
@@ -10,6 +11,38 @@
   let cisoRequest = null;
   let sssFindings = null;
   let sssRequest = null;
+  let rootObserver = null;
+
+  function getExtensionHost() {
+    let host = document.getElementById(EXTENSION_HOST_ID);
+    if (!host) {
+      host = document.createElement('section');
+      host.id = EXTENSION_HOST_ID;
+      host.hidden = true;
+      host.setAttribute('aria-live', 'polite');
+      document.body.append(host);
+    }
+    return host;
+  }
+
+  function activateExtensionHost(path) {
+    const host = getExtensionHost();
+    host.hidden = false;
+    host.dataset.temprisExtensionRoute = path;
+    document.body.classList.add('tmx-extension-active');
+    return host;
+  }
+
+  function deactivateExtensionHost() {
+    const host = document.getElementById(EXTENSION_HOST_ID);
+    if (host) {
+      host.hidden = true;
+      host.replaceChildren();
+      delete host.dataset.temprisExtensionRoute;
+      delete host.dataset.temprisRenderedRoute;
+    }
+    document.body.classList.remove('tmx-extension-active');
+  }
 
   const escapeHtml = (value) => String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -200,7 +233,7 @@
     return `<div class="tmx-list">${items.map(renderItem).join('')}</div>`;
   }
 
-  function renderCiso(main, data) {
+  function renderCiso(host, data) {
     const findings = data.findings || {};
     const posture = titleCase(data.overall_risk_posture);
     const trend = data.risk_trend?.status === 'available' ? titleCase(data.risk_trend.direction) : 'Unavailable';
@@ -210,7 +243,7 @@
     const reports = data.report_links?.items || [];
     const gaps = data.compliance_gaps || {};
 
-    main.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="ciso">
+    host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="ciso">
       <header class="tmx-heading">
         <div><h1>CISO Dashboard</h1><p>Tenant-scoped executive security posture.</p></div>
         <button type="button" class="tmx-button" data-ciso-refresh>Refresh</button>
@@ -258,8 +291,8 @@
       </div>
     </div>`;
 
-    main.querySelector('[data-ciso-refresh]').addEventListener('click', () => renderCisoRoute(main, true));
-    main.querySelectorAll('[data-report-path]').forEach((button) => button.addEventListener('click', () => openReport(button.dataset.reportPath)));
+    host.querySelector('[data-ciso-refresh]').addEventListener('click', () => renderCisoRoute(host, true));
+    host.querySelectorAll('[data-report-path]').forEach((button) => button.addEventListener('click', () => openReport(button.dataset.reportPath)));
   }
 
   async function openReport(path) {
@@ -275,16 +308,16 @@
     URL.revokeObjectURL(url);
   }
 
-  async function renderCisoRoute(main, force = false) {
-    main.dataset.temprisExtensionRoute = '/ciso';
-    main.innerHTML = '<div data-tempris-extension-root class="tmx-panel tmx-loading">Loading CISO dashboard...</div>';
+  async function renderCisoRoute(host, force = false) {
+    host.dataset.temprisExtensionRoute = '/ciso';
+    host.innerHTML = '<div data-tempris-extension-root class="tmx-panel tmx-loading">Loading CISO dashboard...</div>';
     try {
       const data = await loadCiso(force);
-      if (window.location.pathname === '/ciso') renderCiso(main, data);
+      if (window.location.pathname === '/ciso') renderCiso(host, data);
     } catch (error) {
       if (window.location.pathname !== '/ciso') return;
-      main.innerHTML = `<div data-tempris-extension-root class="tmx-page"><div class="tmx-panel tmx-error">${escapeHtml(error.message || 'CISO dashboard is unavailable after retries.')}<div style="margin-top:16px"><button type="button" class="tmx-button" data-ciso-retry>Retry</button></div></div></div>`;
-      main.querySelector('[data-ciso-retry]').addEventListener('click', () => renderCisoRoute(main, true));
+      host.innerHTML = `<div data-tempris-extension-root class="tmx-page"><div class="tmx-panel tmx-error">${escapeHtml(error.message || 'CISO dashboard is unavailable after retries.')}<div style="margin-top:16px"><button type="button" class="tmx-button" data-ciso-retry>Retry</button></div></div></div>`;
+      host.querySelector('[data-ciso-retry]').addEventListener('click', () => renderCisoRoute(host, true));
     }
   }
 
@@ -303,8 +336,8 @@
     overdue: 'Overdue',
   }[state] || 'Date supplied');
 
-  function renderSssIntake(main, findings) {
-    main.dataset.temprisExtensionRoute = '/sss-intake';
+  function renderSssIntake(host, findings) {
+    host.dataset.temprisExtensionRoute = '/sss-intake';
     const cards = findings.length ? findings.map((finding) => {
       const decision = finding.edip_decision || finding.tes_decision || 'UNAVAILABLE';
       const deadline = finding.kev_due
@@ -329,30 +362,30 @@
       </article>`;
     }).join('') : '<div class="tmx-empty">No SSS decision records are available for this tenant.</div>';
 
-    main.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="sss-intake">
+    host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="sss-intake">
       <header class="tmx-heading"><div><h1>SSS Decision Queue</h1><p>Server-authoritative non-CVE and connector outputs. The client never recomputes decisions.</p></div><button type="button" class="tmx-button" data-sss-refresh>Refresh</button></header>
       <section class="tmx-finding-grid" aria-live="polite">${cards}</section>
     </div>`;
-    main.querySelector('[data-sss-refresh]').addEventListener('click', () => renderSssRoute(main, true));
+    host.querySelector('[data-sss-refresh]').addEventListener('click', () => renderSssRoute(host, true));
   }
 
-  async function renderSssRoute(main, force = false) {
-    main.dataset.temprisExtensionRoute = '/sss-intake';
-    main.innerHTML = '<div data-tempris-extension-root class="tmx-panel tmx-loading">Loading SSS decision outputs...</div>';
+  async function renderSssRoute(host, force = false) {
+    host.dataset.temprisExtensionRoute = '/sss-intake';
+    host.innerHTML = '<div data-tempris-extension-root class="tmx-panel tmx-loading">Loading SSS decision outputs...</div>';
     try {
       const findings = await loadSssFindings(force);
-      if (window.location.pathname === '/sss-intake') renderSssIntake(main, findings);
+      if (window.location.pathname === '/sss-intake') renderSssIntake(host, findings);
     } catch (error) {
       if (window.location.pathname !== '/sss-intake') return;
-      main.innerHTML = `<div data-tempris-extension-root class="tmx-page"><div class="tmx-panel tmx-error">${escapeHtml(error.message || 'SSS decision outputs are unavailable.')}<div style="margin-top:16px"><button type="button" class="tmx-button" data-sss-retry>Retry</button></div></div></div>`;
-      main.querySelector('[data-sss-retry]').addEventListener('click', () => renderSssRoute(main, true));
+      host.innerHTML = `<div data-tempris-extension-root class="tmx-page"><div class="tmx-panel tmx-error">${escapeHtml(error.message || 'SSS decision outputs are unavailable.')}<div style="margin-top:16px"><button type="button" class="tmx-button" data-sss-retry>Retry</button></div></div></div>`;
+      host.querySelector('[data-sss-retry]').addEventListener('click', () => renderSssRoute(host, true));
     }
   }
 
-  function renderPackages(main) {
+  function renderPackages(host) {
     const modules = ['SYNTHESIS', 'SPECTRUM', 'SCOUT', 'STRIKE', 'STANDARD', 'GRC', 'ASSETS', 'SPOTLIGHT', 'CISO'];
-    main.dataset.temprisExtensionRoute = '/packages';
-    main.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="packages">
+    host.dataset.temprisExtensionRoute = '/packages';
+    host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="packages">
       <header class="tmx-heading"><div><h1>Package Controls</h1><p>Tenant package visibility and module access status.</p></div><button type="button" class="tmx-button" disabled>Save changes</button></header>
       <div class="tmx-notice"><strong>Unavailable:</strong><span>Backend package-entitlement enforcement is not implemented. These controls are read-only and do not change authorization.</span></div>
       <section class="tmx-panel">
@@ -371,22 +404,24 @@
 
   function renderCurrentRoute() {
     const path = window.location.pathname;
-    const main = document.querySelector('#root main');
     if (!EXTENSION_ROUTES.has(path)) {
-      main?.querySelector('[data-tempris-extension-root]')?.remove();
-      if (main) delete main.dataset.temprisExtensionRoute;
+      deactivateExtensionHost();
       return;
     }
-    if (!main || !localStorage.getItem(TOKEN_KEY)) return;
-    if (main.dataset.temprisExtensionRoute === path && main.children.length) return;
-    if (path === '/ciso') renderCisoRoute(main);
-    if (path === '/sss-intake') renderSssRoute(main);
+    if (!document.querySelector('#root main') || !localStorage.getItem(TOKEN_KEY)) return;
+    const host = activateExtensionHost(path);
+    if (host.dataset.temprisRenderedRoute === path && host.children.length) return;
+    host.dataset.temprisRenderedRoute = path;
+    if (path === '/ciso') renderCisoRoute(host);
+    if (path === '/sss-intake') renderSssRoute(host);
     if (path === '/packages') {
       if (cisoAccess === false) {
-        main.dataset.temprisExtensionRoute = path;
-        main.innerHTML = '<div data-tempris-extension-root class="tmx-panel tmx-error">This module is restricted to Superadmin and Admin roles.</div>';
-      } else if (cisoAccess === true) renderPackages(main);
-      else loadCiso().then(() => { if (window.location.pathname === path) renderPackages(main); }).catch(schedule);
+        host.innerHTML = '<div data-tempris-extension-root class="tmx-panel tmx-error">This module is restricted to Superadmin and Admin roles.</div>';
+      } else if (cisoAccess === true) renderPackages(host);
+      else {
+        host.innerHTML = '<div data-tempris-extension-root class="tmx-panel tmx-loading">Loading package controls...</div>';
+        loadCiso().then(() => { if (window.location.pathname === path) renderPackages(host); }).catch(schedule);
+      }
     }
   }
 
@@ -406,13 +441,13 @@
   window.addEventListener('popstate', schedule);
   window.addEventListener('tempris:decision-output', () => {
     sssFindings = null;
-    const main = document.querySelector('#root main');
-    if (window.location.pathname === '/sss-intake' && main) renderSssRoute(main, true);
+    const host = document.getElementById(EXTENSION_HOST_ID);
+    if (window.location.pathname === '/sss-intake' && host) renderSssRoute(host, true);
   });
   window.addEventListener('focus', () => {
     if (window.location.pathname !== '/sss-intake') return;
-    const main = document.querySelector('#root main');
-    if (main) renderSssRoute(main, true);
+    const host = document.getElementById(EXTENSION_HOST_ID);
+    if (host) renderSssRoute(host, true);
   });
   window.addEventListener('tempris:logout', () => {
     cisoAccess = null;
@@ -420,7 +455,17 @@
     sssFindings = null;
     schedule();
   });
-  new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
-  window.addEventListener('DOMContentLoaded', schedule);
+  function observeReactRoot() {
+    const root = document.getElementById('root');
+    if (!root || rootObserver) return;
+    rootObserver = new MutationObserver(schedule);
+    rootObserver.observe(root, { childList: true, subtree: true });
+  }
+
+  window.addEventListener('DOMContentLoaded', () => {
+    observeReactRoot();
+    schedule();
+  });
+  observeReactRoot();
   schedule();
 })();

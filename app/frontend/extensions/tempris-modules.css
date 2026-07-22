@@ -5,6 +5,27 @@
   object-fit: contain;
 }
 
+#tempris-extension-host {
+  position: fixed;
+  inset: 4rem 0 0 16rem;
+  z-index: 20;
+  overflow: auto;
+  padding: 1.5rem;
+  background: #09090b;
+  color: #f4f4f5;
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 transparent;
+}
+
+#tempris-extension-host[hidden] {
+  display: none !important;
+}
+
+body.tmx-extension-active #root main {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .tmx-login-logo {
   width: min(220px, 72%);
   max-height: 64px;

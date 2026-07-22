@@ -21,6 +21,11 @@ def parse_args() -> argparse.Namespace:
     target.add_argument("--database-url-env", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--backup-file", type=Path)
+    parser.add_argument(
+        "--externally-verified-backup",
+        action="store_true",
+        help="Accept a non-empty backup already verified with pg_restore --list.",
+    )
     return parser.parse_args()
 
 
@@ -67,6 +72,8 @@ def prepare_backup(args: argparse.Namespace) -> Path:
     backup = args.backup_file.resolve()
     if not backup.is_file() or backup.stat().st_size == 0:
         raise RuntimeError("Database backup is missing or empty")
+    if args.externally_verified_backup:
+        return backup
     pg_restore = shutil.which("pg_restore")
     if not pg_restore:
         raise RuntimeError("pg_restore is required to verify a PostgreSQL backup")
