@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from services.tes_engine import calculate_tes, TESInputs, calculate_finding_tes, decision_from_tes, priority_from_tes, public_severity, public_decision_for_finding
+from services.sss_contract import public_sss_output
 from routers.audit import append_to_audit_log, AuditEntry
 from routers.auth import get_current_user, require_role
 from services.kev_loader import get_findings_paginated, get_finding_by_id
@@ -48,11 +49,14 @@ def _public_tes_score(f: dict) -> float:
 
 def _strip_internal_fields(f: dict) -> dict:
     sss = f.get("sss_data") or {}
+    f.update(public_sss_output(sss))
     if sss.get("fim_bypass"):
         f["fim_bypass"] = True
         f["fim_bypass_note"] = sss.get("fim_bypass_note")
     if sss.get("type"):
         f["finding_type"] = sss.get("type")
+    if sss.get("sub_class"):
+        f["sub_class"] = sss.get("sub_class")
     if sss.get("source"):
         f["source_detail"] = sss.get("source")
     for public_key, private_key in (

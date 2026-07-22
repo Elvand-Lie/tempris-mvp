@@ -48,6 +48,18 @@ def init_db():
                       "Please run: python scripts/migrations/001_add_evidence_tenant.py --legacy-tenant-id <tenant_id>", file=sys.stderr)
                 sys.exit(1)
 
+        if "findings" in tables:
+            finding_columns = {column["name"] for column in inspector.get_columns("findings")}
+            finding_indexes = {index["name"] for index in inspector.get_indexes("findings")}
+            if "sub_class" not in finding_columns or "ix_findings_sub_class" not in finding_indexes:
+                print(
+                    "FATAL: Database schema is out of date. Required findings.sub_class "
+                    "column or index is missing. Run scripts/migrations/006_add_sss_sub_class.py "
+                    "with a verified backup.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
         tenant_scoped_tables = (
             'grc_states',
             'grc_signoffs',

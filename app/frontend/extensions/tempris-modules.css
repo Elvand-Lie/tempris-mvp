@@ -301,6 +301,91 @@
   text-decoration: underline;
 }
 
+.tmx-finding-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.tmx-finding-card {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid #27272a;
+  border-radius: 10px;
+  background: rgb(20 20 22 / 92%);
+}
+
+.tmx-finding-card h2 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.tmx-finding-topline,
+.tmx-chip-row,
+.tmx-finding-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tmx-finding-topline {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.tmx-subclass,
+.tmx-validated,
+.tmx-decision,
+.tmx-deadline {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid #3f3f46;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+
+.tmx-subclass { color: #c4b5fd; border-color: rgb(139 92 246 / 40%); background: rgb(139 92 246 / 10%); }
+.tmx-validated { color: #e0a44a; border-color: rgb(224 164 74 / 45%); background: rgb(224 164 74 / 10%); }
+.tmx-decision-escalate { color: #fb7185; border-color: rgb(244 63 94 / 45%); background: rgb(244 63 94 / 10%); }
+.tmx-decision-patch { color: #2dd4bf; border-color: rgb(45 212 191 / 40%); background: rgb(45 212 191 / 10%); }
+.tmx-decision-investigate { color: #60a5fa; border-color: rgb(96 165 250 / 40%); background: rgb(96 165 250 / 10%); }
+.tmx-decision-control { color: #c084fc; border-color: rgb(192 132 252 / 40%); background: rgb(192 132 252 / 10%); }
+.tmx-deadline-scheduled { color: #34d399; border-color: rgb(52 211 153 / 35%); }
+.tmx-deadline-due_soon { color: #f59e0b; border-color: rgb(245 158 11 / 40%); }
+.tmx-deadline-overdue { color: #ef4444; border-color: rgb(239 68 68 / 45%); }
+
+.tmx-finding-meta {
+  color: #a1a1aa;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.tmx-control-callout {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-left: 3px solid #60a5fa;
+  background: rgb(96 165 250 / 7%);
+  color: #d4d4d8;
+  font-size: 12px;
+}
+
+.tmx-control-callout strong {
+  color: #93c5fd;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
 @keyframes tmx-enter {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }

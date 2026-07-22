@@ -259,6 +259,7 @@ class Finding(Base):
     cve_id = Column(String(50), index=True)
     finding_type = Column(String(50), nullable=False, default="standard")
     subtype = Column(String(50))
+    sub_class = Column(String(50), index=True)
     pipeline = Column(String(50), nullable=False, default="STANDARD")
     verification = Column(String(50), nullable=False, default="CONFIRMED")
     score = Column(Float)

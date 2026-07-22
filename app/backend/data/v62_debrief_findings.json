@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.0.0",
+  "source": "06_3rd_Party_Elvand_Debrief_and_Updates_v62.html",
+  "findings": [
+    {
+      "finding_id": "CVE-2026-56155",
+      "type": "CVE",
+      "source": "V62_DECISION_RECORD",
+      "title": "Microsoft AD FS Elevation of Privilege",
+      "description": "July 2026 decision record supplied by the Tempris engine contract.",
+      "affected_ecosystem": "Microsoft AD FS",
+      "attack_vectors": ["IDENTITY_INFRASTRUCTURE"],
+      "scoring": {"base_severity": 7.2, "AGM": 1.0, "DRF": 1.0, "TEF": 1.0},
+      "cisa_kev": true,
+      "kev_due": "2026-07-28",
+      "patch_available": true,
+      "recommended_action": "ESCALATE",
+      "engine_decision": "ESCALATE"
+    },
+    {
+      "finding_id": "CVE-2026-56164",
+      "type": "CVE",
+      "source": "V62_DECISION_RECORD",
+      "title": "Microsoft SharePoint Server Elevation of Privilege",
+      "description": "July 2026 decision record with the required AMSI request-body control.",
+      "affected_ecosystem": "Microsoft SharePoint Server",
+      "attack_vectors": ["WEB_APPLICATION"],
+      "scoring": {"base_severity": 5.3, "AGM": 1.0, "DRF": 1.0, "TEF": 1.0},
+      "cisa_kev": true,
+      "kev_due": "2026-07-17",
+      "required_control": "AMSI Request Body Scan = Full",
+      "patch_available": true,
+      "recommended_action": "ESCALATE",
+      "engine_decision": "ESCALATE"
+    },
+    {
+      "finding_id": "CVE-2026-50661",
+      "type": "CVE",
+      "source": "V62_DECISION_RECORD",
+      "title": "Windows BitLocker Security Feature Bypass",
+      "description": "Portable-asset-priority decision record supplied by the Tempris engine contract.",
+      "affected_ecosystem": "Microsoft Windows BitLocker",
+      "attack_vectors": ["PORTABLE_ASSET"],
+      "scoring": {"base_severity": 6.1, "AGM": 1.0, "DRF": 1.0, "TEF": 1.0},
+      "portable_asset_priority": true,
+      "patch_available": true,
+      "recommended_action": "PATCH",
+      "engine_decision": "PATCH"
+    },
+    {
+      "finding_id": "CVE-2026-57092",
+      "type": "CVE",
+      "source": "V62_DECISION_RECORD",
+      "title": "Hyper-V VMSwitch Vulnerability",
+      "description": "Watch-enabled conditional decision record supplied by the Tempris engine contract.",
+      "affected_ecosystem": "Microsoft Hyper-V",
+      "attack_vectors": ["VIRTUALIZATION_HOST"],
+      "scoring": {"base_severity": 9.9, "AGM": 1.0, "DRF": 1.0, "TEF": 1.0},
+      "watch_flag": true,
+      "conditional_decision": {
+        "asset_tag": "multi-tenant virtualization host",
+        "when_matched": "ESCALATE",
+        "otherwise": "PATCH"
+      },
+      "patch_available": true,
+      "recommended_action": "PATCH",
+      "engine_decision": "PATCH"
+    }
+  ]
+}

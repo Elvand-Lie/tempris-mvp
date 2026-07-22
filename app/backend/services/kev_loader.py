@@ -15,6 +15,8 @@ def _finding_to_dict(f) -> dict:
     """Convert a Finding ORM object to the dict format expected by all consumers."""
     return {
         "id": f.id,
+        "finding_type": f.finding_type,
+        "sub_class": f.sub_class,
         "cve": f.cve,
         "title": f.title,
         "vendor": f.vendor,

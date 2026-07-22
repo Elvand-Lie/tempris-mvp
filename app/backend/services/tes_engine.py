@@ -88,6 +88,11 @@ def decision_from_tes(score: float) -> str:
 def public_decision_for_finding(finding: dict, score: float) -> str:
     """Return the public EDIP action without leaking modifier internals."""
     sss = finding.get("sss_data") or {}
+    engine_decision = str(sss.get("engine_decision") or "").upper()
+    if engine_decision in {
+        "ESCALATE", "PATCH", "INVESTIGATE", "DEFER", "COMPENSATING_CONTROL"
+    }:
+        return engine_decision
     if sss.get("patch_available") is False:
         return "COMPENSATING_CONTROL"
     return decision_from_tes(score)

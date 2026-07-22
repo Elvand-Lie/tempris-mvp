@@ -2,12 +2,14 @@
   'use strict';
 
   const TOKEN_KEY = 'tempris_token';
-  const EXTENSION_ROUTES = new Set(['/ciso', '/packages']);
+  const EXTENSION_ROUTES = new Set(['/ciso', '/packages', '/sss-intake']);
   const RETRY_DELAYS = [1000, 3000, 8000];
   let scheduled = false;
   let cisoAccess = null;
   let cisoSummary = null;
   let cisoRequest = null;
+  let sssFindings = null;
+  let sssRequest = null;
 
   const escapeHtml = (value) => String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -160,6 +162,18 @@
     return cisoRequest;
   }
 
+  async function loadSssFindings(force = false) {
+    if (sssFindings && !force) return sssFindings;
+    if (sssRequest && !force) return sssRequest;
+    sssRequest = api('/api/edip/intake/sss')
+      .then((payload) => {
+        sssFindings = payload.data || [];
+        return sssFindings;
+      })
+      .finally(() => { sssRequest = null; });
+    return sssRequest;
+  }
+
   function ensureNavigation() {
     const nav = document.querySelector('#root nav');
     if (!nav || !localStorage.getItem(TOKEN_KEY)) return;
@@ -171,6 +185,7 @@
     if (cisoAccess === true) {
       if (!nav.querySelector('[data-tempris-extension-nav="/ciso"]')) createNavItem(nav, 'CISO', '/ciso', 0);
       if (!nav.querySelector('[data-tempris-extension-nav="/packages"]')) createNavItem(nav, 'PACKAGES', '/packages', 4);
+      if (!nav.querySelector('[data-tempris-extension-nav="/sss-intake"]')) createNavItem(nav, 'SSS INTAKE', '/sss-intake', 2);
     } else if (cisoAccess === null && !cisoRequest) {
       loadCiso().then(schedule).catch(schedule);
     }
@@ -273,6 +288,67 @@
     }
   }
 
+  const decisionTone = (decision) => {
+    const normalized = String(decision || '').toUpperCase();
+    if (normalized === 'ESCALATE') return 'tmx-decision-escalate';
+    if (normalized === 'PATCH') return 'tmx-decision-patch';
+    if (normalized === 'INVESTIGATE') return 'tmx-decision-investigate';
+    if (normalized === 'COMPENSATING_CONTROL') return 'tmx-decision-control';
+    return '';
+  };
+
+  const deadlineLabel = (state) => ({
+    scheduled: '>7 days',
+    due_soon: '≤7 days',
+    overdue: 'Overdue',
+  }[state] || 'Date supplied');
+
+  function renderSssIntake(main, findings) {
+    main.dataset.temprisExtensionRoute = '/sss-intake';
+    const cards = findings.length ? findings.map((finding) => {
+      const decision = finding.edip_decision || finding.tes_decision || 'UNAVAILABLE';
+      const deadline = finding.kev_due
+        ? `<span class="tmx-deadline tmx-deadline-${escapeHtml(finding.kev_countdown_state)}">KEV ${escapeHtml(deadlineLabel(finding.kev_countdown_state))} · ${escapeHtml(finding.kev_due)}</span>`
+        : '';
+      const revalidation = finding.revalidate_by
+        ? `<span class="tmx-deadline tmx-deadline-${escapeHtml(finding.revalidation_countdown_state)}">Revalidate ${escapeHtml(deadlineLabel(finding.revalidation_countdown_state))} · ${escapeHtml(finding.revalidate_by)}</span>`
+        : '';
+      return `<article class="tmx-finding-card" data-finding-id="${escapeHtml(finding.id)}">
+        <div class="tmx-finding-topline">
+          <div class="tmx-chip-row">
+            <span class="tmx-status">${escapeHtml(finding.class || finding.finding_type)}</span>
+            ${finding.sub_class ? `<span class="tmx-subclass">${escapeHtml(finding.sub_class)}</span>` : ''}
+            ${finding.validated ? '<span class="tmx-validated">VALIDATED</span>' : ''}
+          </div>
+          <span class="tmx-decision ${decisionTone(decision)}">${escapeHtml(decision)}</span>
+        </div>
+        <h2>${escapeHtml(finding.title)}</h2>
+        <div class="tmx-finding-meta"><span>${escapeHtml(finding.cve)}</span><span>SSS ${escapeHtml(finding.sss)}</span><span>TES ${escapeHtml(finding.tes)}</span></div>
+        <div class="tmx-chip-row">${deadline}${revalidation}</div>
+        ${finding.required_control ? `<div class="tmx-control-callout"><strong>Required control</strong><span>${escapeHtml(finding.required_control)}</span></div>` : ''}
+      </article>`;
+    }).join('') : '<div class="tmx-empty">No SSS decision records are available for this tenant.</div>';
+
+    main.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="sss-intake">
+      <header class="tmx-heading"><div><h1>SSS Decision Queue</h1><p>Server-authoritative non-CVE and connector outputs. The client never recomputes decisions.</p></div><button type="button" class="tmx-button" data-sss-refresh>Refresh</button></header>
+      <section class="tmx-finding-grid" aria-live="polite">${cards}</section>
+    </div>`;
+    main.querySelector('[data-sss-refresh]').addEventListener('click', () => renderSssRoute(main, true));
+  }
+
+  async function renderSssRoute(main, force = false) {
+    main.dataset.temprisExtensionRoute = '/sss-intake';
+    main.innerHTML = '<div data-tempris-extension-root class="tmx-panel tmx-loading">Loading SSS decision outputs...</div>';
+    try {
+      const findings = await loadSssFindings(force);
+      if (window.location.pathname === '/sss-intake') renderSssIntake(main, findings);
+    } catch (error) {
+      if (window.location.pathname !== '/sss-intake') return;
+      main.innerHTML = `<div data-tempris-extension-root class="tmx-page"><div class="tmx-panel tmx-error">${escapeHtml(error.message || 'SSS decision outputs are unavailable.')}<div style="margin-top:16px"><button type="button" class="tmx-button" data-sss-retry>Retry</button></div></div></div>`;
+      main.querySelector('[data-sss-retry]').addEventListener('click', () => renderSssRoute(main, true));
+    }
+  }
+
   function renderPackages(main) {
     const modules = ['SYNTHESIS', 'SPECTRUM', 'SCOUT', 'STRIKE', 'STANDARD', 'GRC', 'ASSETS', 'SPOTLIGHT', 'CISO'];
     main.dataset.temprisExtensionRoute = '/packages';
@@ -304,6 +380,7 @@
     if (!main || !localStorage.getItem(TOKEN_KEY)) return;
     if (main.dataset.temprisExtensionRoute === path && main.children.length) return;
     if (path === '/ciso') renderCisoRoute(main);
+    if (path === '/sss-intake') renderSssRoute(main);
     if (path === '/packages') {
       if (cisoAccess === false) {
         main.dataset.temprisExtensionRoute = path;
@@ -327,9 +404,20 @@
   }
 
   window.addEventListener('popstate', schedule);
+  window.addEventListener('tempris:decision-output', () => {
+    sssFindings = null;
+    const main = document.querySelector('#root main');
+    if (window.location.pathname === '/sss-intake' && main) renderSssRoute(main, true);
+  });
+  window.addEventListener('focus', () => {
+    if (window.location.pathname !== '/sss-intake') return;
+    const main = document.querySelector('#root main');
+    if (main) renderSssRoute(main, true);
+  });
   window.addEventListener('tempris:logout', () => {
     cisoAccess = null;
     cisoSummary = null;
+    sssFindings = null;
     schedule();
   });
   new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });

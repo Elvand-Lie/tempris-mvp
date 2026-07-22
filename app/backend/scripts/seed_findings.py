@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from services.database import SessionLocal, init_db
 from models import Finding
 from services.tes_engine import calculate_sss_tes, priority_from_tes
+from services.sss_contract import PUBLIC_SSS_FIELDS
 
 logger = logging.getLogger("tempris.seed")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -251,6 +252,9 @@ def seed_sss_findings(db, existing_ids: set):
 
         db.add(Finding(
             id=fid,
+            finding_type=sf.get("type", "NON_CVE_SSS"),
+            sub_class=sf.get("sub_class"),
+            decision=sf.get("engine_decision"),
             cve=sf.get('finding_id', f'SSS-{idx}'),
             title=sf.get('title', 'Unknown'),
             vendor=sf.get('affected_ecosystem', 'Supply Chain'),
@@ -322,6 +326,9 @@ def _seed_threat_pack(db, existing_ids: set, filename: str, id_base: int, label:
 
         db.add(Finding(
             id=fid,
+            finding_type=finding_type,
+            sub_class=tf.get("sub_class"),
+            decision=tf.get("engine_decision"),
             cve=finding_key,
             title=tf.get('title', 'Unknown'),
             vendor=tf.get('affected_ecosystem', 'Threat Intel'),
@@ -337,6 +344,7 @@ def _seed_threat_pack(db, existing_ids: set, filename: str, id_base: int, label:
             raw_inputs=raw_inputs,
             sss_data={
                 "type": finding_type,
+                "sub_class": tf.get("sub_class"),
                 "source": tf.get('source'),
                 "scoring": scoring,
                 "compensating_controls": tf.get('compensating_controls', []),
@@ -355,6 +363,12 @@ def _seed_threat_pack(db, existing_ids: set, filename: str, id_base: int, label:
                 "source_verification": tf.get('source_verification'),
                 "mas_trm_mapping": tf.get('mas_trm_mapping'),
                 "patch_available": tf.get('patch_available'),
+                "engine_decision": tf.get("engine_decision"),
+                **{
+                    key: tf[key]
+                    for key in PUBLIC_SSS_FIELDS
+                    if tf.get(key) not in (None, "", [])
+                },
             },
             source=source,
         ))
@@ -381,6 +395,11 @@ def seed_v51_brief_findings(db, existing_ids: set):
 def seed_v54_final_findings(db, existing_ids: set):
     """Seed normalized findings from the v54 final update notes."""
     _seed_threat_pack(db, existing_ids, 'v54_final_update_findings.json', 7000, 'v54 final')
+
+
+def seed_v62_debrief_findings(db, existing_ids: set):
+    """Seed server-authoritative decision records from the v62 debrief."""
+    _seed_threat_pack(db, existing_ids, 'v62_debrief_findings.json', 8000, 'v62 debrief')
 
 
 def seed_all():
@@ -417,6 +436,9 @@ def seed_all():
         db.commit()
 
         seed_v54_final_findings(db, existing_ids)
+        db.commit()
+
+        seed_v62_debrief_findings(db, existing_ids)
         db.commit()
 
         # Final count
