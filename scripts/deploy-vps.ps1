@@ -83,7 +83,7 @@ test -s "`$db_backup"
 docker cp "`$stage/scripts/migrations/006_add_sss_sub_class.py" tempris_backend:/tmp/006_add_sss_sub_class.py
 docker cp "`$db_backup" "tempris_backend:/tmp/`$release.dump"
 docker exec tempris_backend python /tmp/006_add_sss_sub_class.py --database-url-env --backup-file "/tmp/`$release.dump" --externally-verified-backup
-docker exec tempris_backend rm -f /tmp/006_add_sss_sub_class.py "/tmp/`$release.dump"
+docker exec -u 0 tempris_backend rm -f /tmp/006_add_sss_sub_class.py "/tmp/`$release.dump"
 
 source_changed=1
 rsync -a --delete --exclude='deploy/.env' --exclude='freellmapi/.env' --exclude='backend/data/' "`$stage/app/" "`$root/app/"
