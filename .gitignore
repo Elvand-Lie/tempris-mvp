@@ -1,6 +1,7 @@
 # Secrets
 app/deploy/.env
 app/freellmapi/.env
+workDocs/tempris-account-credentials.local.md
 ssl/
 
 # Database

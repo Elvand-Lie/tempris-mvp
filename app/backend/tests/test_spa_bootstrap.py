@@ -64,6 +64,8 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     assert "main.innerHTML" not in script.text
     assert "rootObserver.observe(root" in script.text
     assert "observe(document.documentElement" not in script.text
+    assert "Production account emails:" in script.text
+    assert "setControlledInputValue(currentPassword, '')" in script.text
     assert stylesheet.status_code == 200
     assert ".tmx-page" in stylesheet.text
     assert logo.status_code == 200

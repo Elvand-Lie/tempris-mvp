@@ -62,7 +62,7 @@ class _LRUBuckets(OrderedDict):
 
 # path prefix â†’ (bucket capacity, refill rate tokens/sec)
 _LIMITS = {
-    "/api/auth":    (5,  5 / 60),       # 5 per minute
+    "/api/auth/login": (5, 5 / 60),     # 5 login attempts per minute
     "/api/scanner": (10, 10 / 60),      # 10 per minute
 }
 _DEFAULT_LIMIT = (100, 100 / 60)        # 100 per minute
@@ -79,6 +79,13 @@ def _get_limit(path: str) -> tuple[int, float]:
         if path.startswith(prefix):
             return limit
     return _DEFAULT_LIMIT
+
+
+def _bucket_group(path: str) -> str:
+    for prefix in _LIMITS:
+        if path.startswith(prefix):
+            return prefix
+    return "default"
 
 
 # â”€â”€ Per-account daily caps (anti-distillation) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -252,7 +259,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # â”€â”€ 1. IP-based rate limit (existing) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         cap, rate = _get_limit(path)
-        k = _key(ip, path.split("/")[2] if path.count("/") >= 3 else "api")
+        k = _key(ip, _bucket_group(path))
 
         bucket = _buckets.get(k)
         if bucket is None:

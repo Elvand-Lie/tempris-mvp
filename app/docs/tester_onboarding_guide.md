@@ -63,7 +63,7 @@ Expected: **80 passed** in ~30-40 seconds.
 
 ## 3. Test Accounts
 
-All demo accounts use password: `demo`
+The production sandbox uses a unique password for every account. Authorized operators can rotate them with `.\scripts\rotate-account-passwords.ps1`; the script writes the current values to the Git-ignored local file `workDocs/tempris-account-credentials.local.md`. The shared password `demo` is only valid in a local `ENVIRONMENT=demo` deployment.
 
 | Email | Role | Access Level |
 |-------|------|-------------|
@@ -78,7 +78,7 @@ All demo accounts use password: `demo`
 ```bash
 curl -X POST https://sandbox.tempris.tech/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"sherie@tempris.com","password":"demo"}'
+  -d "{\"email\":\"sherie@tempris.com\",\"password\":\"$TEMPRIS_SUPERADMIN_PASSWORD\"}"
 ```
 
 Use the returned `access_token` as: `Authorization: Bearer <token>`
@@ -89,7 +89,7 @@ Use the returned `access_token` as: `Authorization: Bearer <token>`
 
 | URL | Purpose |
 |-----|---------|
-| `https://sandbox.tempris.tech` | Main app (login with demo accounts) |
+| `https://sandbox.tempris.tech` | Main app (login with an assigned sandbox account) |
 | `https://sandbox.tempris.tech/api/health` | API health check |
 | `https://sandbox.tempris.tech/security` | VDP policy page |
 | `https://sandbox.tempris.tech/.well-known/security.txt` | security.txt |

@@ -808,6 +808,16 @@ def test_rate_limiting_active_in_test_env(monkeypatch):
 
 
 # ── 35. Bearer-only transport validation tests
+def test_auth_rate_limit_bucket_is_scoped_to_login_only():
+    from middleware.rate_limit import _DEFAULT_LIMIT, _bucket_group, _get_limit
+
+    assert _get_limit("/api/auth/login") == (5, 5 / 60)
+    assert _bucket_group("/api/auth/login") == "/api/auth/login"
+    assert _get_limit("/api/auth/logout") == _DEFAULT_LIMIT
+    assert _bucket_group("/api/auth/logout") == "default"
+    assert _bucket_group("/api/auth/sessions") == "default"
+
+
 def test_bearer_only_transport_validation():
     from passlib.hash import bcrypt
     from routers.auth import USERS

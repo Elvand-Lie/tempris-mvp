@@ -73,7 +73,7 @@ python index.py
 
 The app will be available at **http://localhost:8000**.
 
-#### Demo Credentials
+#### Local Demo Credentials
 
 | Email | Password | Role |
 |-------|----------|------|
@@ -82,6 +82,8 @@ The app will be available at **http://localhost:8000**.
 | `analyst@tempris.com` | `demo` | Analyst |
 | `viewer@tempris.com` | `demo` | Viewer |
 | `readonly@tempris.com` | `demo` | Read-only |
+
+These shared credentials are only enabled when `ENVIRONMENT=demo` (or an unconfigured test environment). Staging and production require five unique passwords supplied through `TEMPRIS_PASS_*` environment variables. Rotate sandbox credentials with `.\scripts\rotate-account-passwords.ps1`; its generated local credential record is Git-ignored.
 
 ### Option B: Run With Docker (Full Stack)
 

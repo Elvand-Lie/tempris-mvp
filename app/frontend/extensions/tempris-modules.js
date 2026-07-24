@@ -154,7 +154,46 @@
     nav.append(item);
   }
 
+  function setControlledInputValue(input, value) {
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    if (descriptor?.set) descriptor.set.call(input, value);
+    else input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function configureProductionLogin() {
+    const form = document.querySelector('#root form');
+    if (!form) return;
+
+    const password = form.querySelector('input[type="password"]');
+    if (password && !password.dataset.temprisProductionCredential) {
+      password.dataset.temprisProductionCredential = 'true';
+      if (password.value === 'demo') setControlledInputValue(password, '');
+    }
+
+    const accountHeading = [...document.querySelectorAll('#root p')]
+      .find((node) => node.textContent.trim() === 'Demo Accounts Available:');
+    if (accountHeading) accountHeading.textContent = 'Production account emails:';
+
+    const accountButtons = [...document.querySelectorAll('#root button')]
+      .filter((button) => button.textContent.includes('@tempris.com'));
+    accountButtons.forEach((button) => {
+      if (button.dataset.temprisAccountShortcut) return;
+      button.dataset.temprisAccountShortcut = 'true';
+      button.addEventListener('click', () => {
+        window.setTimeout(() => {
+          const currentPassword = document.querySelector('#root form input[type="password"]');
+          if (!currentPassword) return;
+          setControlledInputValue(currentPassword, '');
+          currentPassword.focus();
+        }, 0);
+      });
+    });
+  }
+
   function decorateBranding() {
+    configureProductionLogin();
     const heading = [...document.querySelectorAll('#root h1')].find((node) => node.textContent.trim() === 'TEMPRIS');
     if (heading && !heading.parentElement.querySelector('.tmx-login-logo')) {
       const logo = document.createElement('img');

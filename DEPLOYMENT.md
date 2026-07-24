@@ -25,6 +25,16 @@ If it reports the expected Compose configuration and Tempris containers, release
 
 The script refuses tracked worktree changes, archives only committed Git content, verifies SHA-256 after upload, makes timestamped source and PostgreSQL backups, verifies the database backup with `pg_restore --list`, preserves `.env`, mounted runtime data, and Docker volumes, applies migration `006_add_sss_sub_class.py`, seeds only the idempotent v62 debrief pack, restarts the production Compose stack, and checks `/api/health`.
 
+## Rotate sandbox account passwords
+
+Production rejects the shared password `demo` and duplicate account passwords. To generate five unique credentials, update the protected VPS `.env`, recreate only the backend container, verify all five logins, and write the new account list to a local Git-ignored file, run:
+
+```powershell
+.\scripts\rotate-account-passwords.ps1
+```
+
+The local output is `workDocs/tempris-account-credentials.local.md`. Never add that file or `app/deploy/.env` to Git. The remote script creates a mode-600 backup under `/home/tempris/backups/credentials/` before replacing the credential values.
+
 ## Failure and rollback
 
 If the post-restart health check fails, the script restores the previous source archive and restarts Compose. It does not automatically reverse database migrations: migration 006 is additive (a nullable column and index), and database restoration must use the backup made by the operator under the actual production database arrangement.
