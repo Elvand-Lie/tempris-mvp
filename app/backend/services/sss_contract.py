@@ -66,6 +66,8 @@ PUBLIC_SSS_FIELDS = (
     "verdict",
     "evidence_ref",
     "revalidate_by",
+    "resolution_notes",
+    "resolved_at",
 )
 
 

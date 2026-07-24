@@ -21,7 +21,9 @@ from models import ScanFinding
 
 logger = logging.getLogger("tempris.scanner")
 
-router = APIRouter()
+from services.entitlements import require_module
+
+router = APIRouter(dependencies=[Depends(require_module("SCOUT"))])
 
 # ── SSRF Protection: blocked IP ranges ────────────────────────────────────────
 

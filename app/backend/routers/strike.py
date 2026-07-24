@@ -16,7 +16,9 @@ from services.adversary_engine import run_adversary_emulation, TECHNIQUE_HANDLER
 import ipaddress
 import socket
 
-router = APIRouter()
+from services.entitlements import require_module
+
+router = APIRouter(dependencies=[Depends(require_module("STRIKE"))])
 
 # ── SSRF Protection ──────────────────────────────────────────────────────────
 

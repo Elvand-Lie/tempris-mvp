@@ -251,6 +251,20 @@ class GrcPolicyDocument(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class TenantPackage(Base):
+    __tablename__ = "tenant_packages"
+    tenant_id = Column(String(50), primary_key=True)
+    package_code = Column(String(20), nullable=False, default="DOMINATE")
+    module_overrides = Column(JSON, default={}, nullable=False)
+    updated_by = Column(String(255), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
 class Finding(Base):
     __tablename__ = "findings"
     id = Column(String(20), primary_key=True)              # F-1000, F-2000, F-3000

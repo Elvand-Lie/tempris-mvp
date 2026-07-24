@@ -24,7 +24,9 @@ import unicodedata
 import urllib.parse
 from pathlib import Path
 
-router = APIRouter()
+from services.entitlements import require_module
+
+router = APIRouter(dependencies=[Depends(require_module("STANDARD"))])
 VALID_STATUSES = ["not_assessed", "compliant", "partial", "non_compliant", "not_applicable"]
 
 def get_evidence_storage_root() -> str:

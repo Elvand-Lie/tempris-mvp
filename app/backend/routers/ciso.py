@@ -19,7 +19,9 @@ from routers.auth import get_auth_context, require_role
 from services.database import get_db
 
 
-router = APIRouter()
+from services.entitlements import require_module
+
+router = APIRouter(dependencies=[Depends(require_module("CISO"))])
 EXECUTIVE_ROLES = ('Superadmin', 'Admin')
 RESOLVED_STATUSES = {'resolved', 'mitigated', 'closed'}
 SEVERITY_ORDER = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'unknown': 4}

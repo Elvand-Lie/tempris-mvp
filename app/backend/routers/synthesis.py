@@ -7,7 +7,9 @@ from models import TesSnapshot
 from routers.auth import get_current_user
 from datetime import datetime, timedelta, timezone
 
-router = APIRouter()
+from services.entitlements import require_module
+
+router = APIRouter(dependencies=[Depends(require_module("SYNTHESIS"))])
 
 def get_dashboard_data(db: Session = None, tenant_id: str = "tempris"):
     """Generate dashboard telemetry from real data scoped to tenant."""

@@ -16,6 +16,8 @@ from services.sss_contract import FindingClass, public_sss_output, validate_subc
 
 router = APIRouter()
 
+BLFLAW_SUBTYPES = frozenset({"IDOR", "BFLAW-BAC", "BFLAW-HPE", "BFLAW-BFB", "BFLAW-MSC"})
+
 
 class SssIntake(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -24,6 +26,7 @@ class SssIntake(BaseModel):
     finding_type: str = Field(default="BLFLAW", max_length=50)
     finding_class: str | None = Field(default=None, alias="class", max_length=50)
     sub_class: str | None = Field(default=None, max_length=50)
+    finding_subtype: str | None = Field(default=None, alias="subtype", max_length=50)
     title: str = Field(..., max_length=255)
     description: str = Field(..., max_length=2000)
     affected_ecosystem: str = Field(default="Application", max_length=255)
@@ -33,6 +36,9 @@ class SssIntake(BaseModel):
     drf: float = Field(default=1.0, ge=0, le=2)
     tef: float = Field(default=1.0, ge=0, le=2)
     patch_available: bool = False
+    source_tool: str = Field(default="Manual", max_length=100)
+    pii_exposed: bool = False
+    compensating_control_notes: str | None = Field(default=None, max_length=2000)
     recommended_action: str = "COMPENSATING_CONTROL"
     compensating_controls: list[str] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
@@ -64,7 +70,18 @@ class SssIntake(BaseModel):
         category = (self.finding_class or self.finding_type).upper()
         self.finding_class = category
         self.sub_class = validate_subclass(category, self.sub_class)
+        if category == FindingClass.BLFLAW.value:
+            subtype = (self.finding_subtype or "").upper()
+            if subtype not in BLFLAW_SUBTYPES:
+                raise ValueError(
+                    "BLFLAW requires subtype: " + ", ".join(sorted(BLFLAW_SUBTYPES))
+                )
+            self.finding_subtype = subtype
+        if category == FindingClass.IDENTITY_POSTURE.value and not self.sub_class:
+            raise ValueError("IDENTITY_POSTURE requires sub_class")
         if category == FindingClass.AGENTIC_EXPOSURE.value:
+            if not self.sub_class:
+                raise ValueError("AGENTIC_EXPOSURE requires sub_class")
             missing = [name for name in ("agent_id", "credential_scope") if not getattr(self, name)]
             if missing or not self.ingestion_paths or self.egress_controlled is None:
                 raise ValueError(
@@ -72,6 +89,17 @@ class SssIntake(BaseModel):
                     "ingestion_paths, and egress_controlled"
                 )
         return self
+
+
+class SssUpdate(BaseModel):
+    base_severity: float | None = Field(default=None, ge=0, le=10)
+    patch_available: bool | None = None
+    compensating_controls: list[str] | None = None
+    compensating_control_notes: str | None = Field(default=None, max_length=2000)
+
+
+class SssResolve(BaseModel):
+    resolution_notes: str = Field(..., min_length=3, max_length=2000)
 
 
 class LegacyCveIntake(BaseModel):
@@ -145,6 +173,7 @@ def _create_finding(
 
     category = (req.finding_class or req.finding_type or kind).upper()
     sub_class = validate_subclass(category, req.sub_class)
+    subtype = req.finding_subtype
     scoring = {"base_severity": req.base_severity, "AGM": req.agm, "DRF": req.drf, "TEF": req.tef}
     tes = calculate_sss_tes(scoring)
     public_decision = engine_decision or public_decision_for_finding(
@@ -167,8 +196,11 @@ def _create_finding(
         id=_new_id("ED"),
         tenant_id=tenant_id,
         finding_type=category,
+        subtype=subtype,
         sub_class=sub_class,
         decision=public_decision,
+        patch_available=req.patch_available,
+        cve_assigned=False,
         cve=fid,
         title=req.title,
         vendor=req.affected_ecosystem,
@@ -193,6 +225,10 @@ def _create_finding(
             "type": category,
             "source": kind,
             "sub_class": sub_class,
+            "subtype": subtype,
+            "source_tool": req.source_tool,
+            "pii_exposed": req.pii_exposed,
+            "compensating_control_notes": req.compensating_control_notes,
             "scoring": scoring,
             "patch_available": req.patch_available,
             "compensating_controls": req.compensating_controls,
@@ -222,6 +258,13 @@ def _public(f: Finding) -> dict:
         "finding_type": sss.get("type") or f.finding_type,
         "class": sss.get("type") or f.finding_type,
         "sub_class": sss.get("sub_class") or f.sub_class,
+        "subtype": sss.get("subtype") or f.subtype,
+        "description": f.short_description,
+        "affected_ecosystem": f.vendor,
+        "attack_vectors": sss.get("attack_vectors", []),
+        "source_tool": sss.get("source_tool"),
+        "pii_exposed": bool(sss.get("pii_exposed")),
+        "compensating_control_notes": sss.get("compensating_control_notes"),
         "patch_available": sss.get("patch_available"),
         "compensating_controls": sss.get("compensating_controls", []),
         "source_references": sss.get("references", []),
@@ -288,6 +331,76 @@ def list_sss(
         Finding.tenant_id == _tenant_id(user),
     ).order_by(Finding.created_at.desc()).limit(300).all()
     return {"data": [_public(finding) for finding in rows]}
+
+
+def _tenant_sss_finding(db: Session, finding_id: str, tenant_id: str) -> Finding:
+    finding = db.query(Finding).filter(
+        Finding.tenant_id == tenant_id,
+        Finding.source == "sss",
+        ((Finding.id == finding_id) | (Finding.cve == finding_id)),
+    ).first()
+    if not finding:
+        raise HTTPException(status_code=404, detail="SSS finding not found")
+    return finding
+
+
+@router.put("/intake/sss/{finding_id}")
+def update_sss(
+    finding_id: str,
+    req: SssUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("Superadmin", "Admin", "Analyst")),
+):
+    finding = _tenant_sss_finding(db, finding_id, _tenant_id(user))
+    sss = dict(finding.sss_data or {})
+    scoring = dict(sss.get("scoring") or {})
+    if req.base_severity is not None:
+        scoring["base_severity"] = req.base_severity
+        finding.cvss = req.base_severity
+    if req.patch_available is not None:
+        sss["patch_available"] = req.patch_available
+        finding.patch_available = req.patch_available
+    if req.compensating_controls is not None:
+        sss["compensating_controls"] = req.compensating_controls
+    if req.compensating_control_notes is not None:
+        sss["compensating_control_notes"] = req.compensating_control_notes
+    sss["scoring"] = scoring
+    score = calculate_sss_tes(scoring)
+    decision = public_decision_for_finding({"sss_data": sss, "source": "sss"}, score)
+    sss["engine_decision"] = decision
+    finding.sss_data = sss
+    finding.decision = decision
+    finding.priority = priority_from_tes(score)
+    _audit_connector(db, request, user, "SSS_INTAKE_UPDATED", f"SSS intake updated {finding.cve}")
+    db.commit()
+    db.refresh(finding)
+    return _public(finding)
+
+
+@router.post("/intake/sss/{finding_id}/resolve")
+def resolve_sss(
+    finding_id: str,
+    req: SssResolve,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("Superadmin", "Admin", "Analyst")),
+):
+    finding = _tenant_sss_finding(db, finding_id, _tenant_id(user))
+    if finding.status == "resolved":
+        raise HTTPException(status_code=409, detail="SSS finding is already resolved")
+    sss = dict(finding.sss_data or {})
+    sss.update({
+        "resolution_notes": req.resolution_notes,
+        "resolved_at": datetime.now(timezone.utc).isoformat(),
+        "resolved_by": get_auth_context(user).user_id,
+    })
+    finding.sss_data = sss
+    finding.status = "resolved"
+    _audit_connector(db, request, user, "SSS_INTAKE_RESOLVED", f"SSS intake resolved {finding.cve}")
+    db.commit()
+    db.refresh(finding)
+    return _public(finding)
 
 
 @router.post("/intake/legacy-cve")

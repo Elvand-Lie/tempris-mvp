@@ -6,7 +6,9 @@ from services.database import get_db
 from routers.auth import get_auth_context, get_current_user
 import math
 
-router = APIRouter()
+from services.entitlements import require_module
+
+router = APIRouter(dependencies=[Depends(require_module("SCOUT"))])
 
 
 def _strip_internal_fields(f: dict) -> dict:

@@ -9,7 +9,9 @@ from datetime import datetime
 import os
 import uuid
 
-router = APIRouter()
+from services.entitlements import require_module
+
+router = APIRouter(dependencies=[Depends(require_module("SCOUT"))])
 
 class AevModuleRegisterReq(BaseModel):
     id: str

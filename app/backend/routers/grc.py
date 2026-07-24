@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 from services.database import get_db
+from services.entitlements import require_module
 from models import GrcState, GrcSignoff, GrcPolicyDocument, ControlEvidence
 from routers.audit import append_to_audit_log, AuditEntry
 from routers.auth import get_current_user, require_role, get_auth_context, scoped_evidence_query, EvidencePermission
@@ -99,7 +100,7 @@ def log_evidence_action(
 
 
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_module("GRC"))])
 
 
 def _verified_tenant_id(user: dict) -> str:

@@ -21,7 +21,7 @@ logger = logging.getLogger("tempris")
 # Add the api directory to the Python path for Vercel Serverless
 sys.path.append(os.path.dirname(__file__))
 
-from routers import auth, spectrum, audit, synthesis, scout, scanner, strike, standard, assets, grc, edip, surge, blflaw, partner, reports, aev, ocq, threats, ciso
+from routers import auth, spectrum, audit, synthesis, scout, scanner, strike, standard, assets, grc, edip, surge, blflaw, partner, reports, aev, ocq, threats, ciso, packages
 from routers.audit import append_to_audit_log, AuditEntry
 from routers.auth import get_current_user
 from services.kev_loader import ensure_findings_seeded, get_finding_stats
@@ -90,6 +90,7 @@ app.include_router(aev.router, prefix="/api/aev", tags=["aev"])
 app.include_router(ocq.router, prefix="/api/ocq", tags=["ocq"])
 app.include_router(threats.router, prefix="/api/threats", tags=["threats"])
 app.include_router(ciso.router, prefix="/api/ciso", tags=["ciso"])
+app.include_router(packages.router, prefix="/api/packages", tags=["packages"])
 
 # ─ Startup: Init DB, Seed data ──────────────────────────────────────────────────
 
@@ -102,6 +103,11 @@ def startup():
     try:
         from services.asset_seeder import seed_assets
         seed_assets(db)
+        from services.entitlements import ensure_default_tenant_packages
+        ensure_default_tenant_packages(
+            db,
+            {record.get("tenant_id") for record in auth.USERS.values()},
+        )
     finally:
         db.close()
     # 3. Seed findings into DB (auto-seeds from JSON if table is empty)

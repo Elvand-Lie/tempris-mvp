@@ -13,7 +13,9 @@ from routers.auth import get_auth_context, get_current_user, require_role
 from datetime import datetime, timezone
 from uuid import uuid4
 
-router = APIRouter()
+from services.entitlements import require_module
+
+router = APIRouter(dependencies=[Depends(require_module("ASSETS"))])
 
 
 def _verified_tenant_id(user: dict) -> str:

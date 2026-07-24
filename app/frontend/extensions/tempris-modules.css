@@ -426,3 +426,139 @@ body.tmx-extension-active #root main {
   .tmx-metrics { grid-template-columns: 1fr; }
   .tmx-heading { display: grid; }
 }
+
+.tmx-intake-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.tmx-field-wide,
+.tmx-form-actions {
+  grid-column: 1 / -1;
+}
+
+.tmx-field textarea,
+.tmx-search {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  background: #0a0a0b;
+  color: #f4f4f5;
+  font: inherit;
+}
+
+.tmx-field textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.tmx-search {
+  max-width: 320px;
+  min-height: 36px;
+}
+
+.tmx-check-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #d4d4d8;
+  font-size: 13px;
+}
+
+.tmx-check-label input {
+  width: 16px;
+  height: 16px;
+  accent-color: #10b981;
+}
+
+.tmx-form-actions,
+.tmx-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.tmx-form-message {
+  min-height: 20px;
+  color: #a1a1aa;
+  font-size: 12px;
+}
+
+.tmx-card-actions {
+  justify-content: flex-start;
+  padding-top: 4px;
+}
+
+.tmx-button-secondary {
+  border-color: #3f3f46;
+  background: #1c1c1f;
+  color: #d4d4d8;
+}
+
+.tmx-finding-description {
+  margin: 0;
+  color: #a1a1aa;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.tmx-notice-success {
+  border-color: rgb(16 185 129 / 30%);
+  background: rgb(16 185 129 / 8%);
+}
+
+.tmx-package-description {
+  min-height: 40px;
+  padding: 10px 12px;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  background: #0a0a0b;
+  color: #d4d4d8;
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .tmx-intake-form { grid-template-columns: 1fr; }
+  .tmx-field-wide,
+  .tmx-form-actions { grid-column: auto; }
+  .tmx-panel-header { height: auto; min-height: 52px; flex-wrap: wrap; }
+}
+
+#tempris-extension-host [hidden] {
+  display: none !important;
+}
+
+.tmx-resolution-form {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #3f3f46;
+  border-radius: 8px;
+  background: #0a0a0b;
+}
+
+.tmx-resolution-form label {
+  display: grid;
+  gap: 7px;
+  color: #a1a1aa;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.tmx-resolution-form textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  background: #141416;
+  color: #f4f4f5;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  text-transform: none;
+  resize: vertical;
+}

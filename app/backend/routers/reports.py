@@ -7,7 +7,9 @@ from routers.auth import get_current_user, require_role, get_auth_context
 from routers.audit import append_to_audit_log_db, AuditEntry
 from typing import Any
 
-router = APIRouter()
+from services.entitlements import require_module
+
+router = APIRouter(dependencies=[Depends(require_module("SPOTLIGHT"))])
 
 class ReportRegisterReq(BaseModel):
     id: str

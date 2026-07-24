@@ -12,7 +12,9 @@ from services.edip_engine import auto_classify
 from middleware.rate_limit import detect_probe_attempt
 from typing import Any
 
-router = APIRouter()
+from services.entitlements import require_module
+
+router = APIRouter(dependencies=[Depends(require_module("SPECTRUM"))])
 
 VALID_EDIP_DECISIONS = {"mitigate", "accept", "transfer", "ignore"}
 

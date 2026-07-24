@@ -5,7 +5,9 @@ from services.threat_importer import import_threat_pack, rollback_threat_pack
 from routers.auth import require_role, get_auth_context
 from typing import Any
 
-router = APIRouter()
+from services.entitlements import require_module
+
+router = APIRouter(dependencies=[Depends(require_module("SPECTRUM"))])
 
 @router.post("/import")
 def import_threats(
