@@ -49,11 +49,14 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     logo = client.get("/brand/tempris-logo-light.png")
 
     assert 'src="/assets/index-DUrFdX-d.js"' in index.text
-    assert 'src="/extensions/tempris-bootstrap.js"' in index.text
-    assert index.text.index('src="/extensions/tempris-bootstrap.js"') < index.text.index('src="/assets/index-DUrFdX-d.js"')
-    assert 'src="/extensions/tempris-modules.js"' in index.text
-    assert 'href="/extensions/tempris-modules.css"' in index.text
+    assert 'src="/extensions/tempris-bootstrap.js?v=20260724a"' in index.text
+    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260724a"') < index.text.index('src="/assets/index-DUrFdX-d.js"')
+    assert 'src="/extensions/tempris-modules.js?v=20260724a"' in index.text
+    assert 'href="/extensions/tempris-modules.css?v=20260724a"' in index.text
     assert script.status_code == 200
+    assert script.headers["cache-control"] == "no-store, max-age=0"
+    assert bootstrap.headers["cache-control"] == "no-store, max-age=0"
+    assert stylesheet.headers["cache-control"] == "no-store, max-age=0"
     assert bootstrap.status_code == 200
     assert "url.pathname !== '/api/grc/state'" in bootstrap.text
     assert "normalizeToggleGroup(toggles.agm" in bootstrap.text

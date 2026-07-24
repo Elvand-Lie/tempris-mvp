@@ -718,7 +718,8 @@ if FRONTEND_DIR.exists():
         if file_path.is_file():
             if file_path == (FRONTEND_DIR / "index.html").resolve():
                 return serve_spa_index()
-            return FileResponse(str(file_path))
+            headers = SPA_INDEX_HEADERS if full_path.startswith("extensions/") else None
+            return FileResponse(str(file_path), headers=headers)
         return serve_spa_index()
 
 if __name__ == "__main__":
