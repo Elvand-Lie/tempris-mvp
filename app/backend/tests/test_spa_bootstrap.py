@@ -23,13 +23,15 @@ def test_spa_bootstrap_is_not_cached_and_uses_token_persisting_bundle():
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store, max-age=0"
-    bundle_match = re.search(r'src="(/assets/index-[^"]+\.js)"', response.text)
+    bundle_match = re.search(r'src="(/assets/index-[^"]+\.js(?:\?v=[^"]+)?)"', response.text)
     assert bundle_match, "SPA bootstrap must select a JavaScript bundle"
 
     bundle = client.get(bundle_match.group(1))
 
     assert bundle.status_code == 200
     assert "localStorage.setItem(`tempris_token`" in bundle.text
+    assert "localStorage.setItem(`tempris_user`" in bundle.text
+    assert "JSON.parse(localStorage.getItem(`tempris_user`)" in bundle.text
 
 
 def test_direct_index_and_spa_fallback_are_not_cached():
@@ -48,11 +50,11 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     stylesheet = client.get("/extensions/tempris-modules.css")
     logo = client.get("/brand/tempris-logo-light.png")
 
-    assert 'src="/assets/index-DUrFdX-d.js"' in index.text
-    assert 'src="/extensions/tempris-bootstrap.js?v=20260724c"' in index.text
-    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260724c"') < index.text.index('src="/assets/index-DUrFdX-d.js"')
-    assert 'src="/extensions/tempris-modules.js?v=20260724c"' in index.text
-    assert 'href="/extensions/tempris-modules.css?v=20260724c"' in index.text
+    assert 'src="/assets/index-DUrFdX-d.js?v=20260724d"' in index.text
+    assert 'src="/extensions/tempris-bootstrap.js?v=20260724d"' in index.text
+    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260724d"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260724d"')
+    assert 'src="/extensions/tempris-modules.js?v=20260724d"' in index.text
+    assert 'href="/extensions/tempris-modules.css?v=20260724d"' in index.text
     assert script.status_code == 200
     assert script.headers["cache-control"] == "no-store, max-age=0"
     assert bootstrap.headers["cache-control"] == "no-store, max-age=0"
@@ -64,6 +66,10 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     assert "'/packages'" in script.text
     assert "'/api/packages/current'" in script.text
     assert "Business Logic Flaw Intake" in script.text
+    assert "Secure online intake" in script.text
+    assert "Enabled Modules" in script.text
+    assert "'/vdp-queue'" in script.text
+    assert "VDP Security Queue" in script.text
     assert "Confirm resolution" in script.text
     assert "window.prompt" not in script.text
     assert "Backend package-entitlement enforcement is not implemented" not in script.text
@@ -72,8 +78,10 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     assert "main.innerHTML" not in script.text
     assert "rootObserver.observe(root" in script.text
     assert "observe(document.documentElement" not in script.text
-    assert "Production account emails:" in script.text
-    assert "setControlledInputValue(currentPassword, '')" in script.text
+    assert "Use your assigned Tempris credentials." in script.text
+    assert "Powered by Codingo Wave 1 Architecture" in script.text
+    assert "Tempris Technology Pte. Ltd. · Secure Workspace" in script.text
+    assert "button.style.display = 'none'" in script.text
     assert stylesheet.status_code == 200
     assert ".tmx-page" in stylesheet.text
     assert logo.status_code == 200

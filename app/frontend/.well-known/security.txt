@@ -1,11 +1,8 @@
-# Tempris Technology Pte. Ltd. - security.txt
-# RFC 9116 compliant | VDP + coordinated disclosure
-# Generated: June 2026 | Review annually
-
+# Tempris Technology Pte. Ltd. - RFC 9116 security.txt
+Contact: https://sandbox.tempris.tech/vdp#submit
 Contact: mailto:lohsherie@yahoo.com.sg
-Contact: https://tempris.tech/security
-Acknowledgments: https://tempris.tech/security#hof
-Policy: https://tempris.tech/security
-Canonical: https://tempris.tech/.well-known/security.txt
+Acknowledgments: https://sandbox.tempris.tech/vdp#hof
+Policy: https://sandbox.tempris.tech/vdp
+Canonical: https://sandbox.tempris.tech/.well-known/security.txt
 Expires: 2027-06-30T00:00:00Z
 Preferred-Languages: en

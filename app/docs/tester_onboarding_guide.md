@@ -91,7 +91,7 @@ Use the returned `access_token` as: `Authorization: Bearer <token>`
 |-----|---------|
 | `https://sandbox.tempris.tech` | Main app (login with an assigned sandbox account) |
 | `https://sandbox.tempris.tech/api/health` | API health check |
-| `https://sandbox.tempris.tech/security` | VDP policy page |
+| `https://sandbox.tempris.tech/vdp` | VDP policy and confidential SURGE intake |
 | `https://sandbox.tempris.tech/.well-known/security.txt` | security.txt |
 
 ---

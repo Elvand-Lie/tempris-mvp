@@ -62,6 +62,7 @@ class _LRUBuckets(OrderedDict):
 
 # path prefix â†’ (bucket capacity, refill rate tokens/sec)
 _LIMITS = {
+    "/api/surge/public/submit": (5, 5 / 3600),  # 5 confidential reports per IP/hour
     "/api/auth/login": (5, 5 / 60),     # 5 login attempts per minute
     "/api/scanner": (10, 10 / 60),      # 10 per minute
 }

@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 import time
@@ -692,24 +692,43 @@ if FRONTEND_DIR.exists():
     @app.get("/")
     async def serve_root():
         return serve_spa_index()
-    # Serve VDP policy page at /security (public, no auth)
-    DOCS_DIR = Path(__file__).resolve().parent / "docs"
-    if not DOCS_DIR.exists():
-        DOCS_DIR = Path("/app/docs")
+    # Keep one canonical VDP experience. /security remains as a durable alias.
+    VDP_PUBLIC_ORIGIN = os.environ.get("VDP_PUBLIC_ORIGIN", "https://sandbox.tempris.tech").rstrip("/")
+    VDP_CONTACT_EMAIL = os.environ.get("VDP_CONTACT_EMAIL", "lohsherie@yahoo.com.sg").strip()
+    VDP_SECURITY_TXT_EXPIRES = os.environ.get("VDP_SECURITY_TXT_EXPIRES", "2027-06-30T00:00:00Z").strip()
 
-    @app.get("/security")
-    async def serve_vdp():
-        vdp_path = DOCS_DIR / "tempris_vdp_policy.html"
-        if vdp_path.is_file():
-            return FileResponse(str(vdp_path), media_type="text/html")
-        raise HTTPException(status_code=404, detail="VDP policy not found")
+    @app.get("/security", include_in_schema=False)
+    async def redirect_vdp():
+        return RedirectResponse(url="/vdp", status_code=308)
+
+    @app.get("/.well-known/security.txt", include_in_schema=False)
+    async def serve_security_txt():
+        lines = [
+            "# Tempris Technology Pte. Ltd. - RFC 9116 security.txt",
+            f"Contact: {VDP_PUBLIC_ORIGIN}/vdp#submit",
+        ]
+        if VDP_CONTACT_EMAIL:
+            lines.append(f"Contact: mailto:{VDP_CONTACT_EMAIL}")
+        lines.extend([
+            f"Acknowledgments: {VDP_PUBLIC_ORIGIN}/vdp#hof",
+            f"Policy: {VDP_PUBLIC_ORIGIN}/vdp",
+            f"Canonical: {VDP_PUBLIC_ORIGIN}/.well-known/security.txt",
+            f"Expires: {VDP_SECURITY_TXT_EXPIRES}",
+            "Preferred-Languages: en",
+            "",
+        ])
+        return PlainTextResponse(
+            "\n".join(lines),
+            media_type="text/plain; charset=utf-8",
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
 
     # Catch-all: serve index.html for any non-API route (SPA client-side routing)
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
         if full_path.startswith("api"):
             raise HTTPException(status_code=404, detail="Not found")
-        if full_path in (".well-known/security.txt", ".well-known/pgp-key.txt"):
+        if full_path == ".well-known/pgp-key.txt":
             file_path = (FRONTEND_DIR / full_path).resolve()
             if file_path.is_file() and str(file_path).startswith(str(FRONTEND_DIR.resolve())):
                 return FileResponse(str(file_path), media_type="text/plain")

@@ -2,9 +2,24 @@
   'use strict';
 
   const TOKEN_KEY = 'tempris_token';
-  const EXTENSION_ROUTES = new Set(['/ciso', '/packages', '/sss-intake']);
+  const EXTENSION_ROUTES = new Set(['/ciso', '/packages', '/sss-intake', '/vdp-queue']);
   const EXTENSION_HOST_ID = 'tempris-extension-host';
   const RETRY_DELAYS = [1000, 3000, 8000];
+  const MODULE_PATHS = {
+    SYNTHESIS: '/', SPECTRUM: '/spectrum', SCOUT: '/scout', STRIKE: '/strike',
+    STANDARD: '/standard', GRC: '/grc', ASSETS: '/assets', SPOTLIGHT: '/spotlight', CISO: '/ciso',
+  };
+  const MODULE_PURPOSES = {
+    SYNTHESIS: 'Exposure overview and prioritised action',
+    SPECTRUM: 'Finding intelligence and TES decisions',
+    SCOUT: 'Threat and vulnerability discovery',
+    STRIKE: 'Authorised security validation',
+    STANDARD: 'Control assurance and regulatory evidence',
+    GRC: 'Governance, risk, and compliance operations',
+    ASSETS: 'Tenant asset inventory and ownership',
+    SPOTLIGHT: 'Executive and board-ready reporting',
+    CISO: 'Executive security posture and decisions',
+  };
   let scheduled = false;
   let cisoAccess = null;
   let cisoSummary = null;
@@ -13,6 +28,8 @@
   let sssRequest = null;
   let packageConfig = null;
   let packageRequest = null;
+  let vdpSubmissions = null;
+  let vdpRequest = null;
   let rootObserver = null;
 
   function getExtensionHost() {
@@ -180,24 +197,27 @@
       if (password.value === 'demo') setControlledInputValue(password, '');
     }
 
-    const accountHeading = [...document.querySelectorAll('#root p')]
-      .find((node) => node.textContent.trim() === 'Demo Accounts Available:');
-    if (accountHeading) accountHeading.textContent = 'Production account emails:';
+    const email = form.querySelector('input[type="email"]');
+    if (email) {
+      email.placeholder = 'name@company.com';
+      email.autocomplete = 'username';
+    }
+    if (password) password.autocomplete = 'current-password';
 
-    const accountButtons = [...document.querySelectorAll('#root button')]
-      .filter((button) => button.textContent.includes('@tempris.com'));
-    accountButtons.forEach((button) => {
-      if (button.dataset.temprisAccountShortcut) return;
-      button.dataset.temprisAccountShortcut = 'true';
-      button.addEventListener('click', () => {
-        window.setTimeout(() => {
-          const currentPassword = document.querySelector('#root form input[type="password"]');
-          if (!currentPassword) return;
-          setControlledInputValue(currentPassword, '');
-          currentPassword.focus();
-        }, 0);
-      });
-    });
+    const accountHeading = [...document.querySelectorAll('#root p')]
+      .find((node) => node.textContent.trim() === 'Demo Accounts Available:' || node.textContent.trim() === 'Production account emails:');
+    if (accountHeading) {
+      accountHeading.textContent = 'Use your assigned Tempris credentials.';
+      accountHeading.classList.add('tmx-login-guidance');
+    }
+
+    [...document.querySelectorAll('#root button')]
+      .filter((button) => button.textContent.includes('@tempris.com'))
+      .forEach((button) => { button.hidden = true; button.style.display = 'none'; });
+
+    const vendorLine = [...document.querySelectorAll('#root *')]
+      .find((node) => node.children.length === 0 && node.textContent.trim() === 'Powered by Codingo Wave 1 Architecture');
+    if (vendorLine) vendorLine.textContent = 'Tempris Technology Pte. Ltd. · Secure Workspace';
   }
 
   function decorateBranding() {
@@ -213,7 +233,24 @@
       if (oldIcon && oldIcon !== logo) oldIcon.classList.add('tmx-old-brand-icon');
     }
 
+    const root = document.getElementById('root');
+    if (root) {
+      const textWalker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      while (textWalker.nextNode()) {
+        if (textWalker.currentNode.nodeValue?.includes('Demo Environment')) {
+          textWalker.currentNode.nodeValue = textWalker.currentNode.nodeValue.replace(
+            'Demo Environment',
+            'Tempris Workspace',
+          );
+          break;
+        }
+      }
+    }
+
     const nav = document.querySelector('#root nav');
+    const navHeading = [...(nav?.querySelectorAll('div') || [])]
+      .find((node) => node.children.length === 0 && node.textContent.trim() === 'Wave 1 Modules');
+    if (navHeading) navHeading.textContent = 'Security Modules';
     const sidebarHeader = nav?.parentElement?.firstElementChild;
     if (sidebarHeader && !sidebarHeader.querySelector('.tmx-logo')) {
       const logo = document.createElement('img');
@@ -266,6 +303,18 @@
     return packageRequest;
   }
 
+  async function loadVdpSubmissions(force = false) {
+    if (vdpSubmissions && !force) return vdpSubmissions;
+    if (vdpRequest && !force) return vdpRequest;
+    vdpRequest = api('/api/surge/submissions')
+      .then((payload) => {
+        vdpSubmissions = payload.data || [];
+        return vdpSubmissions;
+      })
+      .finally(() => { vdpRequest = null; });
+    return vdpRequest;
+  }
+
   function ensureNavigation() {
     const nav = document.querySelector('#root nav');
     if (!nav || !localStorage.getItem(TOKEN_KEY)) return;
@@ -300,6 +349,11 @@
     if (!nav.querySelector('[data-tempris-extension-nav="/sss-intake"]')) {
       createNavItem(nav, 'SSS INTAKE', '/sss-intake', 2);
     }
+    const vdpEligible = packageConfig.tenant_id === 'tempris'
+      && ['Superadmin', 'Admin', 'Analyst'].includes(packageConfig.role);
+    const vdpItem = nav.querySelector('[data-tempris-extension-nav="/vdp-queue"]');
+    if (vdpItem) vdpItem.style.display = vdpEligible ? '' : 'none';
+    if (vdpEligible && !vdpItem) createNavItem(nav, 'VDP QUEUE', '/vdp-queue', 3);
 
     nav.querySelectorAll('[data-tempris-extension-nav]').forEach((item) => {
       item.className = navClass(item.getAttribute('href') === window.location.pathname);
@@ -463,7 +517,7 @@
     </section>` : '';
 
     host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="sss-intake">
-      <header class="tmx-heading"><div><h1>SSS Decision Queue</h1><p>Server-authoritative non-CVE intake and connector decisions. The browser never recomputes scores or actions.</p></div><button type="button" class="tmx-button tmx-button-secondary" data-sss-refresh>Refresh</button></header>
+      <header class="tmx-heading"><div><h1>SSS Decision Queue</h1><p>Capture and manage non-CVE findings with server-issued exposure scores and remediation decisions.</p></div><button type="button" class="tmx-button tmx-button-secondary" data-sss-refresh>Refresh</button></header>
       ${intake}
       <section class="tmx-panel"><div class="tmx-panel-header"><h2>Tenant Findings</h2><input class="tmx-search" data-sss-search aria-label="Filter findings" placeholder="Filter by title, ID, class, or status"></div><div class="tmx-panel-body"><div class="tmx-finding-grid" aria-live="polite">${cards}</div></div></section>
     </div>`;
@@ -564,7 +618,7 @@
     const catalog = config.catalog || [];
     host.dataset.temprisExtensionRoute = '/packages';
     host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="packages">
-      <header class="tmx-heading"><div><h1>Package Controls</h1><p>Server-enforced tenant module access for the onboarding tier selected in the Tempris brief.</p></div><button type="button" class="tmx-button" data-package-save ${config.can_manage ? '' : 'disabled'}>Save changes</button></header>
+      <header class="tmx-heading"><div><h1>Package Controls</h1><p>Manage server-enforced module access for this tenant.</p></div><button type="button" class="tmx-button" data-package-save ${config.can_manage ? '' : 'disabled'}>Save changes</button></header>
       <div class="tmx-notice tmx-notice-success"><strong>Enforced:</strong><span>Disabled modules are rejected by the backend as well as hidden from navigation. Audit logging records every package change.</span></div>
       <section class="tmx-panel">
         <div class="tmx-panel-header"><h2>Tenant Configuration</h2><span class="tmx-status ${config.configured ? 'tmx-status-available' : 'tmx-status-high'}">${config.configured ? 'Configured' : 'Default fallback'}</span></div>
@@ -636,6 +690,225 @@
       host.querySelector('[data-package-retry]').addEventListener('click', () => renderPackagesRoute(host, true));
     }
   }
+  function safeHttpUrl(value) {
+    try {
+      const parsed = new URL(value);
+      return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : '';
+    } catch { return ''; }
+  }
+
+  function renderVdpQueue(host, submissions) {
+    host.dataset.temprisExtensionRoute = '/vdp-queue';
+    const open = submissions.filter((item) => ['submitted', 'triaged'].includes(item.status));
+    const accepted = submissions.filter((item) => ['accepted', 'paid'].includes(item.status));
+    const cards = submissions.length ? submissions.map((item) => {
+      const affectedUrl = safeHttpUrl(item.poc_url);
+      const researcher = item.researcher || {};
+      const actionable = ['submitted', 'triaged'].includes(item.status);
+      return `<article class="tmx-vdp-card">
+        <div class="tmx-finding-topline"><div class="tmx-chip-row"><span class="tmx-status ${statusClass(item.severity)}">${escapeHtml(item.severity)}</span><span class="tmx-status ${item.status === 'accepted' ? 'tmx-status-available' : ''}">${escapeHtml(item.status)}</span></div><span class="tmx-list-detail">${escapeHtml(formatDate(item.created_at))}</span></div>
+        <h2>${escapeHtml(item.title)}</h2>
+        <div class="tmx-vdp-reference"><strong>${escapeHtml(item.id)}</strong><span>${escapeHtml(researcher.handle || 'Anonymous researcher')}</span>${researcher.email ? `<a href="mailto:${encodeURIComponent(researcher.email)}">${escapeHtml(researcher.email)}</a>` : ''}</div>
+        <p>${escapeHtml(item.description)}</p>
+        ${affectedUrl ? `<a class="tmx-vdp-target" href="${escapeHtml(affectedUrl)}" target="_blank" rel="noopener noreferrer">Affected URL ↗</a>` : ''}
+        ${item.finding_id ? `<div class="tmx-control-callout"><strong>Accepted finding</strong><span>${escapeHtml(item.finding_id)}</span></div>` : ''}
+        ${actionable ? `<div class="tmx-card-actions"><button type="button" class="tmx-button" data-vdp-triage="accepted" data-vdp-id="${escapeHtml(item.id)}">Accept into SPECTRUM</button><button type="button" class="tmx-button tmx-button-secondary" data-vdp-triage="duplicate" data-vdp-id="${escapeHtml(item.id)}">Duplicate</button><button type="button" class="tmx-button tmx-button-secondary" data-vdp-triage="rejected" data-vdp-id="${escapeHtml(item.id)}">Reject</button></div>` : ''}
+      </article>`;
+    }).join('') : '<div class="tmx-empty">No confidential VDP submissions are waiting for triage.</div>';
+
+    host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="vdp-queue">
+      <header class="tmx-heading"><div><h1>VDP Security Queue</h1><p>Restricted SURGE workspace for confidential researcher reports and validated-finding intake.</p></div><button type="button" class="tmx-button tmx-button-secondary" data-vdp-refresh>Refresh</button></header>
+      <section class="tmx-metrics" aria-label="VDP queue metrics"><div class="tmx-metric"><div class="tmx-metric-label">Total reports</div><div class="tmx-metric-value">${submissions.length}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Awaiting triage</div><div class="tmx-metric-value ${open.length ? 'tmx-tone-high' : 'tmx-tone-success'}">${open.length}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Accepted</div><div class="tmx-metric-value tmx-tone-success">${accepted.length}</div></div></section>
+      <div class="tmx-notice"><strong>Confidential:</strong><span>Researcher contact details and reproduction evidence are restricted to authorised Tempris security staff. Accepted reports create tenant-scoped findings.</span></div>
+      <section class="tmx-vdp-queue" aria-live="polite">${cards}</section>
+    </div>`;
+    host.querySelector('[data-vdp-refresh]').addEventListener('click', () => renderVdpQueueRoute(host, true));
+    host.querySelectorAll('[data-vdp-triage]').forEach((button) => button.addEventListener('click', async () => {
+      const action = button.dataset.vdpTriage;
+      const prompt = action === 'accepted'
+        ? 'Accept this report and create a tenant finding?'
+        : `Mark this report as ${action}?`;
+      if (!window.confirm(prompt)) return;
+      button.disabled = true;
+      try {
+        await api(`/api/surge/submissions/${encodeURIComponent(button.dataset.vdpId)}/triage`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: action, edip_decision: action === 'accepted' ? 'mitigate' : 'defer' }),
+        });
+        vdpSubmissions = null;
+        await renderVdpQueueRoute(host, true);
+      } catch (error) {
+        button.disabled = false;
+        window.alert(error.message || 'VDP triage update failed.');
+      }
+    }));
+  }
+
+  async function renderVdpQueueRoute(host, force = false) {
+    host.dataset.temprisExtensionRoute = '/vdp-queue';
+    host.innerHTML = '<div data-tempris-extension-root class="tmx-panel tmx-loading">Loading confidential VDP queue...</div>';
+    try {
+      const [submissions, config] = await Promise.all([loadVdpSubmissions(force), loadPackageConfig(force)]);
+      const permitted = config.tenant_id === 'tempris' && ['Superadmin', 'Admin', 'Analyst'].includes(config.role);
+      if (!permitted) throw Object.assign(new Error('VDP queue access requires Tempris security staff.'), { status: 403 });
+      if (window.location.pathname === '/vdp-queue') renderVdpQueue(host, submissions);
+    } catch (error) {
+      if (window.location.pathname !== '/vdp-queue') return;
+      host.innerHTML = `<div data-tempris-extension-root class="tmx-page"><div class="tmx-panel tmx-error">${escapeHtml(error.message || 'VDP queue is unavailable.')}<div style="margin-top:16px"><button type="button" class="tmx-button" data-vdp-queue-retry>Retry</button></div></div></div>`;
+      host.querySelector('[data-vdp-queue-retry]').addEventListener('click', () => renderVdpQueueRoute(host, true));
+    }
+  }
+  function decorateSynthesisPanel() {
+    if (window.location.pathname !== '/' || !packageConfig || !localStorage.getItem(TOKEN_KEY)) return;
+    const synthesisIntro = [...document.querySelectorAll('#root p')]
+      .find((node) => node.textContent.trim() === 'Master view of Tempris CTEM platform status.');
+    if (synthesisIntro) synthesisIntro.textContent = 'Prioritised exposure overview and enabled tenant capabilities.';
+    const heading = [...document.querySelectorAll('#root h2')]
+      .find((node) => ['Module Status', 'Enabled Modules'].includes(node.textContent.trim()));
+    if (!heading) return;
+    const panel = heading.closest('.glass-panel');
+    const grid = heading.nextElementSibling;
+    if (!panel || !grid) return;
+
+    const visible = (packageConfig.effective_modules || []).filter((name) => {
+      if (!MODULE_PATHS[name]) return false;
+      if (name === 'CISO' && !['Superadmin', 'Admin'].includes(packageConfig.role)) return false;
+      return true;
+    });
+    const fingerprint = `${packageConfig.package_code}:${packageConfig.role}:${visible.join(',')}`;
+    if (panel.dataset.temprisWorkspacePanel === fingerprint) return;
+    panel.dataset.temprisWorkspacePanel = fingerprint;
+    heading.textContent = 'Enabled Modules';
+
+    let summary = panel.querySelector('[data-tempris-module-summary]');
+    if (!summary) {
+      summary = document.createElement('div');
+      summary.dataset.temprisModuleSummary = 'true';
+      heading.insertAdjacentElement('afterend', summary);
+    }
+    summary.className = 'tmx-module-summary';
+    summary.innerHTML = `<div><strong>${escapeHtml(packageConfig.package_code)} package</strong><span>${visible.length} accessible modules</span></div><p><strong>SPEAK</strong> is the always-on conversational assistant. <strong>SSS / EDIP</strong> is the server-authoritative decision engine.</p>`;
+
+    grid.className = 'tmx-module-grid';
+    grid.replaceChildren();
+    visible.forEach((name) => {
+      const item = document.createElement('a');
+      item.href = MODULE_PATHS[name];
+      item.className = 'tmx-module-card';
+      if (MODULE_PATHS[name] === window.location.pathname) item.setAttribute('aria-current', 'page');
+      const title = document.createElement('strong');
+      title.textContent = name;
+      const purpose = document.createElement('span');
+      purpose.textContent = MODULE_PURPOSES[name] || 'Enabled tenant capability';
+      item.append(title, purpose);
+      item.addEventListener('click', (event) => {
+        event.preventDefault();
+        navigate(MODULE_PATHS[name]);
+      });
+      grid.append(item);
+    });
+  }
+
+  function decorateVdp() {
+    if (window.location.pathname !== '/vdp') return;
+    const root = document.querySelector('#root');
+    const submitSection = document.querySelector('#submit');
+    if (!root || !submitSection) return;
+
+    const policyReplacements = new Map([
+      ['v1.0 - June 2026', 'v1.1 - July 2026'],
+      ['Automated acknowledgement is sent immediately. Human acknowledgement follows within 5 business days.', 'An on-page receipt and tracking reference are provided immediately. Human acknowledgement follows within 5 business days.'],
+      ['disclose.io Programme Database: submit a pull request to diodb once this policy page is published.', 'Programme directory listing is reviewed after operational ownership and triage capacity are confirmed.'],
+      ['FireBounty: can index the programme from /.well-known/security.txt once deployed.', 'Automated disclosure directories can discover the programme through the live RFC 9116 security.txt endpoint.'],
+      ['Community announcement: publish only after Tier 2 sandbox invitations are ready.', 'Material scope or programme changes are announced only after testing capacity and response ownership are confirmed.'],
+      ['TEMPRIS.TECH - Vulnerability Disclosure Policy v1.0', 'TEMPRIS.TECH - Vulnerability Disclosure Policy v1.1'],
+    ]);
+    [...root.querySelectorAll('*')].forEach((node) => {
+      if (node.children.length) return;
+      const replacement = policyReplacements.get(node.textContent.trim());
+      if (replacement) node.textContent = replacement;
+    });
+    const securityBlock = document.querySelector('#securitytxt pre');
+    if (securityBlock) {
+      securityBlock.textContent = `# Tempris Technology Pte. Ltd. - RFC 9116 security.txt\nContact: ${window.location.origin}/vdp#submit\nContact: mailto:lohsherie@yahoo.com.sg\nAcknowledgments: ${window.location.origin}/vdp#hof\nPolicy: ${window.location.origin}/vdp\nCanonical: ${window.location.origin}/.well-known/security.txt\nExpires: 2027-06-30T00:00:00Z\nPreferred-Languages: en`;
+    }
+
+    const reportLink = [...root.querySelectorAll('a')]
+      .find((link) => link.textContent.trim() === 'Report Finding');
+    if (reportLink) reportLink.href = '#submit';
+    const primaryLabel = [...submitSection.querySelectorAll('*')]
+      .find((node) => node.children.length === 0 && node.textContent.trim() === 'Primary channel');
+    if (primaryLabel) primaryLabel.textContent = 'Email fallback';
+    const reportingIntro = [...submitSection.querySelectorAll('p')]
+      .find((node) => node.textContent.includes('All vulnerability reports should be sent'));
+    if (reportingIntro) {
+      reportingIntro.textContent = 'Submit reports through the confidential online intake below. Email remains available as a fallback when the form is unsuitable.';
+    }
+
+    if (submitSection.querySelector('[data-vdp-intake]')) return;
+    const intake = document.createElement('div');
+    intake.dataset.vdpIntake = 'true';
+    intake.className = 'tmx-vdp-intake';
+    intake.innerHTML = `<div class="tmx-vdp-intake-heading"><div><span>Secure online intake</span><h3>Report a vulnerability</h3></div><strong>Powered by SURGE</strong></div>
+      <p class="tmx-vdp-intake-copy">Reports enter Tempris's restricted security queue for confidential triage. Do not include passwords, access tokens, unrelated personal data, or live client data. File uploads are intentionally disabled; we will arrange an encrypted exchange if evidence cannot be shared safely as text.</p>
+      <form data-vdp-form class="tmx-vdp-form">
+        <label>Email address<input name="email" type="email" autocomplete="email" maxlength="255" required></label>
+        <label>Recognition name or handle <span>(optional)</span><input name="recognition_name" autocomplete="nickname" maxlength="100"></label>
+        <label class="tmx-vdp-wide">Report title<input name="title" minlength="5" maxlength="255" required></label>
+        <label>Affected URL <span>(optional)</span><input name="affected_url" type="url" inputmode="url" maxlength="500" placeholder="https://sandbox.tempris.tech/..."></label>
+        <label>Researcher-assessed severity<select name="severity"><option value="critical">Critical</option><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select></label>
+        <label class="tmx-vdp-wide">Description and reproduction steps<textarea name="description" minlength="20" maxlength="8000" rows="8" required placeholder="Describe the affected component, numbered reproduction steps, observed impact, and suggested remediation if known."></textarea></label>
+        <label class="tmx-vdp-honeypot" aria-hidden="true">Website<input name="website" tabindex="-1" autocomplete="off"></label>
+        <label class="tmx-vdp-check tmx-vdp-wide"><input name="safe_harbor_ack" type="checkbox" required><span>I have read the scope, safe-harbor terms, and rules of engagement, and confirm this report arises from good-faith research.</span></label>
+        <label class="tmx-vdp-check tmx-vdp-wide"><input name="privacy_ack" type="checkbox" required><span>I consent to Tempris using my contact details and report content solely for security triage, remediation, and coordinated disclosure.</span></label>
+        <div class="tmx-vdp-actions tmx-vdp-wide"><div data-vdp-message role="status" aria-live="polite"></div><button type="submit">Submit confidential report</button></div>
+      </form>`;
+    submitSection.append(intake);
+
+    const form = intake.querySelector('[data-vdp-form]');
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const button = form.querySelector('button[type="submit"]');
+      const message = form.querySelector('[data-vdp-message]');
+      const data = new FormData(form);
+      button.disabled = true;
+      button.textContent = 'Submitting...';
+      message.className = '';
+      message.textContent = 'Sending your report to the confidential triage queue...';
+      try {
+        const response = await fetch('/api/surge/public/submit', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({
+            email: data.get('email'), recognition_name: data.get('recognition_name') || null,
+            title: data.get('title'), affected_url: data.get('affected_url') || null,
+            severity: data.get('severity'), description: data.get('description'),
+            safe_harbor_ack: data.has('safe_harbor_ack'), privacy_ack: data.has('privacy_ack'),
+            website: data.get('website') || '',
+          }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const fallback = response.status === 429
+            ? 'Submission limit reached. Please use the email fallback for an urgent report.'
+            : 'The report could not be submitted. Please review the form or use the email fallback.';
+          throw new Error(typeof result.detail === 'string' ? result.detail : fallback);
+        }
+        form.reset();
+        message.className = 'tmx-vdp-success';
+        message.textContent = result.tracking_id
+          ? `Report received. Keep tracking reference ${result.tracking_id} for follow-up.`
+          : 'Report received for confidential triage.';
+      } catch (error) {
+        message.className = 'tmx-vdp-error';
+        message.textContent = error.message || 'Submission failed. Please use the email fallback.';
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Submit confidential report';
+      }
+    });
+  }
   function renderCurrentRoute() {
     const path = window.location.pathname;
     if (!EXTENSION_ROUTES.has(path)) {
@@ -649,6 +922,7 @@
     if (path === '/ciso') renderCisoRoute(host);
     if (path === '/sss-intake') renderSssRoute(host);
     if (path === '/packages') renderPackagesRoute(host);
+    if (path === '/vdp-queue') renderVdpQueueRoute(host);
 
   }
 
@@ -656,6 +930,8 @@
     scheduled = false;
     decorateBranding();
     ensureNavigation();
+    decorateSynthesisPanel();
+    decorateVdp();
     renderCurrentRoute();
   }
 
@@ -682,6 +958,8 @@
     sssFindings = null;
     packageConfig = null;
     packageRequest = null;
+    vdpSubmissions = null;
+    vdpRequest = null;
     schedule();
   });
   function observeReactRoot() {

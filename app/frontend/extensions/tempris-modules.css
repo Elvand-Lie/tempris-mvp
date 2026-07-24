@@ -562,3 +562,251 @@ body.tmx-extension-active #root main {
   text-transform: none;
   resize: vertical;
 }
+
+/* Synthesis workspace clarity */
+.tmx-module-summary {
+  display: grid;
+  gap: 8px;
+  margin: -8px 0 18px;
+  color: #a1a1aa;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.tmx-module-summary > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tmx-module-summary strong { color: #f4f4f5; }
+.tmx-module-summary span {
+  padding: 2px 8px;
+  border: 1px solid rgb(16 185 129 / 28%);
+  border-radius: 999px;
+  color: #34d399;
+  background: rgb(16 185 129 / 8%);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.tmx-module-summary p { margin: 0; }
+
+.tmx-module-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.tmx-module-card {
+  display: grid;
+  gap: 5px;
+  min-height: 82px;
+  padding: 14px 15px;
+  border: 1px solid #27272a;
+  border-radius: 10px;
+  background: #141416;
+  color: #f4f4f5;
+  text-decoration: none;
+  transition: border-color .18s ease, background .18s ease, transform .18s ease;
+}
+
+.tmx-module-card:hover,
+.tmx-module-card:focus-visible {
+  border-color: rgb(16 185 129 / 45%);
+  background: rgb(16 185 129 / 7%);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.tmx-module-card[aria-current="page"] {
+  border-color: rgb(16 185 129 / 40%);
+  background: rgb(16 185 129 / 10%);
+}
+
+.tmx-module-card strong {
+  font-size: 13px;
+  letter-spacing: .02em;
+}
+
+.tmx-module-card span {
+  color: #a1a1aa;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* Public VDP / SURGE intake */
+.tmx-vdp-intake {
+  margin-top: 28px;
+  padding: 24px;
+  border: 1px solid rgb(16 185 129 / 28%);
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgb(16 185 129 / 8%), rgb(10 10 11 / 92%));
+  box-shadow: 0 18px 50px rgb(0 0 0 / 18%);
+}
+
+.tmx-vdp-intake-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 10px;
+}
+
+.tmx-vdp-intake-heading span {
+  color: #34d399;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.tmx-vdp-intake-heading h3 {
+  margin: 5px 0 0;
+  color: #f8fafc;
+  font-size: 20px;
+}
+
+.tmx-vdp-intake-heading > strong {
+  padding: 5px 9px;
+  border: 1px solid rgb(16 185 129 / 30%);
+  border-radius: 999px;
+  color: #34d399;
+  background: rgb(16 185 129 / 8%);
+  font-size: 10px;
+  letter-spacing: .05em;
+  white-space: nowrap;
+}
+
+.tmx-vdp-intake-copy {
+  margin: 0 0 20px;
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.tmx-vdp-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.tmx-vdp-form > label:not(.tmx-vdp-check) {
+  display: grid;
+  gap: 7px;
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.tmx-vdp-form label > span {
+  color: #64748b;
+  font-weight: 400;
+}
+
+.tmx-vdp-form input,
+.tmx-vdp-form select,
+.tmx-vdp-form textarea {
+  width: 100%;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0b0e13;
+  color: #f8fafc;
+  font: inherit;
+}
+
+.tmx-vdp-form input,
+.tmx-vdp-form select { min-height: 42px; padding: 9px 11px; }
+.tmx-vdp-form textarea { min-height: 170px; padding: 11px; resize: vertical; line-height: 1.55; }
+.tmx-vdp-form input:focus,
+.tmx-vdp-form select:focus,
+.tmx-vdp-form textarea:focus {
+  border-color: #10b981;
+  outline: 2px solid rgb(16 185 129 / 15%);
+  outline-offset: 1px;
+}
+
+.tmx-vdp-wide { grid-column: 1 / -1; }
+.tmx-vdp-honeypot { position: absolute !important; left: -10000px !important; width: 1px !important; height: 1px !important; overflow: hidden !important; }
+
+.tmx-vdp-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.tmx-vdp-check input { width: 17px; min-height: 17px; height: 17px; margin-top: 2px; accent-color: #10b981; }
+.tmx-vdp-check span { color: inherit !important; }
+
+.tmx-vdp-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+}
+
+.tmx-vdp-actions [data-vdp-message] { color: #94a3b8; font-size: 12px; line-height: 1.45; }
+.tmx-vdp-actions .tmx-vdp-success { color: #34d399; }
+.tmx-vdp-actions .tmx-vdp-error { color: #fb7185; }
+.tmx-vdp-actions button {
+  min-height: 42px;
+  padding: 9px 16px;
+  border: 1px solid #10b981;
+  border-radius: 8px;
+  background: #10b981;
+  color: #03120c;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tmx-vdp-actions button:hover { background: #34d399; }
+.tmx-vdp-actions button:disabled { cursor: wait; opacity: .55; }
+
+@media (max-width: 900px) {
+  .tmx-module-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  .tmx-module-grid,
+  .tmx-vdp-form { grid-template-columns: 1fr; }
+  .tmx-vdp-wide { grid-column: auto; }
+  .tmx-vdp-intake { padding: 18px; }
+  .tmx-vdp-intake-heading,
+  .tmx-vdp-actions { align-items: stretch; flex-direction: column; }
+  .tmx-vdp-actions button { width: 100%; }
+}
+.tmx-vdp-queue {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.tmx-vdp-card {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid #27272a;
+  border-radius: 10px;
+  background: #141416;
+}
+
+.tmx-vdp-card h2 { margin: 0; color: #f4f4f5; font-size: 16px; line-height: 1.35; }
+.tmx-vdp-card > p { margin: 0; color: #a1a1aa; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
+.tmx-vdp-reference { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; color: #a1a1aa; font-size: 11px; }
+.tmx-vdp-reference strong { color: #f4f4f5; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tmx-vdp-reference a,
+.tmx-vdp-target { color: #34d399; text-decoration: none; }
+.tmx-vdp-reference a:hover,
+.tmx-vdp-target:hover { text-decoration: underline; }
+.tmx-vdp-target { width: fit-content; font-size: 12px; font-weight: 700; }
+
+@media (max-width: 900px) {
+  .tmx-vdp-queue { grid-template-columns: 1fr; }
+}
