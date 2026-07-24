@@ -175,7 +175,11 @@ print(f"Credential environment updated; backup created at {backup_path}")
         throw "Backend health check did not recover after password rotation."
     }
 
+    $verificationIndex = 0
     foreach ($entry in $accounts.GetEnumerator()) {
+        if ($verificationIndex -gt 0) {
+            Start-Sleep -Seconds 13
+        }
         $body = @{
             email = $entry.Value.Email
             password = $credentials[$entry.Key]
@@ -187,6 +191,7 @@ print(f"Credential environment updated; backup created at {backup_path}")
         $headers = @{ Authorization = "Bearer $($session.access_token)" }
         Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/auth/logout" -Headers $headers -TimeoutSec 20 | Out-Null
         Write-Host "Verified login: $($entry.Value.Email)"
+        $verificationIndex += 1
     }
 
     Write-Host "Password rotation complete."
