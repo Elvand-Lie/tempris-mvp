@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from passlib.hash import bcrypt
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +15,7 @@ os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("AUDIT_HMAC_KEY", "test_audit_hmac_secret_key_12345678")
 
 from index import app
+from routers import auth
 
 
 def test_spa_bootstrap_is_not_cached_and_uses_token_persisting_bundle():
@@ -41,6 +43,43 @@ def test_direct_index_and_spa_fallback_are_not_cached():
     assert client.get("/synthesis").headers["cache-control"] == "no-store, max-age=0"
 
 
+def test_read_only_standard_page_avoids_forbidden_cross_module_bootstrap(monkeypatch):
+    from middleware.rate_limit import _Bucket
+
+    monkeypatch.setattr(_Bucket, "consume", lambda self: True)
+    email = "readonly.bootstrap@tempris.test"
+    auth.USERS[email] = {
+        "password": bcrypt.hash("readonly-bootstrap-password"),
+        "role": "Read-only",
+        "name": "Read-only Bootstrap",
+        "tenant_id": "tenant-readonly-bootstrap",
+    }
+    try:
+        client = TestClient(app)
+        login = client.post(
+            "/api/auth/login",
+            json={"email": email, "password": "readonly-bootstrap-password"},
+        )
+        assert login.status_code == 200
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+        assert client.get("/api/standard/frameworks", headers=headers).status_code == 200
+        assert client.get("/api/audit/log", headers=headers).status_code == 200
+        assert client.get(
+            "/api/scout/findings?limit=5&ransomware_only=true", headers=headers
+        ).status_code == 403
+        assert client.get("/api/packages/current", headers=headers).status_code == 403
+
+        index = client.get("/").text
+        bundle_path = re.search(r'src="(/assets/index-[^"]+\.js(?:\?v=[^"]+)?)"', index).group(1)
+        bundle = client.get(bundle_path).text
+        extension = client.get("/extensions/tempris-modules.js").text
+        assert "e?.role===`Read-only`?Promise.resolve({data:[]})" in bundle
+        assert "currentUserRole() === 'Read-only'" in extension
+    finally:
+        auth.USERS.pop(email, None)
+
+
 def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     client = TestClient(app)
 
@@ -50,11 +89,11 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     stylesheet = client.get("/extensions/tempris-modules.css")
     logo = client.get("/brand/tempris-logo-light.png")
 
-    assert 'src="/assets/index-DUrFdX-d.js?v=20260730a"' in index.text
-    assert 'src="/extensions/tempris-bootstrap.js?v=20260730a"' in index.text
-    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260730a"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260730a"')
-    assert 'src="/extensions/tempris-modules.js?v=20260730a"' in index.text
-    assert 'href="/extensions/tempris-modules.css?v=20260730a"' in index.text
+    assert 'src="/assets/index-DUrFdX-d.js?v=20260731a"' in index.text
+    assert 'src="/extensions/tempris-bootstrap.js?v=20260731a"' in index.text
+    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260731a"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260731a"')
+    assert 'src="/extensions/tempris-modules.js?v=20260731a"' in index.text
+    assert 'href="/extensions/tempris-modules.css?v=20260731a"' in index.text
     assert script.status_code == 200
     assert script.headers["cache-control"] == "no-store, max-age=0"
     assert bootstrap.headers["cache-control"] == "no-store, max-age=0"

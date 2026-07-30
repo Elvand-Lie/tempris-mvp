@@ -2,6 +2,7 @@
   'use strict';
 
   const TOKEN_KEY = 'tempris_token';
+  const USER_KEY = 'tempris_user';
   const EXTENSION_ROUTES = new Set(['/ciso', '/packages', '/sss-intake', '/vdp-queue']);
   const EXTENSION_HOST_ID = 'tempris-extension-host';
   const RETRY_DELAYS = [1000, 3000, 8000];
@@ -79,6 +80,14 @@
     if (!value) return 'Unavailable';
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime()) ? 'Unavailable' : parsed.toLocaleString();
+  };
+
+  const currentUserRole = () => {
+    try {
+      return JSON.parse(localStorage.getItem(USER_KEY) || 'null')?.role || '';
+    } catch {
+      return '';
+    }
   };
 
   const statusClass = (value) => {
@@ -371,6 +380,7 @@
   function ensureNavigation() {
     const nav = document.querySelector('#root nav');
     if (!nav || !localStorage.getItem(TOKEN_KEY)) return;
+    if (currentUserRole() === 'Read-only') return;
     const standardOnly = nav.querySelectorAll(':scope > a').length === 1
       && nav.textContent.includes('STANDARD');
     if (standardOnly) return;
