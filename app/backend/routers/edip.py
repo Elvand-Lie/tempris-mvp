@@ -1,8 +1,13 @@
+import asyncio
+import json
 from datetime import datetime, timezone
+from queue import Empty, Full, Queue
+from threading import Lock
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from models import Finding
@@ -12,11 +17,53 @@ from services.database import get_db
 from services.tes_engine import calculate_sss_tes, priority_from_tes, public_decision_for_finding, public_severity
 from services.cvss_remap import v2_to_v31_remap
 from services.scout_connectors import aev_verdict_finding, entra_authentication_method_findings
-from services.sss_contract import FindingClass, public_sss_output, validate_subclass
+from services.sss_contract import FindingClass, FindingSubclass, deadline_state, public_sss_output, validate_subclass
 
 router = APIRouter()
 
 BLFLAW_SUBTYPES = frozenset({"IDOR", "BFLAW-BAC", "BFLAW-HPE", "BFLAW-BFB", "BFLAW-MSC"})
+LEGACY_AGENTIC_SUBCLASSES = frozenset({"INJECTION_PATH", "MEMORY_RAG", "TOOL_MCP", "TRAINING_SUPPLY"})
+INDEPENDENT_EGRESS_SOURCES = frozenset({"external siem", "independent monitor"})
+
+# ponytail: in-process fan-out matches the single Uvicorn worker; move to Redis pub/sub before adding workers.
+_sss_watch_queues: dict[str, set[Queue]] = {}
+_sss_watch_lock = Lock()
+
+
+def _publish_sss_event(tenant_id: str, payload: dict) -> None:
+    with _sss_watch_lock:
+        subscribers = tuple(_sss_watch_queues.get(tenant_id, ()))
+    for subscriber in subscribers:
+        try:
+            subscriber.put_nowait(payload)
+        except Full:
+            try:
+                subscriber.get_nowait()
+            except Empty:
+                pass
+            subscriber.put_nowait(payload)
+
+
+async def _sss_event_stream(tenant_id: str):
+    subscriber = Queue(maxsize=10)
+    with _sss_watch_lock:
+        _sss_watch_queues.setdefault(tenant_id, set()).add(subscriber)
+    try:
+        yield ": connected\n\n"
+        while True:
+            try:
+                payload = await asyncio.to_thread(subscriber.get, True, 15)
+                body = json.dumps(payload, separators=(",", ":"))
+                yield f"event: sss.watch\ndata: {body}\n\n"
+            except Empty:
+                yield ": keepalive\n\n"
+    finally:
+        with _sss_watch_lock:
+            tenant_queues = _sss_watch_queues.get(tenant_id)
+            if tenant_queues:
+                tenant_queues.discard(subscriber)
+                if not tenant_queues:
+                    _sss_watch_queues.pop(tenant_id, None)
 
 
 class SssIntake(BaseModel):
@@ -64,6 +111,23 @@ class SssIntake(BaseModel):
     verdict: str | None = Field(default=None, pattern="^(allowed|detected|prevented)$")
     evidence_ref: str | None = Field(default=None, max_length=1000)
     revalidate_by: str | None = None
+    device_code_flow_enabled: bool | None = None
+    oauth_grant_inventory: str | None = Field(default=None, pattern="^(none|partial|complete)$")
+    app_consent_policy: str | None = Field(default=None, pattern="^(open|restricted|admin_only)$")
+    refresh_token_lifetime_days: int | None = Field(default=None, ge=0)
+    auth_transfer_blocked: bool | None = None
+    ai_workload_inventory: str | None = Field(default=None, pattern="^(none|partial|complete)$")
+    workload_credential_scope: str | None = Field(default=None, pattern="^(none|read|write|admin)$")
+    egress_monitored_independently: bool | None = None
+    containment_tested: bool | None = None
+    abort_criteria_owner: str | None = Field(default=None, max_length=255)
+
+    @field_validator("kev_due", "revalidate_by")
+    @classmethod
+    def validate_deadline(cls, value):
+        if value:
+            deadline_state(value)
+        return value
 
     @model_validator(mode="after")
     def validate_public_contract(self):
@@ -82,11 +146,21 @@ class SssIntake(BaseModel):
         if category == FindingClass.AGENTIC_EXPOSURE.value:
             if not self.sub_class:
                 raise ValueError("AGENTIC_EXPOSURE requires sub_class")
-            missing = [name for name in ("agent_id", "credential_scope") if not getattr(self, name)]
-            if missing or not self.ingestion_paths or self.egress_controlled is None:
+            if self.sub_class in LEGACY_AGENTIC_SUBCLASSES:
+                missing = [name for name in ("agent_id", "credential_scope") if not getattr(self, name)]
+                if missing or not self.ingestion_paths or self.egress_controlled is None:
+                    raise ValueError(
+                        "Existing AGENTIC_EXPOSURE sub-classes require agent_id, credential_scope, "
+                        "ingestion_paths, and egress_controlled"
+                    )
+            if (
+                self.sub_class == FindingSubclass.AUTONOMOUS_PRINCIPAL.value
+                and self.egress_monitored_independently is True
+                and self.source_tool.strip().lower() not in INDEPENDENT_EGRESS_SOURCES
+            ):
                 raise ValueError(
-                    "AGENTIC_EXPOSURE requires agent_id, credential_scope, "
-                    "ingestion_paths, and egress_controlled"
+                    "egress_monitored_independently requires evidence from an External SIEM "
+                    "or Independent Monitor outside the assessed isolation boundary"
                 )
         return self
 
@@ -96,6 +170,15 @@ class SssUpdate(BaseModel):
     patch_available: bool | None = None
     compensating_controls: list[str] | None = None
     compensating_control_notes: str | None = Field(default=None, max_length=2000)
+    watch_flag: bool | None = None
+    kev_due: str | None = None
+
+    @field_validator("kev_due")
+    @classmethod
+    def validate_deadline(cls, value):
+        if value:
+            deadline_state(value)
+        return value
 
 
 class SssResolve(BaseModel):
@@ -189,6 +272,10 @@ def _create_finding(
             "escalated_severity", "kev_due", "required_control",
             "portable_asset_priority", "watch_flag", "conditional_decision",
             "validated", "path_id", "verdict", "evidence_ref", "revalidate_by",
+            "device_code_flow_enabled", "oauth_grant_inventory", "app_consent_policy",
+            "refresh_token_lifetime_days", "auth_transfer_blocked", "ai_workload_inventory",
+            "workload_credential_scope", "egress_monitored_independently", "containment_tested",
+            "abort_criteria_owner",
         )
         if getattr(req, name) not in (None, "", [])
     }
@@ -235,6 +322,7 @@ def _create_finding(
             "attack_vectors": req.attack_vectors,
             "references": req.references,
             "engine_decision": public_decision,
+            "decision_sequence": [public_decision],
             **public_fields,
             **(connector_data or {}),
         },
@@ -333,6 +421,21 @@ def list_sss(
     return {"data": [_public(finding) for finding in rows]}
 
 
+@router.get("/intake/sss/events")
+async def stream_sss_events(
+    user=Depends(require_role("Superadmin", "Admin", "Analyst", "Viewer")),
+):
+    tenant_id = _tenant_id(user)
+    return StreamingResponse(
+        _sss_event_stream(tenant_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 def _tenant_sss_finding(db: Session, finding_id: str, tenant_id: str) -> Finding:
     finding = db.query(Finding).filter(
         Finding.tenant_id == tenant_id,
@@ -352,8 +455,13 @@ def update_sss(
     db: Session = Depends(get_db),
     user=Depends(require_role("Superadmin", "Admin", "Analyst")),
 ):
-    finding = _tenant_sss_finding(db, finding_id, _tenant_id(user))
+    tenant_id = _tenant_id(user)
+    finding = _tenant_sss_finding(db, finding_id, tenant_id)
     sss = dict(finding.sss_data or {})
+    previous_watch = sss.get("watch_flag")
+    sequence = list(sss.get("decision_sequence") or [])
+    if not sequence and (sss.get("engine_decision") or finding.decision):
+        sequence.append(sss.get("engine_decision") or finding.decision)
     scoring = dict(sss.get("scoring") or {})
     if req.base_severity is not None:
         scoring["base_severity"] = req.base_severity
@@ -365,9 +473,20 @@ def update_sss(
         sss["compensating_controls"] = req.compensating_controls
     if req.compensating_control_notes is not None:
         sss["compensating_control_notes"] = req.compensating_control_notes
+    if req.watch_flag is not None:
+        sss["watch_flag"] = req.watch_flag
+    if "kev_due" in req.model_fields_set:
+        if req.kev_due:
+            sss["kev_due"] = req.kev_due
+        else:
+            sss.pop("kev_due", None)
     sss["scoring"] = scoring
+    sss.pop("engine_decision", None)
     score = calculate_sss_tes(scoring)
     decision = public_decision_for_finding({"sss_data": sss, "source": "sss"}, score)
+    if not sequence or sequence[-1] != decision:
+        sequence.append(decision)
+    sss["decision_sequence"] = sequence
     sss["engine_decision"] = decision
     finding.sss_data = sss
     finding.decision = decision
@@ -375,6 +494,13 @@ def update_sss(
     _audit_connector(db, request, user, "SSS_INTAKE_UPDATED", f"SSS intake updated {finding.cve}")
     db.commit()
     db.refresh(finding)
+    if req.watch_flag is not None and req.watch_flag != previous_watch:
+        _publish_sss_event(tenant_id, {
+            "type": "sss.watch",
+            "finding_id": finding.id,
+            "watch_flag": req.watch_flag,
+            "kev_due": sss.get("kev_due"),
+        })
     return _public(finding)
 
 

@@ -26,6 +26,7 @@
   let cisoRequest = null;
   let sssFindings = null;
   let sssRequest = null;
+  let sssEventController = null;
   let packageConfig = null;
   let packageRequest = null;
   let vdpSubmissions = null;
@@ -291,6 +292,58 @@
     return sssRequest;
   }
 
+  function stopSssEvents() {
+    if (sssEventController) sssEventController.abort();
+    sssEventController = null;
+  }
+
+  async function startSssEvents() {
+    if (sssEventController || window.location.pathname !== '/sss-intake') return;
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (!token) return;
+    const controller = new AbortController();
+    sssEventController = controller;
+    try {
+      const response = await fetch('/api/edip/intake/sss/events', {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' },
+        signal: controller.signal,
+      });
+      if (response.status === 401) {
+        localStorage.removeItem(TOKEN_KEY);
+        window.dispatchEvent(new CustomEvent('tempris:logout'));
+        return;
+      }
+      if (!response.ok || !response.body) throw new Error(`SSS event stream failed: ${response.status}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (!controller.signal.aborted) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true }).replaceAll('\r\n', '\n');
+        let boundary;
+        while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+          const block = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const dataLine = block.split('\n').find((line) => line.startsWith('data:'));
+          if (!dataLine) continue;
+          const event = JSON.parse(dataLine.slice(5).trim());
+          if (event.type !== 'sss.watch') continue;
+          sssFindings = null;
+          const host = document.getElementById(EXTENSION_HOST_ID);
+          if (window.location.pathname === '/sss-intake' && host) await renderSssRoute(host, true);
+        }
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) console.warn('[Tempris] SSS event stream disconnected.', error);
+    } finally {
+      if (sssEventController === controller) sssEventController = null;
+      if (!controller.signal.aborted && window.location.pathname === '/sss-intake') {
+        window.setTimeout(startSssEvents, 3000);
+      }
+    }
+  }
+
   async function loadPackageConfig(force = false) {
     if (packageConfig && !force) return packageConfig;
     if (packageRequest && !force) return packageRequest;
@@ -466,14 +519,27 @@
     due_soon: '≤7 days',
     overdue: 'Overdue',
   }[state] || 'Date supplied');
+  const deadlineState = (value) => {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) return '';
+    const due = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    const now = new Date();
+    const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const days = Math.round((due - today) / 86400000);
+    return days < 0 ? 'overdue' : days <= 7 ? 'due_soon' : 'scheduled';
+  };
 
   function renderSssIntake(host, findings, config) {
     host.dataset.temprisExtensionRoute = '/sss-intake';
     const canSubmit = Boolean(config?.can_submit_sss);
     const cards = findings.length ? findings.map((finding) => {
       const decision = finding.edip_decision || finding.tes_decision || 'UNAVAILABLE';
+      const decisions = Array.isArray(finding.decision_sequence) && finding.decision_sequence.length
+        ? finding.decision_sequence : [decision];
+      const decisionHistory = `<div class="tmx-decision-history"><strong>Engine decision sequence</strong><ol>${decisions.map((item, index) => `<li><span>${index + 1}</span><b class="tmx-decision ${decisionTone(item)}">${escapeHtml(item)}</b></li>`).join('')}</ol></div>`;
+      const kevState = deadlineState(finding.kev_due);
       const deadline = finding.kev_due
-        ? `<span class="tmx-deadline tmx-deadline-${escapeHtml(finding.kev_countdown_state)}">KEV ${escapeHtml(deadlineLabel(finding.kev_countdown_state))} · ${escapeHtml(finding.kev_due)}</span>`
+        ? `<span class="tmx-deadline tmx-deadline-${escapeHtml(kevState)}">KEV ${escapeHtml(deadlineLabel(kevState))} · ${escapeHtml(finding.kev_due)}</span>`
         : '';
       const revalidation = finding.revalidate_by
         ? `<span class="tmx-deadline tmx-deadline-${escapeHtml(finding.revalidation_countdown_state)}">Revalidate ${escapeHtml(deadlineLabel(finding.revalidation_countdown_state))} · ${escapeHtml(finding.revalidate_by)}</span>`
@@ -492,6 +558,7 @@
         </div>
         <h2>${escapeHtml(finding.title)}</h2>
         ${finding.description ? `<p class="tmx-finding-description">${escapeHtml(finding.description)}</p>` : ''}
+        ${decisionHistory}
         <div class="tmx-finding-meta"><span>${escapeHtml(finding.cve)}</span><span>SSS ${escapeHtml(finding.sss)}</span><span>TES ${escapeHtml(finding.tes)}</span><span>${escapeHtml(finding.source_tool || 'Connector')}</span></div>
         <div class="tmx-chip-row">${deadline}${revalidation}</div>
         ${finding.required_control ? `<div class="tmx-control-callout"><strong>Required control</strong><span>${escapeHtml(finding.required_control)}</span></div>` : ''}
@@ -516,9 +583,33 @@
       </form>
     </section>` : '';
 
+    const postureIntake = canSubmit ? `<section class="tmx-panel">
+      <div class="tmx-panel-header"><h2>Identity and Agentic Posture Intake</h2><span class="tmx-status tmx-status-available">v73 descriptive fields</span></div>
+      <form class="tmx-panel-body tmx-intake-form" data-posture-form>
+        <div class="tmx-field"><label for="tmx-posture-class">Finding class</label><select id="tmx-posture-class" name="class" data-posture-class><option value="IDENTITY_POSTURE">Identity posture</option><option value="AGENTIC_EXPOSURE">Agentic exposure</option></select></div>
+        <div class="tmx-field"><label for="tmx-posture-subclass">Sub-class</label><select id="tmx-posture-subclass" name="sub_class" data-posture-subclass><option value="AUTH_FLOW_ABUSE" data-class="IDENTITY_POSTURE">Authentication flow abuse</option><option value="ADVERSARY_AI" data-class="AGENTIC_EXPOSURE">Adversary AI</option><option value="AUTONOMOUS_PRINCIPAL" data-class="AGENTIC_EXPOSURE">Autonomous principal</option></select></div>
+        <div class="tmx-field tmx-field-wide"><label for="tmx-posture-title">Title</label><input id="tmx-posture-title" name="title" maxlength="255" required></div>
+        <div class="tmx-field"><label for="tmx-posture-ecosystem">Affected ecosystem</label><input id="tmx-posture-ecosystem" name="affected_ecosystem" maxlength="255" value="Identity and AI posture" required></div>
+        <div class="tmx-field"><label for="tmx-posture-source">Evidence source</label><select id="tmx-posture-source" name="source_tool"><option>Manual Questionnaire</option><option>Connector</option><option>External SIEM</option><option>Independent Monitor</option></select></div>
+        <div class="tmx-field tmx-field-wide"><label for="tmx-posture-description">Description and evidence context</label><textarea id="tmx-posture-description" name="description" maxlength="2000" rows="4" required></textarea></div>
+        <label class="tmx-check-label" data-posture-for="IDENTITY_POSTURE"><input type="checkbox" name="device_code_flow_enabled"> Device-code flow enabled</label>
+        <div class="tmx-field" data-posture-for="IDENTITY_POSTURE"><label>OAuth grant inventory</label><select name="oauth_grant_inventory"><option value="none">None</option><option value="partial">Partial</option><option value="complete">Complete</option></select></div>
+        <div class="tmx-field" data-posture-for="IDENTITY_POSTURE"><label>Application consent policy</label><select name="app_consent_policy"><option value="open">Open</option><option value="restricted">Restricted</option><option value="admin_only">Admin only</option></select></div>
+        <div class="tmx-field" data-posture-for="IDENTITY_POSTURE"><label>Refresh-token lifetime (days)</label><input name="refresh_token_lifetime_days" type="number" min="0" value="30"></div>
+        <label class="tmx-check-label" data-posture-for="IDENTITY_POSTURE"><input type="checkbox" name="auth_transfer_blocked"> Authentication transfer blocked</label>
+        <div class="tmx-field" data-posture-for="AUTONOMOUS_PRINCIPAL"><label>AI workload inventory</label><select name="ai_workload_inventory"><option value="none">None</option><option value="partial">Partial</option><option value="complete">Complete</option></select></div>
+        <div class="tmx-field" data-posture-for="AUTONOMOUS_PRINCIPAL"><label>Workload credential scope</label><select name="workload_credential_scope"><option value="none">None</option><option value="read">Read</option><option value="write">Write</option><option value="admin">Admin</option></select></div>
+        <label class="tmx-check-label tmx-field-wide" data-posture-for="AUTONOMOUS_PRINCIPAL"><input type="checkbox" name="egress_monitored_independently"> Egress is verified by monitoring outside the assessed isolation boundary</label>
+        <label class="tmx-check-label" data-posture-for="AUTONOMOUS_PRINCIPAL"><input type="checkbox" name="containment_tested"> Containment tested</label>
+        <div class="tmx-field" data-posture-for="AUTONOMOUS_PRINCIPAL"><label>Abort-criteria owner (optional)</label><input name="abort_criteria_owner" maxlength="255"></div>
+        <div class="tmx-form-actions"><span class="tmx-form-message" data-posture-message></span><button type="submit" class="tmx-button">Submit posture finding</button></div>
+      </form>
+    </section>` : '';
+
     host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="sss-intake">
       <header class="tmx-heading"><div><h1>SSS Decision Queue</h1><p>Capture and manage non-CVE findings with server-issued exposure scores and remediation decisions.</p></div><button type="button" class="tmx-button tmx-button-secondary" data-sss-refresh>Refresh</button></header>
       ${intake}
+      ${postureIntake}
       <section class="tmx-panel"><div class="tmx-panel-header"><h2>Tenant Findings</h2><input class="tmx-search" data-sss-search aria-label="Filter findings" placeholder="Filter by title, ID, class, or status"></div><div class="tmx-panel-body"><div class="tmx-finding-grid" aria-live="polite">${cards}</div></div></section>
     </div>`;
 
@@ -527,6 +618,69 @@
       const query = event.target.value.trim().toLowerCase();
       host.querySelectorAll('.tmx-finding-card').forEach((card) => { card.hidden = query && !card.dataset.search.includes(query); });
     });
+    const postureForm = host.querySelector('[data-posture-form]');
+    if (postureForm) {
+      const syncPostureFields = () => {
+        const findingClass = postureForm.elements.class.value;
+        [...postureForm.elements.sub_class.options].forEach((option) => {
+          option.hidden = option.dataset.class !== findingClass;
+          option.disabled = option.hidden;
+        });
+        if (postureForm.elements.sub_class.selectedOptions[0]?.disabled) {
+          postureForm.elements.sub_class.value = [...postureForm.elements.sub_class.options].find((option) => !option.disabled).value;
+        }
+        const subClass = postureForm.elements.sub_class.value;
+        postureForm.querySelectorAll('[data-posture-for]').forEach((field) => {
+          const visible = field.dataset.postureFor === findingClass || field.dataset.postureFor === subClass;
+          field.hidden = !visible;
+          field.querySelectorAll('input,select').forEach((input) => { input.disabled = !visible; });
+        });
+      };
+      postureForm.elements.class.addEventListener('change', syncPostureFields);
+      postureForm.elements.sub_class.addEventListener('change', syncPostureFields);
+      syncPostureFields();
+      postureForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = postureForm.querySelector('button[type="submit"]');
+        const message = postureForm.querySelector('[data-posture-message]');
+        const data = new FormData(postureForm);
+        const findingClass = data.get('class');
+        const subClass = data.get('sub_class');
+        const payload = {
+          class: findingClass, sub_class: subClass, title: data.get('title'),
+          description: data.get('description'), affected_ecosystem: data.get('affected_ecosystem'),
+          source_tool: data.get('source_tool'),
+        };
+        if (findingClass === 'IDENTITY_POSTURE') Object.assign(payload, {
+          device_code_flow_enabled: data.has('device_code_flow_enabled'),
+          oauth_grant_inventory: data.get('oauth_grant_inventory'),
+          app_consent_policy: data.get('app_consent_policy'),
+          refresh_token_lifetime_days: Number(data.get('refresh_token_lifetime_days')),
+          auth_transfer_blocked: data.has('auth_transfer_blocked'),
+        });
+        if (subClass === 'AUTONOMOUS_PRINCIPAL') Object.assign(payload, {
+          ai_workload_inventory: data.get('ai_workload_inventory'),
+          workload_credential_scope: data.get('workload_credential_scope'),
+          egress_monitored_independently: data.has('egress_monitored_independently'),
+          containment_tested: data.has('containment_tested'),
+          abort_criteria_owner: data.get('abort_criteria_owner') || null,
+        });
+        button.disabled = true;
+        message.textContent = 'Submitting…';
+        try {
+          await api('/api/edip/intake/sss', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+          });
+          postureForm.reset();
+          syncPostureFields();
+          sssFindings = null;
+          await renderSssRoute(host, true);
+        } catch (error) {
+          message.textContent = error.message || 'Submission failed.';
+          button.disabled = false;
+        }
+      });
+    }
     const form = host.querySelector('[data-sss-form]');
     if (form) form.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -912,10 +1066,16 @@
   function renderCurrentRoute() {
     const path = window.location.pathname;
     if (!EXTENSION_ROUTES.has(path)) {
+      stopSssEvents();
       deactivateExtensionHost();
       return;
     }
-    if (!document.querySelector('#root main') || !localStorage.getItem(TOKEN_KEY)) return;
+    if (!document.querySelector('#root main') || !localStorage.getItem(TOKEN_KEY)) {
+      stopSssEvents();
+      return;
+    }
+    if (path === '/sss-intake') startSssEvents();
+    else stopSssEvents();
     const host = activateExtensionHost(path);
     if (host.dataset.temprisRenderedRoute === path && host.children.length) return;
     host.dataset.temprisRenderedRoute = path;
@@ -953,6 +1113,7 @@
     if (host) renderSssRoute(host, true);
   });
   window.addEventListener('tempris:logout', () => {
+    stopSssEvents();
     cisoAccess = null;
     cisoSummary = null;
     sssFindings = null;

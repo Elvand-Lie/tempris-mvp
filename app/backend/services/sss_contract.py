@@ -18,6 +18,9 @@ class FindingClass(str, Enum):
 
 
 class FindingSubclass(str, Enum):
+    AUTH_FLOW_ABUSE = "AUTH_FLOW_ABUSE"
+    ADVERSARY_AI = "ADVERSARY_AI"
+    AUTONOMOUS_PRINCIPAL = "AUTONOMOUS_PRINCIPAL"
     INJECTION_PATH = "INJECTION_PATH"
     MEMORY_RAG = "MEMORY_RAG"
     TOOL_MCP = "TOOL_MCP"
@@ -30,12 +33,15 @@ class FindingSubclass(str, Enum):
 
 SUBCLASSES_BY_CLASS = {
     FindingClass.AGENTIC_EXPOSURE.value: {
+        FindingSubclass.ADVERSARY_AI.value,
+        FindingSubclass.AUTONOMOUS_PRINCIPAL.value,
         FindingSubclass.INJECTION_PATH.value,
         FindingSubclass.MEMORY_RAG.value,
         FindingSubclass.TOOL_MCP.value,
         FindingSubclass.TRAINING_SUPPLY.value,
     },
     FindingClass.IDENTITY_POSTURE.value: {
+        FindingSubclass.AUTH_FLOW_ABUSE.value,
         FindingSubclass.MFA_ENROLMENT.value,
         FindingSubclass.SESSION_TOKEN.value,
         FindingSubclass.MACHINE_KEY.value,
@@ -45,6 +51,17 @@ SUBCLASSES_BY_CLASS = {
 
 
 PUBLIC_SSS_FIELDS = (
+    "decision_sequence",
+    "device_code_flow_enabled",
+    "oauth_grant_inventory",
+    "app_consent_policy",
+    "refresh_token_lifetime_days",
+    "auth_transfer_blocked",
+    "ai_workload_inventory",
+    "workload_credential_scope",
+    "egress_monitored_independently",
+    "containment_tested",
+    "abort_criteria_owner",
     "agent_id",
     "credential_scope",
     "ingestion_paths",

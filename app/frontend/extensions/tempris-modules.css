@@ -384,6 +384,40 @@ body.tmx-extension-active #root main {
 .tmx-deadline-due_soon { color: #f59e0b; border-color: rgb(245 158 11 / 40%); }
 .tmx-deadline-overdue { color: #ef4444; border-color: rgb(239 68 68 / 45%); }
 
+.tmx-decision-history {
+  display: grid;
+  gap: 7px;
+  padding: 10px 12px;
+  border-left: 2px solid #3f3f46;
+  background: rgb(39 39 42 / 35%);
+}
+
+.tmx-decision-history > strong {
+  color: #a1a1aa;
+  font-size: 10px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.tmx-decision-history ol {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex-wrap: wrap;
+}
+
+.tmx-decision-history li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.tmx-decision-history li > span {
+  color: #71717a;
+  font: 700 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
 .tmx-finding-meta {
   color: #a1a1aa;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
