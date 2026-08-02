@@ -30,10 +30,13 @@ def _catalog() -> list[dict]:
 def _response(db: Session, user: dict) -> dict:
     auth = get_auth_context(user)
     assignment = get_tenant_package(db, auth.tenant_id)
+    if auth.role == "Researcher":
+        assignment["effective_modules"] = []
     assignment.update({
         "catalog": _catalog(), "modules": list(MODULES), "role": auth.role,
         "can_manage": auth.role in {"Superadmin", "Admin"},
-        "can_submit_sss": auth.role in {"Superadmin", "Admin", "Analyst"},
+        "can_submit_sss": auth.role in {"Superadmin", "Admin", "Analyst", "Researcher"},
+        "can_manage_sss": auth.role in {"Superadmin", "Admin", "Analyst"},
     })
     return assignment
 
@@ -41,7 +44,7 @@ def _response(db: Session, user: dict) -> dict:
 @router.get("/current")
 def current_package(
     db: Session = Depends(get_db),
-    user=Depends(require_role("Superadmin", "Admin", "Analyst", "Viewer")),
+    user=Depends(require_role("Superadmin", "Admin", "Analyst", "Viewer", "Researcher")),
 ):
     return _response(db, user)
 

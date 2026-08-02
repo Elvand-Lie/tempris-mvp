@@ -66,16 +66,18 @@ def _init_users() -> dict:
     pass_analyst = os.environ.get("TEMPRIS_PASS_ANALYST")
     pass_viewer = os.environ.get("TEMPRIS_PASS_VIEWER")
     pass_readonly = os.environ.get("TEMPRIS_PASS_READONLY")
+    pass_researcher = os.environ.get("TEMPRIS_PASS_RESEARCHER")
 
     # For non-demo/non-test environments, or test environment with some credentials set, require all credentials
-    if not is_demo and not (is_test and not any([pass_superadmin, pass_admin, pass_analyst, pass_viewer, pass_readonly])):
+    if not is_demo and not (is_test and not any([pass_superadmin, pass_admin, pass_analyst, pass_viewer, pass_readonly, pass_researcher])):
         missing = []
         for name, val in [
             ("TEMPRIS_PASS_SUPERADMIN", pass_superadmin),
             ("TEMPRIS_PASS_ADMIN", pass_admin),
             ("TEMPRIS_PASS_ANALYST", pass_analyst),
             ("TEMPRIS_PASS_VIEWER", pass_viewer),
-            ("TEMPRIS_PASS_READONLY", pass_readonly)
+            ("TEMPRIS_PASS_READONLY", pass_readonly),
+            ("TEMPRIS_PASS_RESEARCHER", pass_researcher)
         ]:
             if not val:
                 missing.append(name)
@@ -85,7 +87,7 @@ def _init_users() -> dict:
             raise RuntimeError("FATAL: Missing unique credentials for non-demo environment.")
 
         if env in ("staging", "production"):
-            passwords = [pass_superadmin, pass_admin, pass_analyst, pass_viewer, pass_readonly]
+            passwords = [pass_superadmin, pass_admin, pass_analyst, pass_viewer, pass_readonly, pass_researcher]
             if len(passwords) != len(set(passwords)):
                 raise RuntimeError("FATAL: Shared/duplicated passwords are not permitted across privileged accounts in staging or production.")
 
@@ -94,6 +96,7 @@ def _init_users() -> dict:
     hash_analyst = bcrypt.hash(pass_analyst) if pass_analyst else _DEMO_HASH
     hash_viewer = bcrypt.hash(pass_viewer) if pass_viewer else _DEMO_HASH
     hash_readonly = bcrypt.hash(pass_readonly) if pass_readonly else _DEMO_HASH
+    hash_researcher = bcrypt.hash(pass_researcher) if pass_researcher else _DEMO_HASH
 
     # NOTE: The USERS dictionary mapping is a temporary compatibility implementation for Wave 1 MVP auth.
     return {
@@ -102,6 +105,7 @@ def _init_users() -> dict:
         "analyst@tempris.com": {"password": hash_analyst, "role": "Analyst", "name": "Security Analyst", "tenant_id": "tempris"},
         "viewer@tempris.com": {"password": hash_viewer, "role": "Viewer", "name": "Client Viewer", "tenant_id": "tempris"},
         "readonly@tempris.com": {"password": hash_readonly, "role": "Read-only", "name": "Audit Reviewer", "tenant_id": "tempris"},
+        "researcher@tempris.com": {"password": hash_researcher, "role": "Researcher", "name": "Security Researcher", "tenant_id": "bug-bounty"},
     }
 
 USERS = _init_users()
@@ -374,6 +378,13 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 security = HTTPBearer(auto_error=False)
 
 READ_ONLY_ALLOWED_PREFIXES = ("/api/audit", "/api/standard")
+RESEARCHER_ALLOWED_ROUTES = frozenset({
+    ("GET", "/api/packages/current"),
+    ("GET", "/api/edip/intake/sss"),
+    ("GET", "/api/edip/intake/sss/events"),
+    ("POST", "/api/edip/intake/sss"),
+    ("POST", "/api/auth/logout"),
+})
 
 
 def _normalize_datetime(dt) -> datetime | None:
@@ -492,6 +503,12 @@ async def get_current_user(request: Request, credentials: HTTPAuthorizationCrede
         raise HTTPException(
             status_code=403,
             detail="Read-only users can access audit logs and compliance reports only."
+        )
+
+    if record_role == "Researcher" and (request.method.upper(), request.url.path) not in RESEARCHER_ALLOWED_ROUTES:
+        raise HTTPException(
+            status_code=403,
+            detail="Researcher users can create and view isolated SSS test findings only."
         )
 
     # Propagate the authenticated user to request state
@@ -629,6 +646,7 @@ def require_role(*allowed_roles):
     - Analyst: CRUD findings/scenarios, EDIP, scans
     - Viewer: Read-only all modules
     - Read-only: Audit logs + compliance reports only
+    - Researcher: Create and view SSS test findings in an isolated tenant only
     """
     async def checker(user = Depends(get_current_user)):
         if user.get("role") not in allowed_roles:
@@ -668,6 +686,7 @@ ROLE_PERMISSIONS = {
     "Analyst": frozenset({"list", "read", "preview", "download"}),
     "Viewer": frozenset({"list", "read"}),
     "Read-only": frozenset({"list"}),
+    "Researcher": frozenset(),
     "partner-admin": frozenset({"list", "read", "preview", "download", "delete"}),
     "partner-analyst": frozenset({"list", "read", "preview", "download"}),
 }

@@ -392,7 +392,7 @@ def create_sss(
     req: SssIntake,
     request: Request,
     db: Session = Depends(get_db),
-    user=Depends(require_role("Superadmin", "Admin", "Analyst")),
+    user=Depends(require_role("Superadmin", "Admin", "Analyst", "Researcher")),
 ):
     tenant_id = _tenant_id(user)
     try:
@@ -412,7 +412,7 @@ def create_sss(
 @router.get("/intake/sss")
 def list_sss(
     db: Session = Depends(get_db),
-    user=Depends(require_role("Superadmin", "Admin", "Analyst", "Viewer")),
+    user=Depends(require_role("Superadmin", "Admin", "Analyst", "Viewer", "Researcher")),
 ):
     rows = db.query(Finding).filter(
         Finding.source == "sss",
@@ -423,7 +423,7 @@ def list_sss(
 
 @router.get("/intake/sss/events")
 async def stream_sss_events(
-    user=Depends(require_role("Superadmin", "Admin", "Analyst", "Viewer")),
+    user=Depends(require_role("Superadmin", "Admin", "Analyst", "Viewer", "Researcher")),
 ):
     tenant_id = _tenant_id(user)
     return StreamingResponse(

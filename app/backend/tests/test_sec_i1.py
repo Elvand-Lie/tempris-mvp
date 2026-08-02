@@ -12,7 +12,7 @@ def clean_env():
     for key in [
         "ENVIRONMENT", "ENV", "TEMPRIS_PASS_SUPERADMIN", "TEMPRIS_PASS_ADMIN",
         "TEMPRIS_PASS_ANALYST", "TEMPRIS_PASS_VIEWER", "TEMPRIS_PASS_READONLY",
-        "AUDIT_HMAC_KEY"
+        "TEMPRIS_PASS_RESEARCHER", "AUDIT_HMAC_KEY"
     ]:
         os.environ.pop(key, None)
 
@@ -111,6 +111,7 @@ def test_duplicated_passwords_rejected():
     os.environ["TEMPRIS_PASS_ANALYST"] = "secret3"
     os.environ["TEMPRIS_PASS_VIEWER"] = "secret4"
     os.environ["TEMPRIS_PASS_READONLY"] = "secret5"
+    os.environ["TEMPRIS_PASS_RESEARCHER"] = "secret6"
     
     import routers.auth
     with pytest.raises(RuntimeError) as excinfo:
@@ -125,6 +126,7 @@ def test_staging_production_refuse_weak_hmac_keys(tmp_path):
     os.environ["TEMPRIS_PASS_ANALYST"] = "sec3"
     os.environ["TEMPRIS_PASS_VIEWER"] = "sec4"
     os.environ["TEMPRIS_PASS_READONLY"] = "sec5"
+    os.environ["TEMPRIS_PASS_RESEARCHER"] = "sec6"
     os.environ["EVIDENCE_STORAGE_ROOT"] = str(tmp_path)
     
     # CASE A: Key is missing
@@ -150,6 +152,7 @@ def test_valid_production_configuration_succeeds(tmp_path):
     os.environ["TEMPRIS_PASS_ANALYST"] = "sec3"
     os.environ["TEMPRIS_PASS_VIEWER"] = "sec4"
     os.environ["TEMPRIS_PASS_READONLY"] = "sec5"
+    os.environ["TEMPRIS_PASS_RESEARCHER"] = "sec6"
     os.environ["AUDIT_HMAC_KEY"] = "very_long_secure_hmac_secret_key_exceeding_32_bytes_long_123"
     os.environ["EVIDENCE_STORAGE_ROOT"] = str(tmp_path)
     

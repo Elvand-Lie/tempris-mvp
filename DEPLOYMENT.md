@@ -27,13 +27,15 @@ The script refuses tracked worktree changes, archives only committed Git content
 
 ## Rotate sandbox account passwords
 
-Production rejects the shared password `demo` and duplicate account passwords. To generate five unique credentials, update the protected VPS `.env`, recreate only the backend container, verify all five logins, and write the new account list to a local Git-ignored file, run:
+Production rejects the shared password `demo` and duplicate account passwords. To generate six unique credentials, update the protected VPS `.env`, recreate only the backend container, verify all six logins, and write the new account list to a local Git-ignored file, run:
 
 ```powershell
 .\scripts\rotate-account-passwords.ps1
 ```
 
 The local output is `workDocs/tempris-account-credentials.local.md`. Never add that file or `app/deploy/.env` to Git. The remote script creates a mode-600 backup under `/home/tempris/backups/credentials/` before replacing the credential values.
+
+The dedicated `researcher@tempris.com` account belongs to the isolated `bug-bounty` tenant. It can create and view SSS test findings only; all other authenticated API routes fail closed. Use `scripts/provision-researcher-account.ps1` to create or replace only that credential before deploying code that requires it. Do not use the full rotation script during an active testing window. Rotate the shared Read-only password with the full rotation script only after testing concludes on 7 August 2026.
 
 ## Failure and rollback
 

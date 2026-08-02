@@ -380,7 +380,17 @@
   function ensureNavigation() {
     const nav = document.querySelector('#root nav');
     if (!nav || !localStorage.getItem(TOKEN_KEY)) return;
+    if (currentUserRole() === 'Researcher' && window.location.pathname !== '/sss-intake') {
+      window.location.replace('/sss-intake');
+      return;
+    }
     if (currentUserRole() === 'Read-only') return;
+    if (currentUserRole() === 'Researcher') {
+      document.querySelectorAll('#root a[href="/audit"]').forEach((item) => {
+        item.hidden = true;
+        item.style.display = 'none';
+      });
+    }
     const standardOnly = nav.querySelectorAll(':scope > a').length === 1
       && nav.textContent.includes('STANDARD');
     if (standardOnly) return;
@@ -542,6 +552,7 @@
   function renderSssIntake(host, findings, config) {
     host.dataset.temprisExtensionRoute = '/sss-intake';
     const canSubmit = Boolean(config?.can_submit_sss);
+    const canManage = Boolean(config?.can_manage_sss);
     const cards = findings.length ? findings.map((finding) => {
       const decision = finding.edip_decision || finding.tes_decision || 'UNAVAILABLE';
       const decisions = Array.isArray(finding.decision_sequence) && finding.decision_sequence.length
@@ -572,12 +583,12 @@
         <div class="tmx-finding-meta"><span>${escapeHtml(finding.cve)}</span><span>SSS ${escapeHtml(finding.sss)}</span><span>TES ${escapeHtml(finding.tes)}</span><span>${escapeHtml(finding.source_tool || 'Connector')}</span></div>
         <div class="tmx-chip-row">${deadline}${revalidation}</div>
         ${finding.required_control ? `<div class="tmx-control-callout"><strong>Required control</strong><span>${escapeHtml(finding.required_control)}</span></div>` : ''}
-        ${canSubmit && !resolved ? `<div class="tmx-card-actions"><button type="button" class="tmx-button tmx-button-secondary" data-sss-patch="${escapeHtml(finding.id)}" data-patch-state="${Boolean(finding.patch_available)}">${finding.patch_available ? 'Mark patch unavailable' : 'Mark patch available'}</button><button type="button" class="tmx-button" data-sss-resolve>Resolve</button></div><div class="tmx-resolution-form" data-sss-resolution-form hidden><label>Resolution notes<textarea rows="3" maxlength="2000" required aria-label="Resolution notes for ${escapeHtml(finding.title)}"></textarea></label><div class="tmx-card-actions"><button type="button" class="tmx-button tmx-button-secondary" data-sss-resolve-cancel>Cancel</button><button type="button" class="tmx-button" data-sss-resolve-confirm="${escapeHtml(finding.id)}">Confirm resolution</button></div></div>` : ''}
+        ${canManage && !resolved ? `<div class="tmx-card-actions"><button type="button" class="tmx-button tmx-button-secondary" data-sss-patch="${escapeHtml(finding.id)}" data-patch-state="${Boolean(finding.patch_available)}">${finding.patch_available ? 'Mark patch unavailable' : 'Mark patch available'}</button><button type="button" class="tmx-button" data-sss-resolve>Resolve</button></div><div class="tmx-resolution-form" data-sss-resolution-form hidden><label>Resolution notes<textarea rows="3" maxlength="2000" required aria-label="Resolution notes for ${escapeHtml(finding.title)}"></textarea></label><div class="tmx-card-actions"><button type="button" class="tmx-button tmx-button-secondary" data-sss-resolve-cancel>Cancel</button><button type="button" class="tmx-button" data-sss-resolve-confirm="${escapeHtml(finding.id)}">Confirm resolution</button></div></div>` : ''}
       </article>`;
     }).join('') : '<div class="tmx-empty">No SSS decision records are available for this tenant.</div>';
 
     const intake = canSubmit ? `<section class="tmx-panel">
-      <div class="tmx-panel-header"><h2>Business Logic Flaw Intake</h2><span class="tmx-status tmx-status-available">Analyst submission</span></div>
+      <div class="tmx-panel-header"><h2>Business Logic Flaw Intake</h2><span class="tmx-status tmx-status-available">${config?.role === 'Researcher' ? 'Researcher submission' : 'Analyst submission'}</span></div>
       <form class="tmx-panel-body tmx-intake-form" data-sss-form>
         <div class="tmx-field"><label for="tmx-sss-subtype">Finding subtype</label><select id="tmx-sss-subtype" name="subtype" required>
           <option value="IDOR">IDOR — cross-user data access</option><option value="BFLAW-BAC">Broken access control</option><option value="BFLAW-HPE">Horizontal privilege escalation</option><option value="BFLAW-BFB">Business flow bypass</option><option value="BFLAW-MSC">Multi-step logic chain</option>

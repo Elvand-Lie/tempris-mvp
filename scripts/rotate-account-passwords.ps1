@@ -15,6 +15,7 @@ $accounts = [ordered]@{
     "TEMPRIS_PASS_ANALYST" = [ordered]@{ Email = "analyst@tempris.com"; Role = "Analyst" }
     "TEMPRIS_PASS_VIEWER" = [ordered]@{ Email = "viewer@tempris.com"; Role = "Viewer" }
     "TEMPRIS_PASS_READONLY" = [ordered]@{ Email = "readonly@tempris.com"; Role = "Read-only" }
+    "TEMPRIS_PASS_RESEARCHER" = [ordered]@{ Email = "researcher@tempris.com"; Role = "Researcher" }
 }
 
 function New-TemprisPassword {
@@ -101,6 +102,7 @@ required = {
     "TEMPRIS_PASS_ANALYST",
     "TEMPRIS_PASS_VIEWER",
     "TEMPRIS_PASS_READONLY",
+    "TEMPRIS_PASS_RESEARCHER",
 }
 
 updates = {}
@@ -108,7 +110,7 @@ for raw in updates_path.read_text(encoding="utf-8").splitlines():
     key, value = raw.split("=", 1)
     updates[key] = value
 if set(updates) != required:
-    raise SystemExit("Credential update file does not contain the five required keys")
+    raise SystemExit("Credential update file does not contain the six required keys")
 if any(not value or value == "demo" for value in updates.values()):
     raise SystemExit("Blank or demo passwords are forbidden")
 if len(set(updates.values())) != len(updates):
