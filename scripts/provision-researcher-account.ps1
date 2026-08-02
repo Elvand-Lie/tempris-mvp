@@ -105,12 +105,12 @@ print(f"Researcher credential prepared; backup created at {backup_path}")
 
     $outputDirectory = Split-Path -Parent $OutputPath
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-    $row = "| `researcher@tempris.com` | Researcher | `$password` |"
+    $row = '| `researcher@tempris.com` | Researcher | `' + $password + '` |'
     if (Test-Path -LiteralPath $OutputPath) {
         $lines = [Collections.Generic.List[string]](Get-Content -LiteralPath $OutputPath)
         $match = -1
         for ($index = 0; $index -lt $lines.Count; $index += 1) {
-            if ($lines[$index].StartsWith("| `researcher@tempris.com` |")) {
+            if ($lines[$index].StartsWith('| `researcher@tempris.com` |')) {
                 $match = $index
                 break
             }

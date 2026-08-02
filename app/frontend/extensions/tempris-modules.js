@@ -390,6 +390,11 @@
         item.hidden = true;
         item.style.display = 'none';
       });
+      document.querySelectorAll('#root button').forEach((item) => {
+        if (item.textContent.trim().toUpperCase() !== 'SPEAK') return;
+        item.hidden = true;
+        item.style.display = 'none';
+      });
     }
     const standardOnly = nav.querySelectorAll(':scope > a').length === 1
       && nav.textContent.includes('STANDARD');

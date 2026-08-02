@@ -175,3 +175,4 @@ def test_frontend_forces_researchers_into_the_sss_workspace():
     assert "window.location.pathname !== '/sss-intake'" in modules
     assert 'can_manage_sss' in modules
     assert 'a[href="/audit"]' in modules
+    assert "item.textContent.trim().toUpperCase() !== 'SPEAK'" in modules
