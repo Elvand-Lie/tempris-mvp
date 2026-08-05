@@ -249,7 +249,11 @@ def test_ciso_summary_is_tenant_scoped_and_redacted():
         'unresolved': 1,
         'critical': 1,
         'high': 0,
+        'recorded_total': 1,
+        'confirmed_asset_linked': 1,
+        'unlinked_open': 0,
     }
+    assert data['metric_scope'] == 'confirmed_asset_linked_findings'
     assert data['risk_trend']['direction'] == 'improving'
     assert data['deadline_summary']['counts']['remediation_sla']['overdue'] == 1
     assert data['exposure_coverage']['asset_linked_count'] == 1
@@ -479,6 +483,16 @@ def test_workflow_connections_require_explicit_tenant_scoped_records():
     assert exposure['open_finding_count'] == 2
     assert exposure['asset_linked_count'] == 1
     assert exposure['unlinked_count'] == 1
+    assert exposure['unlinked_findings'] == [{
+        'finding_id': 'F-UNLINKED-KEV',
+        'title': 'Unlinked catalog finding',
+        'source': 'unknown',
+        'priority': 'P0',
+        'status': 'unmitigated',
+        'asset_id': None,
+    }]
+    assert exposure['mapping_queue'] == exposure['unlinked_findings']
+    assert exposure['mapping_queue_returned_count'] == 1
     assert exposure['asset_linked_cisa_kev_count'] == 0
 
     cross_tenant = client.patch(
@@ -513,6 +527,8 @@ def test_workflow_connections_require_explicit_tenant_scoped_records():
     db = TestingSessionLocal()
     finding = db.query(Finding).filter(Finding.id == 'F-UNLINKED-KEV').one()
     assert finding.asset_id == 'ASSET-ALPHA'
+    assert finding.asset_data['name'] == 'Alpha Gateway'
+    assert finding.asset_data['source'] == 'tenant_asset_inventory'
     assert finding.sla == 14
     assert finding.sss_data['workflow_provenance']['asset_id']['source'] == 'explicit_analyst_update'
     audit = db.query(AuditLog).filter(AuditLog.action == 'FINDING_WORKFLOW_UPDATED').one()

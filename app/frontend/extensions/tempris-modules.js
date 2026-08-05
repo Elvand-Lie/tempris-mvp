@@ -35,6 +35,8 @@
   let rootObserver = null;
   let workflowOverview = null;
   let workflowRequest = null;
+  let tenantAssets = null;
+  let tenantAssetsRequest = null;
 
   function getExtensionHost() {
     let host = document.getElementById(EXTENSION_HOST_ID);
@@ -379,6 +381,29 @@
     return workflowRequest;
   }
 
+  async function loadTenantAssets(force = false) {
+    if (tenantAssets && !force) return tenantAssets;
+    if (tenantAssetsRequest && !force) return tenantAssetsRequest;
+    tenantAssetsRequest = api('/api/assets?status=active&limit=200')
+      .then((payload) => {
+        tenantAssets = payload.data || [];
+        return tenantAssets;
+      })
+      .finally(() => { tenantAssetsRequest = null; });
+    return tenantAssetsRequest;
+  }
+
+  const assetLabel = (asset) => {
+    const endpoint = asset.hostname || asset.ip_address;
+    const context = [endpoint, asset.environment, asset.owner].filter(Boolean).join(' · ');
+    return context ? `${asset.name} — ${context}` : asset.name;
+  };
+
+  const assetOptions = (assets, selected = '') => [
+    '<option value="">Not mapped yet — send to mapping queue</option>',
+    ...(assets || []).map((asset) => `<option value="${escapeHtml(asset.id)}" ${asset.id === selected ? 'selected' : ''}>${escapeHtml(assetLabel(asset))}</option>`),
+  ].join('');
+
   async function loadVdpSubmissions(force = false) {
     if (vdpSubmissions && !force) return vdpSubmissions;
     if (vdpRequest && !force) return vdpRequest;
@@ -436,10 +461,10 @@
       createNavItem(nav, 'CISO', '/ciso', 0);
     }
     if (packageConfig.can_manage && !nav.querySelector('[data-tempris-extension-nav="/packages"]')) {
-      createNavItem(nav, 'PACKAGES', '/packages', 4);
+      createNavItem(nav, 'TENANT ACCESS', '/packages', 4);
     }
     if (!nav.querySelector('[data-tempris-extension-nav="/sss-intake"]')) {
-      createNavItem(nav, 'SSS INTAKE', '/sss-intake', 2);
+      createNavItem(nav, 'INTAKE & TRIAGE', '/sss-intake', 2);
     }
     const vdpEligible = packageConfig.tenant_id === 'tempris'
       && ['Superadmin', 'Admin', 'Analyst'].includes(packageConfig.role);
@@ -468,30 +493,39 @@
   function renderCiso(host, data) {
     const findings = data.findings || {};
     const posture = titleCase(data.overall_risk_posture);
-    const trend = data.risk_trend?.status === 'available' ? titleCase(data.risk_trend.direction) : 'Unavailable';
+    const trend = data.risk_trend?.status === 'available'
+      ? titleCase(data.risk_trend.direction)
+      : data.risk_trend?.status === 'baseline' ? 'Baseline' : 'No baseline';
     const assets = data.highest_risk_assets?.items || [];
     const actions = data.executive_actions?.items || [];
     const escalations = data.recent_escalations?.items || [];
     const reports = data.report_links?.items || [];
     const gaps = data.compliance_gaps || {};
+    const coverage = data.exposure_coverage || {};
 
     host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="ciso">
       <header class="tmx-heading">
-        <div><h1>CISO Dashboard</h1><p>Tenant-scoped executive security posture.</p></div>
+        <div><h1>CISO Dashboard</h1><p>Executive view of confirmed customer exposure. Only open findings linked to active tenant assets affect risk metrics.</p></div>
         <button type="button" class="tmx-button" data-ciso-refresh>Refresh</button>
       </header>
       <section class="tmx-metrics" aria-label="Executive metrics">
-        <div class="tmx-metric"><div class="tmx-metric-label">Risk posture</div><div class="tmx-metric-value ${metricTone(posture)}">${escapeHtml(posture)}</div></div>
-        <div class="tmx-metric"><div class="tmx-metric-label">Critical</div><div class="tmx-metric-value tmx-tone-critical">${escapeHtml(findings.critical ?? 0)}</div></div>
-        <div class="tmx-metric"><div class="tmx-metric-label">High</div><div class="tmx-metric-value tmx-tone-high">${escapeHtml(findings.high ?? 0)}</div></div>
-        <div class="tmx-metric"><div class="tmx-metric-label">Unresolved</div><div class="tmx-metric-value tmx-tone-neutral">${escapeHtml(findings.unresolved ?? 0)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Confirmed posture</div><div class="tmx-metric-value ${metricTone(posture)}">${escapeHtml(posture)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Linked critical</div><div class="tmx-metric-value tmx-tone-critical">${escapeHtml(findings.critical ?? 0)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Linked high</div><div class="tmx-metric-value tmx-tone-high">${escapeHtml(findings.high ?? 0)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Open confirmed</div><div class="tmx-metric-value tmx-tone-neutral">${escapeHtml(findings.unresolved ?? 0)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Needs mapping</div><div class="tmx-metric-value ${coverage.unlinked_count ? 'tmx-tone-high' : 'tmx-tone-success'}">${escapeHtml(coverage.unlinked_count ?? 0)}</div></div>
       </section>
       <div class="tmx-grid">
+        <section class="tmx-panel tmx-panel-wide">
+          <div class="tmx-panel-header"><div><h2>Exposure Coverage</h2><p>This explains exactly how recorded findings become confirmed customer exposure.</p></div><span class="tmx-status ${coverage.unlinked_count ? 'tmx-status-high' : 'tmx-status-available'}">${escapeHtml(coverage.asset_link_coverage_pct ?? 0)}% mapped</span></div>
+          <div class="tmx-panel-body tmx-coverage-flow"><div><strong>${escapeHtml(coverage.open_finding_count ?? 0)}</strong><span>Open records</span></div><b>→</b><div><strong>${escapeHtml(coverage.asset_linked_count ?? 0)}</strong><span>Linked to active assets</span></div><b>→</b><div><strong>${escapeHtml(coverage.scored_asset_linked_count ?? 0)}</strong><span>Included in TES</span></div></div>
+          ${coverage.unlinked_count ? `<div class="tmx-notice"><strong>Action required:</strong><span>${escapeHtml(coverage.unlinked_count)} open record(s) remain in Intake & Triage until an analyst maps them to an asset.</span></div>` : ''}
+        </section>
         <section class="tmx-panel">
           <div class="tmx-panel-header"><h2>Risk Trend</h2><span class="tmx-status ${statusClass(trend)}">${escapeHtml(trend)}</span></div>
           <div class="tmx-panel-body">${data.risk_trend?.status === 'available'
             ? `<div class="tmx-list-row"><div><div class="tmx-list-title">Current findings</div><div class="tmx-list-detail">Previous: ${escapeHtml(data.risk_trend.previous_findings ?? 0)}</div></div><strong>${escapeHtml(data.risk_trend.current_findings ?? 0)}</strong></div><div class="tmx-list-row"><div><div class="tmx-list-title">Current critical</div><div class="tmx-list-detail">Previous: ${escapeHtml(data.risk_trend.previous_critical ?? 0)}</div></div><strong>${escapeHtml(data.risk_trend.current_critical ?? 0)}</strong></div>`
-            : `<div class="tmx-empty">${escapeHtml(data.risk_trend?.reason || 'Risk trend is unavailable.')}</div>`}</div>
+            : `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(data.risk_trend?.status === 'baseline' ? 'Baseline recorded' : 'No confirmed baseline')}</div><div class="tmx-list-detail">${escapeHtml(data.risk_trend?.reason || 'A second snapshot is required for comparison.')}</div></div>${data.risk_trend?.status === 'baseline' ? `<strong>${escapeHtml(data.risk_trend.current_findings ?? 0)} open</strong>` : ''}</div>`}</div>
         </section>
         <section class="tmx-panel">
           <div class="tmx-panel-header"><h2>Compliance Gaps</h2><span class="tmx-status">${escapeHtml(gaps.status || 'unavailable')}</span></div>
@@ -514,7 +548,7 @@
           <div class="tmx-panel-body">${listRows(escalations, (item) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(item.report_id)}</div><div class="tmx-list-detail">${escapeHtml(formatDate(item.generated_at))}</div></div><span class="tmx-status ${statusClass(item.severity)}">${escapeHtml(item.severity)}</span></div>`, 'No recent critical or high escalations are available.')}</div>
         </section>
         <section class="tmx-panel tmx-panel-wide">
-          <div class="tmx-panel-header"><div><h2>Client Report Service</h2><p>Generate one approved CTEM/EDIP dataset as HTML, JSON, and CSV.</p></div><span class="tmx-status">On demand</span></div>
+          <div class="tmx-panel-header"><div><h2>Client Report Service</h2><p>Generate HTML, JSON, and CSV from confirmed asset-linked findings only. Unmapped intake is excluded.</p></div><span class="tmx-status">On demand</span></div>
           <form class="tmx-panel-body tmx-intake-form" data-poc-report-form>
             <label class="tmx-field"><span>Client organisation</span><input name="organisation" required maxlength="255" autocomplete="organization"></label>
             <label class="tmx-field"><span>Client contact</span><input name="contact" required maxlength="255" autocomplete="name"></label>
@@ -660,10 +694,12 @@
     return days < 0 ? 'overdue' : days <= 7 ? 'due_soon' : 'scheduled';
   };
 
-  function renderSssIntake(host, findings, config) {
+  function renderSssIntake(host, findings, config, assets = [], overview = {}) {
     host.dataset.temprisExtensionRoute = '/sss-intake';
     const canSubmit = Boolean(config?.can_submit_sss);
     const canManage = Boolean(config?.can_manage_sss);
+    const isResearcher = config?.role === 'Researcher';
+    const assetField = !isResearcher ? `<div class="tmx-field tmx-field-wide"><label>Affected customer asset</label><select name="asset_id">${assetOptions(assets)}</select><small>Select the real inventory record when known. Leave unmapped only when triage is still required.</small></div>` : '';
     const cards = findings.length ? findings.map((finding) => {
       const decision = finding.edip_decision || finding.tes_decision || 'UNAVAILABLE';
       const decisions = Array.isArray(finding.decision_sequence) && finding.decision_sequence.length
@@ -677,6 +713,11 @@
         ? `<span class="tmx-deadline tmx-deadline-${escapeHtml(finding.revalidation_countdown_state)}">Revalidate ${escapeHtml(deadlineLabel(finding.revalidation_countdown_state))} · ${escapeHtml(finding.revalidate_by)}</span>`
         : '';
       const resolved = finding.status === 'resolved';
+      const linkedAsset = assets.find((asset) => asset.id === finding.asset_id);
+      const linkedLabel = linkedAsset ? assetLabel(linkedAsset) : finding.asset?.name;
+      const exposureState = finding.asset_id
+        ? `<div class="tmx-control-callout"><strong>Confirmed asset link</strong><span>${escapeHtml(linkedLabel || 'Linked tenant asset')}</span></div>`
+        : '<div class="tmx-notice"><strong>Needs mapping:</strong><span>This record is triage data and does not count as confirmed customer exposure.</span></div>';
       return `<article class="tmx-finding-card" data-finding-id="${escapeHtml(finding.id)}" data-search="${escapeHtml([finding.title, finding.cve, finding.class, finding.subtype, finding.status].join(' ').toLowerCase())}">
         <div class="tmx-finding-topline">
           <div class="tmx-chip-row">
@@ -690,6 +731,7 @@
         </div>
         <h2>${escapeHtml(finding.title)}</h2>
         ${finding.description ? `<p class="tmx-finding-description">${escapeHtml(finding.description)}</p>` : ''}
+        ${exposureState}
         ${decisionHistory}
         <div class="tmx-finding-meta"><span>${escapeHtml(finding.cve)}</span><span>SSS ${escapeHtml(finding.sss)}</span><span>TES ${escapeHtml(finding.tes)}</span><span>${escapeHtml(finding.source_tool || 'Connector')}</span></div>
         <div class="tmx-chip-row">${deadline}${revalidation}</div>
@@ -708,6 +750,7 @@
         <div class="tmx-field tmx-field-wide"><label for="tmx-sss-title">Title</label><input id="tmx-sss-title" name="title" maxlength="255" required></div>
         <div class="tmx-field"><label for="tmx-sss-ecosystem">Affected application / ecosystem</label><input id="tmx-sss-ecosystem" name="affected_ecosystem" maxlength="255" value="Application" required></div>
         <div class="tmx-field"><label for="tmx-sss-severity">SSS (0–10)</label><input id="tmx-sss-severity" name="base_severity" type="number" min="0" max="10" step="0.1" value="8.0" required></div>
+        ${assetField}
         <div class="tmx-field tmx-field-wide"><label for="tmx-sss-description">Description and reproduction context</label><textarea id="tmx-sss-description" name="description" maxlength="2000" rows="4" required></textarea></div>
         <label class="tmx-check-label"><input type="checkbox" name="pii_exposed"> PII or financial data exposed</label>
         <label class="tmx-check-label"><input type="checkbox" name="patch_available"> Patch or remediation available</label>
@@ -723,6 +766,7 @@
         <div class="tmx-field tmx-field-wide"><label for="tmx-posture-title">Title</label><input id="tmx-posture-title" name="title" maxlength="255" required></div>
         <div class="tmx-field"><label for="tmx-posture-ecosystem">Affected ecosystem</label><input id="tmx-posture-ecosystem" name="affected_ecosystem" maxlength="255" value="Identity and AI posture" required></div>
         <div class="tmx-field"><label for="tmx-posture-source">Evidence source</label><select id="tmx-posture-source" name="source_tool"><option>Manual Questionnaire</option><option>Connector</option><option>External SIEM</option><option>Independent Monitor</option></select></div>
+        ${assetField}
         <div class="tmx-field tmx-field-wide"><label for="tmx-posture-description">Description and evidence context</label><textarea id="tmx-posture-description" name="description" maxlength="2000" rows="4" required></textarea></div>
         <label class="tmx-check-label" data-posture-for="IDENTITY_POSTURE"><input type="checkbox" name="device_code_flow_enabled"> Device-code flow enabled</label>
         <div class="tmx-field" data-posture-for="IDENTITY_POSTURE"><label>OAuth grant inventory</label><select name="oauth_grant_inventory"><option value="none">None</option><option value="partial">Partial</option><option value="complete">Complete</option></select></div>
@@ -738,10 +782,23 @@
       </form>
     </section>` : '';
 
+    const mappingTotal = (overview.exposure?.unlinked_count || 0)
+      + (overview.exposure?.invalid_asset_link_count || 0);
+    const unmapped = overview.exposure?.mapping_queue || [
+      ...(overview.exposure?.unlinked_findings || []),
+      ...(overview.exposure?.invalid_asset_links || []),
+    ];
+    const mappingQueue = canManage ? `<section class="tmx-panel">
+      <div class="tmx-panel-header"><div><h2>Exposure Mapping Queue</h2><p>Connect intake records to the customer inventory. Only mapped records become confirmed exposure and feed CISO reporting.${mappingTotal > unmapped.length ? ` Showing the highest-priority ${escapeHtml(unmapped.length)} of ${escapeHtml(mappingTotal)} waiting records.` : ''}</p></div><span class="tmx-status ${mappingTotal ? 'tmx-status-high' : 'tmx-status-available'}">${escapeHtml(mappingTotal)} waiting</span></div>
+      <div class="tmx-panel-body">${unmapped.length ? `<div class="tmx-list">${unmapped.map((item) => `<div class="tmx-list-row" data-mapping-row="${escapeHtml(item.finding_id)}"><div><div class="tmx-list-title">${escapeHtml(item.title)}</div><div class="tmx-list-detail">${escapeHtml(item.source)} · ${escapeHtml(item.priority || 'No priority')} · ${item.asset_id ? 'Invalid/decommissioned asset link' : 'No asset selected'}</div></div><div class="tmx-mapping-controls"><select aria-label="Asset for ${escapeHtml(item.title)}">${assetOptions(assets)}</select><button type="button" class="tmx-button" data-map-finding="${escapeHtml(item.finding_id)}" ${assets.length ? '' : 'disabled'}>Link asset</button></div></div>`).join('')}</div>` : '<div class="tmx-empty">Every open record is mapped to an active tenant asset.</div>'}</div>
+    </section>` : '';
+
     host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="sss-intake">
-      <header class="tmx-heading"><div><h1>SSS Decision Queue</h1><p>Capture and manage non-CVE findings with server-issued exposure scores and remediation decisions.</p></div><button type="button" class="tmx-button tmx-button-secondary" data-sss-refresh>Refresh</button></header>
+      <header class="tmx-heading"><div><h1>Non-CVE Intake & Triage</h1><p>Record evidence, map it to a real customer asset, then manage the EDIP response decision. Unmapped records remain triage data.</p></div><button type="button" class="tmx-button tmx-button-secondary" data-sss-refresh>Refresh</button></header>
+      <div class="tmx-coverage-flow"><div><strong>1</strong><span>Record evidence</span></div><b>→</b><div><strong>2</strong><span>Map customer asset</span></div><b>→</b><div><strong>3</strong><span>Prioritise in SPECTRUM</span></div><b>→</b><div><strong>4</strong><span>Summarise in CISO</span></div></div>
       ${intake}
       ${postureIntake}
+      ${mappingQueue}
       <section class="tmx-panel"><div class="tmx-panel-header"><h2>Tenant Findings</h2><input class="tmx-search" data-sss-search aria-label="Filter findings" placeholder="Filter by title, ID, class, or status"></div><div class="tmx-panel-body"><div class="tmx-finding-grid" aria-live="polite">${cards}</div></div></section>
     </div>`;
 
@@ -781,7 +838,7 @@
         const payload = {
           class: findingClass, sub_class: subClass, title: data.get('title'),
           description: data.get('description'), affected_ecosystem: data.get('affected_ecosystem'),
-          source_tool: data.get('source_tool'),
+          source_tool: data.get('source_tool'), asset_id: data.get('asset_id') || null,
         };
         if (findingClass === 'IDENTITY_POSTURE') Object.assign(payload, {
           device_code_flow_enabled: data.has('device_code_flow_enabled'),
@@ -829,6 +886,7 @@
             description: data.get('description'), affected_ecosystem: data.get('affected_ecosystem'),
             base_severity: Number(data.get('base_severity')), source_tool: data.get('source_tool'),
             pii_exposed: data.has('pii_exposed'), patch_available: data.has('patch_available'),
+            asset_id: data.get('asset_id') || null,
           }),
         });
         form.reset();
@@ -851,6 +909,31 @@
         sssFindings = null;
         await renderSssRoute(host, true);
       } catch (error) { button.disabled = false; window.alert(error.message || 'Update failed.'); }
+    }));
+    host.querySelectorAll('[data-map-finding]').forEach((button) => button.addEventListener('click', async () => {
+      const row = button.closest('[data-mapping-row]');
+      const select = row.querySelector('select');
+      const assetId = select.value;
+      if (!assetId) {
+        select.setCustomValidity('Select the affected customer asset.');
+        select.reportValidity();
+        return;
+      }
+      select.setCustomValidity('');
+      button.disabled = true;
+      try {
+        await api(`/api/workflow/findings/${encodeURIComponent(button.dataset.mapFinding)}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ asset_id: assetId }),
+        });
+        sssFindings = null;
+        workflowOverview = null;
+        cisoSummary = null;
+        await renderSssRoute(host, true);
+      } catch (error) {
+        button.disabled = false;
+        window.alert(error.message || 'Asset mapping failed.');
+      }
     }));
     host.querySelectorAll('[data-sss-resolve]').forEach((button) => button.addEventListener('click', () => {
       const panel = button.closest('.tmx-finding-card').querySelector('[data-sss-resolution-form]');
@@ -891,7 +974,12 @@
     host.innerHTML = '<div data-tempris-extension-root class="tmx-panel tmx-loading">Loading SSS intake and decision outputs...</div>';
     try {
       const [findings, config] = await Promise.all([loadSssFindings(force), loadPackageConfig(force)]);
-      if (window.location.pathname === '/sss-intake') renderSssIntake(host, findings, config);
+      const staff = config.role !== 'Researcher';
+      const [assets, overview] = await Promise.all([
+        staff ? loadTenantAssets(force).catch(() => []) : Promise.resolve([]),
+        staff ? loadWorkflowOverview(force).catch(() => ({})) : Promise.resolve({}),
+      ]);
+      if (window.location.pathname === '/sss-intake') renderSssIntake(host, findings, config, assets, overview);
     } catch (error) {
       if (window.location.pathname !== '/sss-intake') return;
       host.innerHTML = `<div data-tempris-extension-root class="tmx-page"><div class="tmx-panel tmx-error">${escapeHtml(error.message || 'SSS intake is unavailable.')}<div style="margin-top:16px"><button type="button" class="tmx-button" data-sss-retry>Retry</button></div></div></div>`;
@@ -904,8 +992,8 @@
     const catalog = config.catalog || [];
     host.dataset.temprisExtensionRoute = '/packages';
     host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="packages">
-      <header class="tmx-heading"><div><h1>Package Controls</h1><p>Manage server-enforced module access for this tenant.</p></div><button type="button" class="tmx-button" data-package-save ${config.can_manage ? '' : 'disabled'}>Save changes</button></header>
-      <div class="tmx-notice tmx-notice-success"><strong>Enforced:</strong><span>Disabled modules are rejected by the backend as well as hidden from navigation. Audit logging records every package change.</span></div>
+      <header class="tmx-heading"><div><h1>Tenant Access Administration</h1><p>Commercial and administrative configuration for which Tempris modules this tenant may use. This page does not contain findings, assets, or security decisions.</p></div><button type="button" class="tmx-button" data-package-save ${config.can_manage ? '' : 'disabled'}>Save access policy</button></header>
+      <div class="tmx-notice tmx-notice-success"><strong>Superadmin only:</strong><span>Module entitlements are enforced by the backend and every change is audit logged. Tenant administrators cannot upgrade their own access.</span></div>
       <section class="tmx-panel">
         <div class="tmx-panel-header"><h2>Tenant Configuration</h2><span class="tmx-status ${config.configured ? 'tmx-status-available' : 'tmx-status-high'}">${config.configured ? 'Configured' : 'Default fallback'}</span></div>
         <div class="tmx-panel-body tmx-control-grid">
@@ -953,7 +1041,7 @@
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ package_code: select.value, module_overrides: overrides }),
         });
-        message.textContent = 'Package policy saved and enforced.';
+        message.textContent = 'Tenant access policy saved and enforced.';
         renderPackages(host, packageConfig);
         schedule();
       } catch (error) {
@@ -965,14 +1053,14 @@
 
   async function renderPackagesRoute(host, force = false) {
     host.dataset.temprisExtensionRoute = '/packages';
-    host.innerHTML = '<div data-tempris-extension-root class="tmx-panel tmx-loading">Loading package controls...</div>';
+    host.innerHTML = '<div data-tempris-extension-root class="tmx-panel tmx-loading">Loading tenant access administration...</div>';
     try {
       const config = await loadPackageConfig(force);
-      if (!config.can_manage) throw Object.assign(new Error('Package controls require Superadmin or Admin access.'), { status: 403 });
+      if (!config.can_manage) throw Object.assign(new Error('Tenant access administration requires Superadmin access.'), { status: 403 });
       if (window.location.pathname === '/packages') renderPackages(host, config);
     } catch (error) {
       if (window.location.pathname !== '/packages') return;
-      host.innerHTML = `<div data-tempris-extension-root class="tmx-page"><div class="tmx-panel tmx-error">${escapeHtml(error.message || 'Package controls are unavailable.')}<div style="margin-top:16px"><button type="button" class="tmx-button" data-package-retry>Retry</button></div></div></div>`;
+      host.innerHTML = `<div data-tempris-extension-root class="tmx-page"><div class="tmx-panel tmx-error">${escapeHtml(error.message || 'Tenant access administration is unavailable.')}<div style="margin-top:16px"><button type="button" class="tmx-button" data-package-retry>Retry</button></div></div></div>`;
       host.querySelector('[data-package-retry]').addEventListener('click', () => renderPackagesRoute(host, true));
     }
   }
@@ -1230,6 +1318,7 @@
     }
     if (!document.querySelector('#root main') || !localStorage.getItem(TOKEN_KEY)) {
       stopSssEvents();
+      deactivateExtensionHost();
       return;
     }
     if (path === '/sss-intake') startSssEvents();
@@ -1272,6 +1361,7 @@
   });
   window.addEventListener('tempris:logout', () => {
     stopSssEvents();
+    deactivateExtensionHost();
     cisoAccess = null;
     cisoSummary = null;
     sssFindings = null;
@@ -1281,6 +1371,8 @@
     vdpRequest = null;
     workflowOverview = null;
     workflowRequest = null;
+    tenantAssets = null;
+    tenantAssetsRequest = null;
     schedule();
   });
   function observeReactRoot() {

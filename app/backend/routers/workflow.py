@@ -80,6 +80,7 @@ def update_finding_workflow(
 
     changes: dict[str, object] = {}
     if "asset_id" in supplied:
+        asset = None
         if req.asset_id:
             asset = db.query(Asset).filter(
                 Asset.id == req.asset_id,
@@ -89,6 +90,16 @@ def update_finding_workflow(
             if not asset:
                 raise HTTPException(status_code=422, detail="Asset is not an active asset in this tenant")
         finding.asset_id = req.asset_id
+        finding.asset_data = ({
+            "asset_id": asset.id,
+            "name": asset.name,
+            "hostname": asset.hostname,
+            "ip_address": asset.ip_address,
+            "criticality": asset.criticality,
+            "owner": asset.owner,
+            "environment": asset.environment,
+            "source": "tenant_asset_inventory",
+        } if asset else None)
         changes["asset_id"] = req.asset_id
     if "sla_days" in supplied:
         finding.sla = req.sla_days

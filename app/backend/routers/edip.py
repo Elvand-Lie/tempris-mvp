@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
-from models import Finding
+from models import Asset, Finding
 from routers.audit import AuditEntry, append_to_audit_log_db
 from routers.auth import get_auth_context, require_role
 from services.database import get_db
@@ -263,6 +263,15 @@ def _create_finding(
         {"sss_data": {"patch_available": req.patch_available}, "source": "sss"},
         tes,
     )
+    asset = None
+    if req.asset_id:
+        asset = db.query(Asset).filter(
+            Asset.id == req.asset_id,
+            Asset.tenant_id == tenant_id,
+            Asset.status != "decommissioned",
+        ).first()
+        if not asset:
+            raise HTTPException(status_code=422, detail="Asset is not an active asset in this tenant")
     public_fields = {
         name: getattr(req, name)
         for name in (
@@ -308,6 +317,16 @@ def _create_finding(
             "threat_actor_activity": min(10.0, 7.0 * req.agm),
         },
         asset_id=req.asset_id,
+        asset_data=({
+            "asset_id": asset.id,
+            "name": asset.name,
+            "hostname": asset.hostname,
+            "ip_address": asset.ip_address,
+            "criticality": asset.criticality,
+            "owner": asset.owner,
+            "environment": asset.environment,
+            "source": "tenant_asset_inventory",
+        } if asset else None),
         sss_data={
             "type": category,
             "source": kind,
@@ -343,6 +362,8 @@ def _public(f: Finding) -> dict:
         "product": f.product,
         "priority": f.priority,
         "status": f.status,
+        "asset_id": f.asset_id,
+        "asset": f.asset_data if isinstance(f.asset_data, dict) else None,
         "finding_type": sss.get("type") or f.finding_type,
         "class": sss.get("type") or f.finding_type,
         "sub_class": sss.get("sub_class") or f.sub_class,

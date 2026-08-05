@@ -71,7 +71,10 @@ def build_exposure_coverage(db: Session, tenant_id: str) -> dict:
     """Calculate TES only across open findings explicitly linked to tenant assets."""
     assets = {
         row.id: row
-        for row in db.query(Asset).filter(Asset.tenant_id == tenant_id).all()
+        for row in db.query(Asset).filter(
+            Asset.tenant_id == tenant_id,
+            Asset.status != "decommissioned",
+        ).all()
     }
     findings = [
         row for row in db.query(Finding).filter(Finding.tenant_id == tenant_id).all()
@@ -91,6 +94,26 @@ def build_exposure_coverage(db: Session, tenant_id: str) -> dict:
     total = len(findings)
     linked_count = len(linked)
     kev_linked = [row for row in linked if bool(row.cisa_kev)]
+
+    def queue_item(row: Finding) -> dict:
+        return {
+            "finding_id": row.id,
+            "title": row.title,
+            "source": row.source or "unknown",
+            "priority": row.priority,
+            "status": row.status,
+            "asset_id": row.asset_id,
+        }
+
+    unlinked = [row for row in findings if not row.asset_id]
+    priority_order = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+    mapping_queue_limit = 50
+    mapping_queue = sorted(
+        [*invalid_links, *unlinked],
+        key=lambda row: (priority_order.get((row.priority or "").upper(), 4), row.id),
+    )[:mapping_queue_limit]
+    queued_unlinked_ids = {row.id for row in mapping_queue if not row.asset_id}
+    queued_invalid_ids = {row.id for row in mapping_queue if row.asset_id}
     return {
         "status": "available" if scored else "unavailable",
         "aggregate_tes": aggregate,
@@ -100,8 +123,17 @@ def build_exposure_coverage(db: Session, tenant_id: str) -> dict:
         "asset_link_coverage_pct": round(linked_count / total * 100, 1) if total else None,
         "scored_asset_linked_count": len(scored),
         "scoring_coverage_pct": round(len(scored) / linked_count * 100, 1) if linked_count else None,
-        "unlinked_count": sum(1 for row in findings if not row.asset_id),
+        "unlinked_count": len(unlinked),
+        "unlinked_findings": [
+            queue_item(row) for row in mapping_queue if row.id in queued_unlinked_ids
+        ],
         "invalid_asset_link_count": len(invalid_links),
+        "invalid_asset_links": [
+            queue_item(row) for row in mapping_queue if row.id in queued_invalid_ids
+        ],
+        "mapping_queue": [queue_item(row) for row in mapping_queue],
+        "mapping_queue_limit": mapping_queue_limit,
+        "mapping_queue_returned_count": len(mapping_queue),
         "unscored_finding_ids": unscored_ids,
         "asset_linked_cisa_kev_count": len(kev_linked),
         "asset_linked_cisa_kev_ids": [row.id for row in kev_linked],
@@ -149,7 +181,10 @@ def build_deadline_summary(db: Session, tenant_id: str, now: datetime | None = N
 def build_workflow_readiness(db: Session, tenant_id: str) -> dict:
     assets = {
         row.id: row
-        for row in db.query(Asset).filter(Asset.tenant_id == tenant_id).all()
+        for row in db.query(Asset).filter(
+            Asset.tenant_id == tenant_id,
+            Asset.status != "decommissioned",
+        ).all()
     }
     findings = db.query(Finding).filter(Finding.tenant_id == tenant_id).all()
     open_findings = [row for row in findings if _is_open(row)]

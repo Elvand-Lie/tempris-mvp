@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from passlib.hash import bcrypt
 
 from index import app
-from models import AuditLog, Finding, TenantPackage
+from models import Asset, AuditLog, Finding, TenantPackage
 from routers import auth
 from services.database import Base, SessionLocal, engine
 
@@ -11,6 +11,7 @@ from services.database import Base, SessionLocal, engine
 TENANT = "tenant-production-workflows"
 PASSWORD = "production-workflow-test-password"
 ACCOUNTS = {
+    "pkg.superadmin@tempris.test": "Superadmin",
     "pkg.admin@tempris.test": "Admin",
     "pkg.analyst@tempris.test": "Analyst",
     "pkg.viewer@tempris.test": "Viewer",
@@ -34,6 +35,7 @@ def workflow_state(monkeypatch):
     db = SessionLocal()
     db.query(TenantPackage).filter(TenantPackage.tenant_id.in_([TENANT, "tenant-other"])).delete()
     db.query(Finding).filter(Finding.tenant_id.in_([TENANT, "tenant-other"])).delete()
+    db.query(Asset).filter(Asset.tenant_id.in_([TENANT, "tenant-other"])).delete()
     db.query(AuditLog).filter(AuditLog.tenant_id.in_([TENANT, "tenant-other"])).delete()
     db.commit()
     db.close()
@@ -50,6 +52,7 @@ def headers(client: TestClient, email: str) -> dict:
 
 def test_packages_are_persisted_audited_and_enforced_by_backend():
     client = TestClient(app)
+    superadmin = headers(client, "pkg.superadmin@tempris.test")
     admin = headers(client, "pkg.admin@tempris.test")
     analyst = headers(client, "pkg.analyst@tempris.test")
 
@@ -58,6 +61,7 @@ def test_packages_are_persisted_audited_and_enforced_by_backend():
     assert default.json()["package_code"] == "DOMINATE"
     assert default.json()["configured"] is False
     assert set(default.json()["effective_modules"]) == set(default.json()["modules"])
+    assert default.json()["can_manage"] is False
 
     forbidden = client.put(
         "/api/packages/current",
@@ -66,9 +70,16 @@ def test_packages_are_persisted_audited_and_enforced_by_backend():
     )
     assert forbidden.status_code == 403
 
-    saved = client.put(
+    admin_forbidden = client.put(
         "/api/packages/current",
         headers=admin,
+        json={"package_code": "DETECT", "module_overrides": {}},
+    )
+    assert admin_forbidden.status_code == 403
+
+    saved = client.put(
+        "/api/packages/current",
+        headers=superadmin,
         json={"package_code": "DETECT", "module_overrides": {"CISO": True}},
     )
     assert saved.status_code == 200
@@ -171,3 +182,45 @@ def test_sss_business_logic_intake_update_resolve_and_tenant_scope():
         json={"resolution_notes": "Resolve again"},
     )
     assert duplicate.status_code == 409
+
+
+def test_sss_asset_link_is_tenant_scoped_and_returns_human_context():
+    client = TestClient(app)
+    analyst = headers(client, "pkg.analyst@tempris.test")
+    db = SessionLocal()
+    db.add(Asset(
+        id="ASSET-CHECKOUT", tenant_id=TENANT, name="Checkout API",
+        hostname="checkout.internal", environment="production",
+        owner="Payments", criticality="critical", status="active",
+    ))
+    db.add(Asset(
+        id="ASSET-OTHER", tenant_id="tenant-other", name="Other tenant asset",
+        status="active",
+    ))
+    db.commit()
+    db.close()
+
+    rejected = client.post(
+        "/api/edip/intake/sss", headers=analyst,
+        json={
+            "class": "BLFLAW", "subtype": "IDOR", "title": "Wrong tenant link",
+            "description": "Must not cross tenant boundaries.", "asset_id": "ASSET-OTHER",
+        },
+    )
+    assert rejected.status_code == 422
+
+    created = client.post(
+        "/api/edip/intake/sss", headers=analyst,
+        json={
+            "class": "BLFLAW", "subtype": "IDOR", "title": "Checkout object access",
+            "description": "Verified on the checkout application.", "asset_id": "ASSET-CHECKOUT",
+        },
+    )
+    assert created.status_code == 200
+    assert created.json()["asset_id"] == "ASSET-CHECKOUT"
+    assert created.json()["asset"] == {
+        "asset_id": "ASSET-CHECKOUT", "name": "Checkout API",
+        "hostname": "checkout.internal", "ip_address": None,
+        "criticality": "critical", "owner": "Payments",
+        "environment": "production", "source": "tenant_asset_inventory",
+    }

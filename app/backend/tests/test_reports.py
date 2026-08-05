@@ -268,7 +268,12 @@ def test_customer_report_artifacts_are_safe_deterministic_and_tenant_scoped():
         id='F-LOW', tenant_id='tenantA', title='<script>alert(1)</script>',
         priority='P3', status='unmitigated', description='Lower impact item',
         required_action='Review configuration', raw_inputs={'agm': 99, 'tef': 88},
-        score=2.4, cvss=2.4,
+        score=2.4, cvss=2.4, asset_id='ASSET-A',
+    ))
+    db.add(Finding(
+        id='F-UNMAPPED', tenant_id='tenantA', title='Unconfirmed catalog record',
+        priority='P0', status='unmitigated', description='Not matched to a customer asset',
+        score=10.0, cvss=10.0,
     ))
     db.add(Finding(
         id='F-HIGH', tenant_id='tenantA', title='Internet-facing exposure',
@@ -287,7 +292,7 @@ def test_customer_report_artifacts_are_safe_deterministic_and_tenant_scoped():
         '/api/reports/poc/generate',
         headers=headers_a,
         json={
-            'source_finding_ids': ['F-LOW', 'F-HIGH'],
+            'source_finding_ids': ['F-LOW', 'F-HIGH', 'F-UNMAPPED'],
             'configuration': {
                 'title': 'National Day CTEM & EDIP Report',
                 'engagement_id': 'ENG-ND-001',
@@ -337,11 +342,14 @@ def test_customer_report_artifacts_are_safe_deterministic_and_tenant_scoped():
     assert json_response.status_code == html_response.status_code == csv_response.status_code == 200
     payload = json_response.json()
     assert [row['id'] for row in payload['findings']] == ['F-HIGH', 'F-LOW']
+    assert 'F-UNMAPPED' not in json_response.text
+    assert payload['coverage']['eligibility_rule'] == 'active_tenant_asset_link_required'
+    assert payload['coverage']['excluded_unmapped_finding_count'] == 1
     assert payload['findings'][0]['action_label'] == 'Fix now'
     assert payload['findings'][1]['action_label'] == 'Not assigned'
     assert payload['findings'][1]['decision_rationale'] == 'Not recorded'
     assert payload['findings'][1]['why_it_matters'] == 'Not recorded'
-    assert payload['findings'][1]['remediation']['owner'] is None
+    assert payload['findings'][1]['remediation']['owner'] == 'Platform Team'
     assert payload['findings'][1]['remediation']['sla_days'] is None
     assert payload['findings'][1]['remediation']['due_date'] is None
     assert payload['findings'][1]['re_evaluation_date'] is None
@@ -353,6 +361,7 @@ def test_customer_report_artifacts_are_safe_deterministic_and_tenant_scoped():
     assert 'tef' not in json_response.text.lower()
     assert '<script>alert(1)</script>' not in html_response.text
     assert '&lt;script&gt;alert(1)&lt;/script&gt;' in html_response.text
+    assert '1 unmapped record(s) excluded' in html_response.text
     assert "frame-ancestors 'none'" in html_response.headers['content-security-policy']
     assert 'CVSS' not in csv_response.text
 

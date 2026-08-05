@@ -266,7 +266,10 @@ def _evidence_summary(finding, sources, evidence) -> dict:
     }
 
 
-def _build_poc_payload(db, tenant_id, requested_by, report_id, findings, configuration):
+def _build_poc_payload(
+    db, tenant_id, requested_by, report_id, findings, configuration,
+    excluded_unmapped_count=0,
+):
     ids = [finding.id for finding in findings]
     asset_ids = [finding.asset_id for finding in findings if finding.asset_id]
     assets = {
@@ -462,6 +465,8 @@ def _build_poc_payload(db, tenant_id, requested_by, report_id, findings, configu
             'out_of_scope': out_of_scope,
             'identities': coverage.get('identities') or [],
             'finding_count': len(output_findings),
+            'eligibility_rule': 'active_tenant_asset_link_required',
+            'excluded_unmapped_finding_count': excluded_unmapped_count,
         },
         'next_steps': next_steps,
     }
@@ -533,6 +538,10 @@ def _render_poc_html(payload: dict) -> str:
         ),
         '{{OUT_OF_SCOPE}}': ''.join(
             f'<li>{esc(value)}</li>' for value in payload['coverage']['out_of_scope']
+        ) + (
+            f'<li>{esc(payload["coverage"]["excluded_unmapped_finding_count"])} '
+            'unmapped record(s) excluded because no active customer asset link was recorded.</li>'
+            if payload['coverage']['excluded_unmapped_finding_count'] else ''
         ),
         '{{NEXT_STEPS}}': ''.join(
             f'<li>{esc(value)}</li>' for value in payload['next_steps']
@@ -588,14 +597,22 @@ def generate_poc_report_pipeline(
         raise ValueError('Missing tenant context')
     configuration = _clean_report_value(configuration or {})
     source_ids = list(dict.fromkeys(source_finding_ids or []))
-    findings = (
+    candidate_findings = (
         _load_findings(db, tenant_id, source_ids)
         if source_ids else
         db.query(Finding).filter(Finding.tenant_id == tenant_id).all()
     )
+    active_asset_ids = {
+        row.id for row in db.query(Asset).filter(
+            Asset.tenant_id == tenant_id,
+            Asset.status != 'decommissioned',
+        ).all()
+    }
+    findings = [row for row in candidate_findings if row.asset_id in active_asset_ids]
     report_id = f'REP-{uuid.uuid4().hex[:8].upper()}'
     payload = _build_poc_payload(
         db, tenant_id, requested_by, report_id, findings, configuration,
+        excluded_unmapped_count=len(candidate_findings) - len(findings),
     )
     json_content = json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False)
     html_content = _render_poc_html(payload)

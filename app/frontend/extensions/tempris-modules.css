@@ -891,3 +891,42 @@ body.tmx-extension-active #root main {
 @media (max-width: 900px) {
   .tmx-vdp-queue { grid-template-columns: 1fr; }
 }
+
+.tmx-coverage-flow {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  background: rgb(20 20 22 / 88%);
+}
+
+.tmx-coverage-flow > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  text-align: center;
+}
+
+.tmx-coverage-flow strong { color: #34d399; font-size: 20px; }
+.tmx-coverage-flow span { color: #a1a1aa; font-size: 11px; }
+.tmx-coverage-flow b { color: #52525b; }
+
+.tmx-mapping-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: min(520px, 46vw);
+}
+
+.tmx-mapping-controls select { flex: 1; min-width: 0; }
+.tmx-field small { color: #71717a; font-size: 11px; line-height: 1.45; }
+
+@media (max-width: 820px) {
+  .tmx-coverage-flow { align-items: stretch; flex-direction: column; }
+  .tmx-coverage-flow b { transform: rotate(90deg); text-align: center; }
+  .tmx-list-row { grid-template-columns: 1fr; }
+  .tmx-mapping-controls { min-width: 0; }
+}

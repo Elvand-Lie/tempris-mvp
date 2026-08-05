@@ -34,7 +34,7 @@ def _response(db: Session, user: dict) -> dict:
         assignment["effective_modules"] = []
     assignment.update({
         "catalog": _catalog(), "modules": list(MODULES), "role": auth.role,
-        "can_manage": auth.role in {"Superadmin", "Admin"},
+        "can_manage": auth.role == "Superadmin",
         "can_submit_sss": auth.role in {"Superadmin", "Admin", "Analyst", "Researcher"},
         "can_manage_sss": auth.role in {"Superadmin", "Admin", "Analyst"},
     })
@@ -54,7 +54,7 @@ def update_package(
     req: PackageUpdate,
     request: Request,
     db: Session = Depends(get_db),
-    user=Depends(require_role("Superadmin", "Admin")),
+    user=Depends(require_role("Superadmin")),
 ):
     auth = get_auth_context(user)
     try:

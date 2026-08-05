@@ -76,9 +76,23 @@ def _as_utc(value: datetime | None) -> datetime | None:
 
 
 
-def _risk_trend(snapshots: list[TesSnapshot]) -> dict:
+def _risk_trend(
+    snapshots: list[TesSnapshot],
+    current_findings: int,
+    current_critical: int,
+) -> dict:
     if len(snapshots) < 2:
-        return {'status': 'unavailable', 'reason': 'At least two tenant snapshots are required'}
+        if current_findings:
+            return {
+                'status': 'baseline',
+                'current_critical': current_critical,
+                'current_findings': current_findings,
+                'reason': 'Current confirmed exposure is the baseline; trend appears after a second tenant snapshot.',
+            }
+        return {
+            'status': 'unavailable',
+            'reason': 'No open asset-linked finding exists to establish a customer risk baseline.',
+        }
 
     current, previous = snapshots[0], snapshots[1]
     current_counts = (current.critical_count or 0, current.finding_count or 0)
@@ -184,7 +198,13 @@ def get_ciso_summary(
 ):
     tenant_id = _tenant_id(user)
     findings = db.query(Finding).filter(Finding.tenant_id == tenant_id).all()
-    open_findings = [finding for finding in findings if _is_open(finding)]
+    assets = db.query(Asset).filter(
+        Asset.tenant_id == tenant_id,
+        Asset.status != 'decommissioned',
+    ).all()
+    active_asset_ids = {asset.id for asset in assets}
+    confirmed_findings = [finding for finding in findings if finding.asset_id in active_asset_ids]
+    open_findings = [finding for finding in confirmed_findings if _is_open(finding)]
     severities = defaultdict(int)
     for finding in open_findings:
         severities[_severity(finding)] += 1
@@ -197,8 +217,10 @@ def get_ciso_summary(
         posture = 'moderate'
     elif open_findings:
         posture = 'low'
-    elif findings:
+    elif confirmed_findings:
         posture = 'no_open_findings'
+    elif findings:
+        posture = 'no_confirmed_exposure'
     else:
         posture = 'no_data'
 
@@ -209,7 +231,6 @@ def get_ciso_summary(
         .limit(2)
         .all()
     )
-    assets = db.query(Asset).filter(Asset.tenant_id == tenant_id).all()
     controls = db.query(ControlStatus).filter(ControlStatus.tenant_id == tenant_id).all()
     incidents = (
         db.query(IncidentReport)
@@ -250,14 +271,24 @@ def get_ciso_summary(
 
     response = {
         'tenant_id': tenant_id,
+        'metric_scope': 'confirmed_asset_linked_findings',
         'overall_risk_posture': posture,
         'findings': {
-            'total': len(findings),
+            'total': len(confirmed_findings),
             'unresolved': len(open_findings),
             'critical': severities['critical'],
             'high': severities['high'],
+            'recorded_total': len(findings),
+            'confirmed_asset_linked': len(confirmed_findings),
+            'unlinked_open': sum(
+                1 for finding in findings if _is_open(finding) and not finding.asset_id
+            ),
         },
-        'risk_trend': _risk_trend(snapshots),
+        'risk_trend': _risk_trend(
+            snapshots,
+            current_findings=len(open_findings),
+            current_critical=severities['critical'],
+        ),
         'highest_risk_assets': _highest_risk_assets(open_findings, assets),
         'compliance_gaps': _compliance_gaps(controls),
         'exposure_coverage': build_exposure_coverage(db, tenant_id),
