@@ -16,6 +16,7 @@ import services.database
 from index import app
 from models import (
     Asset,
+    AssetExposure,
     AuditLog,
     Base,
     ControlStatus,
@@ -251,6 +252,7 @@ def test_ciso_summary_is_tenant_scoped_and_redacted():
         'high': 0,
         'recorded_total': 1,
         'confirmed_asset_linked': 1,
+        'confirmed_exposure_occurrences': 1,
         'unlinked_open': 0,
     }
     assert data['metric_scope'] == 'confirmed_asset_linked_findings'
@@ -462,6 +464,7 @@ def test_workflow_connections_require_explicit_tenant_scoped_records():
         priority='P0',
         status='unmitigated',
         cisa_kev=True,
+        source='sss',
         raw_inputs={
             'cvss': 9.0,
             'exploitability': 9.0,
@@ -470,6 +473,18 @@ def test_workflow_connections_require_explicit_tenant_scoped_records():
             'threat_actor_activity': 9.0,
         },
     ))
+    db.add(Asset(
+        id='ASSET-ALPHA-2',
+        tenant_id='tenant-alpha',
+        name='Alpha Worker',
+        hostname='worker.alpha.test',
+        asset_type='server',
+        criticality='high',
+        owner='Platform',
+        environment='production',
+        status='active',
+    ))
+
     db.commit()
     db.close()
 
@@ -483,30 +498,42 @@ def test_workflow_connections_require_explicit_tenant_scoped_records():
     assert exposure['open_finding_count'] == 2
     assert exposure['asset_linked_count'] == 1
     assert exposure['unlinked_count'] == 1
-    assert exposure['unlinked_findings'] == [{
-        'finding_id': 'F-UNLINKED-KEV',
-        'title': 'Unlinked catalog finding',
-        'source': 'unknown',
-        'priority': 'P0',
-        'status': 'unmitigated',
-        'asset_id': None,
-    }]
-    assert exposure['mapping_queue'] == exposure['unlinked_findings']
-    assert exposure['mapping_queue_returned_count'] == 1
+    assert exposure['unlinked_findings'] == []
+    assert exposure['mapping_queue'] == []
+    assert exposure['mapping_required_count'] == 0
+    assert exposure['catalog_intelligence_count'] == 1
+    assert exposure['mapping_queue_returned_count'] == 0
     assert exposure['asset_linked_cisa_kev_count'] == 0
 
-    cross_tenant = client.patch(
-        '/api/workflow/findings/F-UNLINKED-KEV',
+    cross_tenant = client.post(
+        '/api/workflow/findings/F-UNLINKED-KEV/assets',
         headers=analyst,
-        json={'asset_id': 'ASSET-BETA'},
+        json={'asset_ids': ['ASSET-BETA'], 'evidence': 'Scanner observation'},
     )
     assert cross_tenant.status_code == 422
+
+    confirmed = client.post(
+        '/api/workflow/findings/F-UNLINKED-KEV/assets',
+        headers=analyst,
+        json={
+            'asset_ids': ['ASSET-ALPHA', 'ASSET-ALPHA-2'],
+            'evidence': 'Authenticated scanner confirmed affected software on both assets',
+        },
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()['confirmed_exposure_count'] == 2
+    sss_findings = client.get('/api/edip/intake/sss', headers=admin)
+    assert sss_findings.status_code == 200
+    sss_record = next(item for item in sss_findings.json()['data'] if item['id'] == 'F-UNLINKED-KEV')
+    assert sss_record['asset_ids'] == ['ASSET-ALPHA', 'ASSET-ALPHA-2']
+    assert {asset['name'] for asset in sss_record['assets']} == {'Alpha Gateway', 'Alpha Worker'}
+
+
 
     recorded = client.patch(
         '/api/workflow/findings/F-UNLINKED-KEV',
         headers=analyst,
         json={
-            'asset_id': 'ASSET-ALPHA',
             'sla_days': 14,
             'business_impact': 'Customer portal availability',
             'effort': 'Engineering estimate recorded by the analyst',
@@ -520,6 +547,7 @@ def test_workflow_connections_require_explicit_tenant_scoped_records():
     updated = client.get('/api/workflow/overview', headers=admin).json()
     assert updated['exposure']['asset_linked_count'] == 2
     assert updated['exposure']['asset_linked_cisa_kev_count'] == 1
+    assert updated['exposure']['confirmed_exposure_count'] == 3
     assert updated['workflow']['business_impact']['recorded'] == 1
     assert updated['workflow']['effort']['recorded'] == 1
     assert updated['workflow']['insurance_tier']['status'] == 'not_configured'
@@ -530,12 +558,49 @@ def test_workflow_connections_require_explicit_tenant_scoped_records():
     assert finding.asset_data['name'] == 'Alpha Gateway'
     assert finding.asset_data['source'] == 'tenant_asset_inventory'
     assert finding.sla == 14
-    assert finding.sss_data['workflow_provenance']['asset_id']['source'] == 'explicit_analyst_update'
+    assert finding.sss_data['workflow_provenance']['business_impact']['source'] == 'explicit_analyst_update'
+    exposures = db.query(AssetExposure).filter(
+        AssetExposure.finding_id == 'F-UNLINKED-KEV'
+    ).all()
+    assert {row.asset_id for row in exposures} == {'ASSET-ALPHA', 'ASSET-ALPHA-2'}
+    assert all(row.evidence for row in exposures)
     audit = db.query(AuditLog).filter(AuditLog.action == 'FINDING_WORKFLOW_UPDATED').one()
     assert audit.tenant_id == 'tenant-alpha'
     db.close()
 
 
+def test_catalogue_record_becomes_actionable_only_after_asset_identity_match():
+    seed_executive_data()
+    db = TestingSessionLocal()
+    db.add(Asset(
+        id='ASSET-CITRIX', tenant_id='tenant-alpha', name='Citrix NetScaler ADC',
+        hostname='adc.alpha.test', asset_type='network', criticality='critical',
+        owner='Network', environment='production', status='active',
+        tags=['citrix', 'netscaler', 'adc'],
+    ))
+    db.add(Finding(
+        id='F-CITRIX-KEV', tenant_id='tenant-alpha', cve='CVE-2026-9999',
+        title='Citrix NetScaler ADC remote code execution', vendor='Citrix',
+        product='NetScaler ADC', priority='P0', status='unmitigated',
+        cisa_kev=True, source='kev', raw_inputs={
+            'cvss': 9.8, 'exploitability': 9.0, 'business_impact': 8.0,
+            'asset_criticality': 10.0, 'threat_actor_activity': 9.0,
+        },
+    ))
+    db.commit()
+    db.close()
+
+    client = TestClient(app)
+    admin = headers_for('alpha-admin@example.test')
+    exposure = client.get('/api/workflow/overview', headers=admin).json()['exposure']
+    assert exposure['mapping_required_count'] == 1
+    assert exposure['candidate_match_count'] == 1
+    assert exposure['catalog_intelligence_count'] == 0
+    candidate = exposure['mapping_queue'][0]
+    assert candidate['mapping_reason'] == 'candidate_match'
+    assert candidate['candidate_assets'][0]['asset_id'] == 'ASSET-CITRIX'
+    assert candidate['candidate_assets'][0]['confidence'] >= 0.9
+    assert exposure['asset_linked_count'] == 1  # Existing seeded finding only; no auto-confirmation.
 def test_sql_shaped_ids_and_tenant_mass_assignment_fail_closed():
     client = TestClient(app)
     alpha_headers = headers_for('alpha-admin@example.test')

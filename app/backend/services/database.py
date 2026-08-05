@@ -104,7 +104,7 @@ def init_db():
     from models import ControlStatus, ControlEvidence, IncidentReport, SpotlightReport
     from models import SurgeResearcher, SurgeSubmission
     from models import ChatSession, ChatMessage, TesSnapshot
-    from models import Asset, ScanFinding, GrcState, GrcSignoff, GrcPolicyDocument, Finding
+    from models import Asset, AssetExposure, ScanFinding, GrcState, GrcSignoff, GrcPolicyDocument, Finding
     from models import AccountQueryLog, AccountSuspension, RevokedToken, UserSession
     Base.metadata.create_all(bind=engine)
     logger.info("All tables created/verified.")

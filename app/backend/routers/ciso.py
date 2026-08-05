@@ -25,6 +25,7 @@ from services.workflow_connections import (
     build_exposure_coverage,
     build_workflow_readiness,
 )
+from services.exposure_links import confirmed_asset_ids_by_finding
 
 router = APIRouter(dependencies=[Depends(require_module("CISO"))])
 EXECUTIVE_ROLES = ('Superadmin', 'Admin')
@@ -114,7 +115,7 @@ def _risk_trend(
 
 
 def _highest_risk_assets(
-    findings: list[Finding],
+    exposures: list[tuple[Finding, str]],
     assets: list[Asset],
 ) -> dict:
     asset_map = {asset.id: asset for asset in assets}
@@ -124,11 +125,11 @@ def _highest_risk_assets(
         'high_findings': 0,
         'highest_severity': 'unknown',
     })
-    for finding in findings:
-        if not finding.asset_id or finding.asset_id not in asset_map or not _is_open(finding):
+    for finding, asset_id in exposures:
+        if asset_id not in asset_map or not _is_open(finding):
             continue
         severity = _severity(finding)
-        summary = aggregates[finding.asset_id]
+        summary = aggregates[asset_id]
         summary['open_findings'] += 1
         if severity == 'critical':
             summary['critical_findings'] += 1
@@ -154,10 +155,8 @@ def _highest_risk_assets(
         row['asset_id'],
     ))
     if not rows:
-        return {'status': 'unavailable', 'reason': 'No tenant findings are linked to tenant assets', 'items': []}
+        return {'status': 'unavailable', 'reason': 'No confirmed exposure occurs on an active tenant asset', 'items': []}
     return {'status': 'available', 'items': rows[:5]}
-
-
 def _compliance_gaps(controls: list[ControlStatus]) -> dict:
     if not controls:
         return {'status': 'unavailable', 'reason': 'No tenant control assessments exist'}
@@ -202,9 +201,15 @@ def get_ciso_summary(
         Asset.tenant_id == tenant_id,
         Asset.status != 'decommissioned',
     ).all()
-    active_asset_ids = {asset.id for asset in assets}
-    confirmed_findings = [finding for finding in findings if finding.asset_id in active_asset_ids]
+    asset_map = {asset.id: asset for asset in assets}
+    links = confirmed_asset_ids_by_finding(db, tenant_id, asset_map)
+    confirmed_findings = [finding for finding in findings if links.get(finding.id)]
     open_findings = [finding for finding in confirmed_findings if _is_open(finding)]
+    open_exposures = [
+        (finding, asset_id)
+        for finding in open_findings
+        for asset_id in sorted(links.get(finding.id, set()))
+    ]
     severities = defaultdict(int)
     for finding in open_findings:
         severities[_severity(finding)] += 1
@@ -280,8 +285,9 @@ def get_ciso_summary(
             'high': severities['high'],
             'recorded_total': len(findings),
             'confirmed_asset_linked': len(confirmed_findings),
+            'confirmed_exposure_occurrences': len(open_exposures),
             'unlinked_open': sum(
-                1 for finding in findings if _is_open(finding) and not finding.asset_id
+                1 for finding in findings if _is_open(finding) and not links.get(finding.id)
             ),
         },
         'risk_trend': _risk_trend(
@@ -289,7 +295,7 @@ def get_ciso_summary(
             current_findings=len(open_findings),
             current_critical=severities['critical'],
         ),
-        'highest_risk_assets': _highest_risk_assets(open_findings, assets),
+        'highest_risk_assets': _highest_risk_assets(open_exposures, assets),
         'compliance_gaps': _compliance_gaps(controls),
         'exposure_coverage': build_exposure_coverage(db, tenant_id),
         'deadline_summary': build_deadline_summary(db, tenant_id),

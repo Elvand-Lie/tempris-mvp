@@ -518,7 +518,7 @@
       <div class="tmx-grid">
         <section class="tmx-panel tmx-panel-wide">
           <div class="tmx-panel-header"><div><h2>Exposure Coverage</h2><p>This explains exactly how recorded findings become confirmed customer exposure.</p></div><span class="tmx-status ${coverage.unlinked_count ? 'tmx-status-high' : 'tmx-status-available'}">${escapeHtml(coverage.asset_link_coverage_pct ?? 0)}% mapped</span></div>
-          <div class="tmx-panel-body tmx-coverage-flow"><div><strong>${escapeHtml(coverage.open_finding_count ?? 0)}</strong><span>Open records</span></div><b>→</b><div><strong>${escapeHtml(coverage.asset_linked_count ?? 0)}</strong><span>Linked to active assets</span></div><b>→</b><div><strong>${escapeHtml(coverage.scored_asset_linked_count ?? 0)}</strong><span>Included in TES</span></div></div>
+          <div class="tmx-panel-body tmx-coverage-flow"><div><strong>${escapeHtml(coverage.open_finding_count ?? 0)}</strong><span>Open records</span></div><b>→</b><div><strong>${escapeHtml(coverage.confirmed_exposure_count ?? coverage.asset_linked_count ?? 0)}</strong><span>Confirmed asset occurrences</span></div><b>→</b><div><strong>${escapeHtml(coverage.scored_asset_linked_count ?? 0)}</strong><span>Scored vulnerability records</span></div></div>
           ${coverage.unlinked_count ? `<div class="tmx-notice"><strong>Action required:</strong><span>${escapeHtml(coverage.unlinked_count)} open record(s) remain in Intake & Triage until an analyst maps them to an asset.</span></div>` : ''}
         </section>
         <section class="tmx-panel">
@@ -713,10 +713,12 @@
         ? `<span class="tmx-deadline tmx-deadline-${escapeHtml(finding.revalidation_countdown_state)}">Revalidate ${escapeHtml(deadlineLabel(finding.revalidation_countdown_state))} · ${escapeHtml(finding.revalidate_by)}</span>`
         : '';
       const resolved = finding.status === 'resolved';
-      const linkedAsset = assets.find((asset) => asset.id === finding.asset_id);
-      const linkedLabel = linkedAsset ? assetLabel(linkedAsset) : finding.asset?.name;
-      const exposureState = finding.asset_id
-        ? `<div class="tmx-control-callout"><strong>Confirmed asset link</strong><span>${escapeHtml(linkedLabel || 'Linked tenant asset')}</span></div>`
+      const linkedAssets = Array.isArray(finding.assets) && finding.assets.length
+        ? finding.assets
+        : (finding.asset_id ? [assets.find((asset) => asset.id === finding.asset_id) || finding.asset].filter(Boolean) : []);
+      const linkedLabels = linkedAssets.map((asset) => assetLabel(asset)).filter(Boolean);
+      const exposureState = linkedAssets.length
+        ? `<div class="tmx-control-callout"><strong>Confirmed on ${linkedAssets.length} customer asset${linkedAssets.length === 1 ? '' : 's'}</strong><span>${escapeHtml(linkedLabels.join(' | ') || 'Linked tenant inventory')}</span></div>`
         : '<div class="tmx-notice"><strong>Needs mapping:</strong><span>This record is triage data and does not count as confirmed customer exposure.</span></div>';
       return `<article class="tmx-finding-card" data-finding-id="${escapeHtml(finding.id)}" data-search="${escapeHtml([finding.title, finding.cve, finding.class, finding.subtype, finding.status].join(' ').toLowerCase())}">
         <div class="tmx-finding-topline">
@@ -782,23 +784,40 @@
       </form>
     </section>` : '';
 
-    const mappingTotal = (overview.exposure?.unlinked_count || 0)
-      + (overview.exposure?.invalid_asset_link_count || 0);
+    const mappingTotal = overview.exposure?.mapping_required_count
+      ?? ((overview.exposure?.unlinked_count || 0) + (overview.exposure?.invalid_asset_link_count || 0));
+    const catalogCount = overview.exposure?.catalog_intelligence_count || 0;
+    const candidateCount = overview.exposure?.candidate_match_count || 0;
     const unmapped = overview.exposure?.mapping_queue || [
       ...(overview.exposure?.unlinked_findings || []),
       ...(overview.exposure?.invalid_asset_links || []),
     ];
+    const mappingById = new Map(unmapped.map((item) => [item.finding_id, item]));
+    const mappingRows = unmapped.map((item) => {
+      const candidates = item.candidate_assets || [];
+      const reason = item.mapping_reason === 'candidate_match'
+        ? `${candidates.length} evidence-based asset candidate${candidates.length === 1 ? '' : 's'}`
+        : item.mapping_reason === 'invalid_asset_link'
+          ? 'Previous asset is inactive; review required'
+          : 'Manual intake requires an analyst-confirmed asset';
+      const candidateNames = candidates.length
+        ? `<div class="tmx-candidate-summary">Suggested: ${candidates.map((candidate) => `${escapeHtml(candidate.name)} (${Math.round(candidate.confidence * 100)}%)`).join(', ')}</div>`
+        : '';
+      return `<div class="tmx-list-row tmx-mapping-row" data-mapping-row="${escapeHtml(item.finding_id)}"><div><div class="tmx-list-title">${escapeHtml(item.title)}</div><div class="tmx-list-detail">${escapeHtml(item.cve || item.source)} - ${escapeHtml(item.priority || 'No priority')} - ${escapeHtml(reason)}</div>${candidateNames}</div><div class="tmx-mapping-controls"><button type="button" class="tmx-button" data-map-finding="${escapeHtml(item.finding_id)}" ${assets.length ? '' : 'disabled'}>Review assets</button></div></div>`;
+    }).join('');
     const mappingQueue = canManage ? `<section class="tmx-panel">
-      <div class="tmx-panel-header"><div><h2>Exposure Mapping Queue</h2><p>Connect intake records to the customer inventory. Only mapped records become confirmed exposure and feed CISO reporting.${mappingTotal > unmapped.length ? ` Showing the highest-priority ${escapeHtml(unmapped.length)} of ${escapeHtml(mappingTotal)} waiting records.` : ''}</p></div><span class="tmx-status ${mappingTotal ? 'tmx-status-high' : 'tmx-status-available'}">${escapeHtml(mappingTotal)} waiting</span></div>
-      <div class="tmx-panel-body">${unmapped.length ? `<div class="tmx-list">${unmapped.map((item) => `<div class="tmx-list-row" data-mapping-row="${escapeHtml(item.finding_id)}"><div><div class="tmx-list-title">${escapeHtml(item.title)}</div><div class="tmx-list-detail">${escapeHtml(item.source)} · ${escapeHtml(item.priority || 'No priority')} · ${item.asset_id ? 'Invalid/decommissioned asset link' : 'No asset selected'}</div></div><div class="tmx-mapping-controls"><select aria-label="Asset for ${escapeHtml(item.title)}">${assetOptions(assets)}</select><button type="button" class="tmx-button" data-map-finding="${escapeHtml(item.finding_id)}" ${assets.length ? '' : 'disabled'}>Link asset</button></div></div>`).join('')}</div>` : '<div class="tmx-empty">Every open record is mapped to an active tenant asset.</div>'}</div>
+      <div class="tmx-panel-header"><div><h2>Customer Exposure Review</h2><p>Only analyst-confirmed asset occurrences feed TES and CISO. Global CISA/NVD records stay reference intelligence until recorded asset evidence produces a candidate match.</p></div><span class="tmx-status ${mappingTotal ? 'tmx-status-high' : 'tmx-status-available'}">${escapeHtml(mappingTotal)} to review</span></div>
+      <div class="tmx-exposure-summary"><div><strong>${escapeHtml(candidateCount)}</strong><span>candidate matches</span></div><div><strong>${escapeHtml(catalogCount)}</strong><span>catalogue-only records</span></div><div><strong>${escapeHtml(overview.exposure?.confirmed_exposure_count || 0)}</strong><span>confirmed occurrences</span></div></div>
+      <div class="tmx-panel-body">${mappingRows ? `<div class="tmx-list">${mappingRows}</div>` : '<div class="tmx-empty">No records currently require asset mapping. Catalogue intelligence remains available in SCOUT.</div>'}</div>
     </section>` : '';
-
+    const assetPicker = canManage ? `<div class="tmx-asset-picker-backdrop" data-asset-picker hidden><section class="tmx-asset-picker" role="dialog" aria-modal="true" aria-labelledby="tmx-asset-picker-title"><header><div><h2 id="tmx-asset-picker-title">Confirm affected assets</h2><p data-asset-picker-context></p></div><button type="button" class="tmx-icon-button" data-asset-picker-close aria-label="Close asset picker">x</button></header><div class="tmx-asset-picker-body"><label class="tmx-field"><span>Search customer inventory</span><input type="search" data-asset-picker-search placeholder="Asset name, hostname, IP, owner, or environment"></label><div class="tmx-asset-options" data-asset-picker-options></div><label class="tmx-field"><span>Evidence (recommended)</span><textarea rows="3" maxlength="2000" data-asset-picker-evidence placeholder="Scanner observation, software inventory, SBOM, service banner, or analyst verification"></textarea></label><div class="tmx-form-message" data-asset-picker-message></div></div><footer><button type="button" class="tmx-button tmx-button-secondary" data-asset-picker-close>Cancel</button><button type="button" class="tmx-button" data-asset-picker-confirm>Confirm selected assets</button></footer></section></div>` : '';
     host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="sss-intake">
       <header class="tmx-heading"><div><h1>Non-CVE Intake & Triage</h1><p>Record evidence, map it to a real customer asset, then manage the EDIP response decision. Unmapped records remain triage data.</p></div><button type="button" class="tmx-button tmx-button-secondary" data-sss-refresh>Refresh</button></header>
       <div class="tmx-coverage-flow"><div><strong>1</strong><span>Record evidence</span></div><b>→</b><div><strong>2</strong><span>Map customer asset</span></div><b>→</b><div><strong>3</strong><span>Prioritise in SPECTRUM</span></div><b>→</b><div><strong>4</strong><span>Summarise in CISO</span></div></div>
       ${intake}
       ${postureIntake}
       ${mappingQueue}
+      ${assetPicker}
       <section class="tmx-panel"><div class="tmx-panel-header"><h2>Tenant Findings</h2><input class="tmx-search" data-sss-search aria-label="Filter findings" placeholder="Filter by title, ID, class, or status"></div><div class="tmx-panel-body"><div class="tmx-finding-grid" aria-live="polite">${cards}</div></div></section>
     </div>`;
 
@@ -910,31 +929,90 @@
         await renderSssRoute(host, true);
       } catch (error) { button.disabled = false; window.alert(error.message || 'Update failed.'); }
     }));
-    host.querySelectorAll('[data-map-finding]').forEach((button) => button.addEventListener('click', async () => {
-      const row = button.closest('[data-mapping-row]');
-      const select = row.querySelector('select');
-      const assetId = select.value;
-      if (!assetId) {
-        select.setCustomValidity('Select the affected customer asset.');
-        select.reportValidity();
-        return;
-      }
-      select.setCustomValidity('');
-      button.disabled = true;
-      try {
-        await api(`/api/workflow/findings/${encodeURIComponent(button.dataset.mapFinding)}`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ asset_id: assetId }),
-        });
-        sssFindings = null;
-        workflowOverview = null;
-        cisoSummary = null;
-        await renderSssRoute(host, true);
-      } catch (error) {
-        button.disabled = false;
-        window.alert(error.message || 'Asset mapping failed.');
-      }
+    const picker = host.querySelector('[data-asset-picker]');
+    let activeMappingId = null;
+    const pickerSelection = new Set();
+    const closeAssetPicker = () => {
+      if (!picker) return;
+      picker.hidden = true;
+      activeMappingId = null;
+      document.body.classList.remove('tmx-modal-open');
+    };
+    const renderAssetPickerOptions = (item, query = '') => {
+      const options = picker.querySelector('[data-asset-picker-options]');
+      const candidateMap = new Map((item.candidate_assets || []).map((candidate) => [candidate.asset_id, candidate]));
+      const normalizedQuery = query.trim().toLowerCase();
+      const ordered = [...assets].sort((left, right) => {
+        const leftConfidence = candidateMap.get(left.id)?.confidence || 0;
+        const rightConfidence = candidateMap.get(right.id)?.confidence || 0;
+        return rightConfidence - leftConfidence || assetLabel(left).localeCompare(assetLabel(right));
+      }).filter((asset) => !normalizedQuery || assetLabel(asset).toLowerCase().includes(normalizedQuery));
+      options.innerHTML = ordered.length ? ordered.map((asset) => {
+        const candidate = candidateMap.get(asset.id);
+        return `<label class="tmx-asset-option ${candidate ? 'tmx-asset-option-candidate' : ''}"><input type="checkbox" value="${escapeHtml(asset.id)}" ${pickerSelection.has(asset.id) ? 'checked' : ''}><span><strong>${escapeHtml(asset.name)}</strong><small>${escapeHtml([asset.hostname || asset.ip_address, asset.environment, asset.owner].filter(Boolean).join(' - ') || asset.id)}</small>${candidate ? `<em>Suggested ${Math.round(candidate.confidence * 100)}% - ${escapeHtml(candidate.evidence)}</em>` : ''}</span></label>`;
+      }).join('') : '<div class="tmx-empty">No active asset matches this search.</div>';
+    };
+    host.querySelectorAll('[data-map-finding]').forEach((button) => button.addEventListener('click', () => {
+      if (!picker) return;
+      const item = mappingById.get(button.dataset.mapFinding);
+      if (!item) return;
+      activeMappingId = item.finding_id;
+      picker.hidden = false;
+      pickerSelection.clear();
+      document.body.classList.add('tmx-modal-open');
+      picker.querySelector('[data-asset-picker-context]').textContent = `${item.cve || item.source}: ${item.title}`;
+      picker.querySelector('[data-asset-picker-search]').value = '';
+      picker.querySelector('[data-asset-picker-evidence]').value = '';
+      picker.querySelector('[data-asset-picker-message]').textContent = item.mapping_reason === 'candidate_match'
+        ? 'Suggestions are not proof. Select only assets supported by recorded evidence.'
+        : 'One vulnerability can be confirmed on several assets in a single review.';
+      renderAssetPickerOptions(item);
+      picker.querySelector('[data-asset-picker-search]').focus();
     }));
+    if (picker) {
+      picker.querySelectorAll('[data-asset-picker-close]').forEach((button) => button.addEventListener('click', closeAssetPicker));
+      picker.addEventListener('click', (event) => { if (event.target === picker) closeAssetPicker(); });
+      picker.querySelector('[data-asset-picker-search]').addEventListener('input', (event) => {
+        const item = mappingById.get(activeMappingId);
+        if (item) renderAssetPickerOptions(item, event.target.value);
+      });
+      picker.querySelector('[data-asset-picker-confirm]').addEventListener('click', async (event) => {
+      picker.querySelector('[data-asset-picker-options]').addEventListener('change', (event) => {
+        if (!event.target.matches('input[type="checkbox"]')) return;
+        if (event.target.checked) pickerSelection.add(event.target.value);
+        else pickerSelection.delete(event.target.value);
+      });
+        const item = mappingById.get(activeMappingId);
+        const message = picker.querySelector('[data-asset-picker-message]');
+        const assetIds = [...pickerSelection];
+        const evidence = picker.querySelector('[data-asset-picker-evidence]').value.trim();
+        if (!assetIds.length) {
+          message.textContent = 'Select at least one affected customer asset.';
+          return;
+        }
+        if (item?.mapping_reason === 'candidate_match' && evidence.length < 10) {
+          message.textContent = 'Record the scanner, inventory, SBOM, or analyst evidence before confirming a catalogue match.';
+          return;
+        }
+        const button = event.currentTarget;
+        button.disabled = true;
+        message.textContent = 'Confirming asset exposure...';
+        try {
+          await api(`/api/workflow/findings/${encodeURIComponent(activeMappingId)}/assets`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ asset_ids: assetIds, evidence: evidence || null }),
+          });
+          closeAssetPicker();
+          sssFindings = null;
+          workflowOverview = null;
+          cisoSummary = null;
+          await renderSssRoute(host, true);
+        } catch (error) {
+          button.disabled = false;
+          message.textContent = error.message || 'Asset mapping failed.';
+        }
+      });
+    }
     host.querySelectorAll('[data-sss-resolve]').forEach((button) => button.addEventListener('click', () => {
       const panel = button.closest('.tmx-finding-card').querySelector('[data-sss-resolution-form]');
       panel.hidden = false;

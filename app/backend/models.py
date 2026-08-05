@@ -309,6 +309,33 @@ class Finding(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class AssetExposure(Base):
+    """One confirmed or reviewed occurrence of a finding on a tenant asset."""
+
+    __tablename__ = "asset_exposures"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "finding_id", "asset_id",
+            name="uq_asset_exposure_tenant_finding_asset",
+        ),
+        Index("ix_asset_exposures_tenant_status", "tenant_id", "status"),
+    )
+
+    id = Column(String(50), primary_key=True)
+    tenant_id = Column(String(50), nullable=False, index=True)
+    finding_id = Column(String(50), nullable=False, index=True)
+    asset_id = Column(String(50), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="confirmed")
+    match_method = Column(String(50), nullable=False, default="manual")
+    confidence = Column(Float)
+    evidence = Column(Text)
+    recorded_by = Column(String(255))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class AccountQueryLog(Base):
     __tablename__ = "account_query_logs"
     id = Column(Integer, primary_key=True, autoincrement=True)

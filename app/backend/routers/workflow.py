@@ -6,12 +6,17 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
-from models import Asset, Finding
+from models import Asset, AssetExposure, Finding
 from routers.audit import AuditEntry, append_to_audit_log_db
 from routers.auth import get_auth_context, require_role
 from services.database import get_db
 from services.entitlements import require_module
 from services.workflow_connections import build_workflow_overview
+from services.exposure_links import (
+    confirm_finding_assets,
+    exposure_rows_for_finding,
+    is_catalog_finding,
+)
 
 
 router = APIRouter(dependencies=[Depends(require_module("SYNTHESIS"))])
@@ -25,6 +30,7 @@ class FindingWorkflowUpdate(BaseModel):
     effort: str | None = Field(default=None, max_length=500)
     revalidate_by: str | None = None
     remediation_verification: str | None = Field(default=None, max_length=2000)
+
 
     @field_validator("revalidate_by")
     @classmethod
@@ -44,6 +50,19 @@ class FindingWorkflowUpdate(BaseModel):
         return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+class FindingAssetConfirmation(BaseModel):
+    asset_ids: list[str] = Field(min_length=1, max_length=100)
+    evidence: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("asset_ids")
+    @classmethod
+    def normalize_asset_ids(cls, values: list[str]) -> list[str]:
+        normalized = list(dict.fromkeys(value.strip() for value in values if value.strip()))
+        if not normalized:
+            raise ValueError("At least one asset is required")
+        return normalized
+
+
 @router.get("/overview")
 def workflow_overview(
     db: Session = Depends(get_db),
@@ -53,6 +72,70 @@ def workflow_overview(
     if not auth.tenant_id:
         raise HTTPException(status_code=400, detail="Missing tenant context")
     return build_workflow_overview(db, auth.tenant_id)
+
+
+@router.post("/findings/{finding_id}/assets")
+def confirm_finding_asset_links(
+    finding_id: str,
+    req: FindingAssetConfirmation,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("Superadmin", "Admin", "Analyst")),
+):
+    """Confirm one vulnerability occurrence on one or more tenant assets."""
+    auth = get_auth_context(user)
+    if not auth.tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant context")
+    finding = db.query(Finding).filter(
+        Finding.id == finding_id,
+        Finding.tenant_id == auth.tenant_id,
+    ).first()
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found")
+
+    if is_catalog_finding(finding) and len((req.evidence or '').strip()) < 10:
+        raise HTTPException(
+            status_code=422,
+            detail="Catalogue vulnerability links require recorded scanner, inventory, SBOM, or analyst evidence",
+        )
+    rows = db.query(Asset).filter(
+        Asset.tenant_id == auth.tenant_id,
+        Asset.id.in_(req.asset_ids),
+        Asset.status != "decommissioned",
+    ).all()
+    by_id = {asset.id: asset for asset in rows}
+    missing = [asset_id for asset_id in req.asset_ids if asset_id not in by_id]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Assets are not active in this tenant: {', '.join(missing)}",
+        )
+    ordered_assets = [by_id[asset_id] for asset_id in req.asset_ids]
+    links = confirm_finding_assets(
+        db, finding, ordered_assets, auth.user_id, req.evidence,
+    )
+    append_to_audit_log_db(
+        db,
+        AuditEntry(
+            user=auth.user_id,
+            action="FINDING_ASSETS_CONFIRMED",
+            module="SPECTRUM",
+            detail=f"Confirmed {finding.id} on {len(ordered_assets)} tenant asset(s)",
+            metadata={
+                "finding_id": finding.id,
+                "asset_ids": req.asset_ids,
+                "evidence_recorded": bool(req.evidence),
+            },
+        ),
+        commit=False,
+    )
+    db.commit()
+    return {
+        "status": "confirmed",
+        "finding_id": finding.id,
+        "confirmed_asset_ids": [row.asset_id for row in links],
+        "confirmed_exposure_count": len(exposure_rows_for_finding(db, auth.tenant_id, finding.id)),
+    }
 
 
 @router.patch("/findings/{finding_id}")
@@ -80,7 +163,11 @@ def update_finding_workflow(
 
     changes: dict[str, object] = {}
     if "asset_id" in supplied:
-        asset = None
+        if req.asset_id and is_catalog_finding(finding):
+            raise HTTPException(
+                status_code=422,
+                detail="Use the evidence-backed asset confirmation endpoint for catalogue vulnerabilities",
+            )
         if req.asset_id:
             asset = db.query(Asset).filter(
                 Asset.id == req.asset_id,
@@ -89,17 +176,14 @@ def update_finding_workflow(
             ).first()
             if not asset:
                 raise HTTPException(status_code=422, detail="Asset is not an active asset in this tenant")
-        finding.asset_id = req.asset_id
-        finding.asset_data = ({
-            "asset_id": asset.id,
-            "name": asset.name,
-            "hostname": asset.hostname,
-            "ip_address": asset.ip_address,
-            "criticality": asset.criticality,
-            "owner": asset.owner,
-            "environment": asset.environment,
-            "source": "tenant_asset_inventory",
-        } if asset else None)
+            confirm_finding_assets(db, finding, [asset], auth.user_id)
+        else:
+            db.query(AssetExposure).filter(
+                AssetExposure.tenant_id == auth.tenant_id,
+                AssetExposure.finding_id == finding.id,
+            ).delete(synchronize_session=False)
+            finding.asset_id = None
+            finding.asset_data = None
         changes["asset_id"] = req.asset_id
     if "sla_days" in supplied:
         finding.sla = req.sla_days

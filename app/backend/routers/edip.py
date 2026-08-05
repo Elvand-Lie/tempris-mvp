@@ -14,6 +14,7 @@ from models import Asset, Finding
 from routers.audit import AuditEntry, append_to_audit_log_db
 from routers.auth import get_auth_context, require_role
 from services.database import get_db
+from services.exposure_links import active_asset_map, confirmed_asset_ids_by_finding
 from services.tes_engine import calculate_sss_tes, priority_from_tes, public_decision_for_finding, public_severity
 from services.cvss_remap import v2_to_v31_remap
 from services.scout_connectors import aev_verdict_finding, entra_authentication_method_findings
@@ -435,11 +436,29 @@ def list_sss(
     db: Session = Depends(get_db),
     user=Depends(require_role("Superadmin", "Admin", "Analyst", "Viewer", "Researcher")),
 ):
+    tenant_id = _tenant_id(user)
     rows = db.query(Finding).filter(
         Finding.source == "sss",
-        Finding.tenant_id == _tenant_id(user),
+        Finding.tenant_id == tenant_id,
     ).order_by(Finding.created_at.desc()).limit(300).all()
-    return {"data": [_public(finding) for finding in rows]}
+    assets = active_asset_map(db, tenant_id)
+    links = confirmed_asset_ids_by_finding(db, tenant_id, assets)
+    data = []
+    for finding in rows:
+        item = _public(finding)
+        asset_ids = sorted(links.get(finding.id, set()))
+        item["asset_ids"] = asset_ids
+        item["assets"] = [
+            {
+                "id": assets[asset_id].id,
+                "name": assets[asset_id].name,
+                "hostname": assets[asset_id].hostname,
+                "environment": assets[asset_id].environment,
+            }
+            for asset_id in asset_ids
+        ]
+        data.append(item)
+    return {"data": data}
 
 
 @router.get("/intake/sss/events")
