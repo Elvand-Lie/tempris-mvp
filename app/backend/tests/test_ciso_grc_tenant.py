@@ -569,6 +569,111 @@ def test_workflow_connections_require_explicit_tenant_scoped_records():
     db.close()
 
 
+
+def test_exposure_assignments_are_searchable_reversible_and_audited():
+    seed_executive_data()
+    db = TestingSessionLocal()
+    db.add(Asset(
+        id='ASSET-ALPHA-2',
+        tenant_id='tenant-alpha',
+        name='Alpha Worker',
+        hostname='worker.alpha.test',
+        asset_type='server',
+        criticality='high',
+        owner='Platform',
+        environment='production',
+        status='active',
+    ))
+    db.commit()
+    db.close()
+
+    client = TestClient(app)
+    admin = headers_for('alpha-admin@example.test')
+    analyst = headers_for('alpha-analyst@example.test')
+
+    found = client.get(
+        '/api/workflow/exposures',
+        headers=admin,
+        params={'q': 'F-ALPHA', 'assignment': 'confirmed'},
+    )
+    assert found.status_code == 200
+    assert found.json()['total'] == 1
+    assert found.json()['data'][0]['confirmed_asset_ids'] == ['ASSET-ALPHA']
+
+    expanded = client.put(
+        '/api/workflow/findings/F-ALPHA/assets',
+        headers=analyst,
+        json={'asset_ids': ['ASSET-ALPHA', 'ASSET-ALPHA-2']},
+    )
+    assert expanded.status_code == 200
+    assert expanded.json()['added_asset_ids'] == ['ASSET-ALPHA-2']
+    assert expanded.json()['removed_asset_ids'] == []
+
+    reassigned = client.put(
+        '/api/workflow/findings/F-ALPHA/assets',
+        headers=analyst,
+        json={
+            'asset_ids': ['ASSET-ALPHA-2'],
+            'evidence': 'Asset owner corrected the affected system assignment',
+        },
+    )
+    assert reassigned.status_code == 200
+    assert reassigned.json()['confirmed_asset_ids'] == ['ASSET-ALPHA-2']
+    assert reassigned.json()['removed_asset_ids'] == ['ASSET-ALPHA']
+
+    searched = client.get(
+        '/api/workflow/exposures',
+        headers=admin,
+        params={'q': 'Alpha finding', 'assignment': 'confirmed'},
+    ).json()
+    assert searched['total'] == 1
+    assert searched['data'][0]['confirmed_assets'][0]['name'] == 'Alpha Worker'
+
+    cleared = client.put(
+        '/api/workflow/findings/F-ALPHA/assets',
+        headers=analyst,
+        json={'asset_ids': [], 'evidence': 'False positive asset mapping removed'},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()['confirmed_asset_ids'] == []
+    assert cleared.json()['removed_asset_ids'] == ['ASSET-ALPHA-2']
+
+    unassigned = client.get(
+        '/api/workflow/exposures',
+        headers=admin,
+        params={'q': 'F-ALPHA', 'assignment': 'unassigned'},
+    ).json()
+    assert unassigned['total'] == 1
+    assert unassigned['data'][0]['confirmed_asset_ids'] == []
+
+    activity = client.get('/api/workflow/exposure-activity?limit=5', headers=admin)
+    assert activity.status_code == 200
+    assert len(activity.json()['data']) == 3
+    assert activity.json()['data'][0]['change'] == 'Cleared'
+    assert activity.json()['data'][0]['finding_id'] == 'F-ALPHA'
+
+    cross_tenant = client.put(
+        '/api/workflow/findings/F-ALPHA/assets',
+        headers=headers_for('beta-admin@example.test'),
+        json={'asset_ids': ['ASSET-BETA']},
+    )
+    assert cross_tenant.status_code == 404
+
+    db = TestingSessionLocal()
+    finding = db.query(Finding).filter(Finding.id == 'F-ALPHA').one()
+    assert finding.asset_id is None
+    exposures = db.query(AssetExposure).filter(
+        AssetExposure.finding_id == 'F-ALPHA'
+    ).all()
+    assert {row.status for row in exposures} == {'removed'}
+    events = db.query(AuditLog).filter(
+        AuditLog.action == 'FINDING_ASSET_ASSIGNMENT_UPDATED'
+    ).order_by(AuditLog.id.asc()).all()
+    assert len(events) == 3
+    assert events[-1].metadata_['after_asset_ids'] == []
+    assert events[-1].metadata_['removed_asset_ids'] == ['ASSET-ALPHA-2']
+    db.close()
+
 def test_catalogue_record_becomes_actionable_only_after_asset_identity_match():
     seed_executive_data()
     db = TestingSessionLocal()

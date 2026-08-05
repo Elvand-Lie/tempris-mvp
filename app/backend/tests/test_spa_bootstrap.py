@@ -89,11 +89,11 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     stylesheet = client.get("/extensions/tempris-modules.css")
     logo = client.get("/brand/tempris-logo-light.png")
 
-    assert 'src="/assets/index-DUrFdX-d.js?v=20260805b"' in index.text
-    assert 'src="/extensions/tempris-bootstrap.js?v=20260805b"' in index.text
-    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260805b"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260805b"')
-    assert 'src="/extensions/tempris-modules.js?v=20260805b"' in index.text
-    assert 'href="/extensions/tempris-modules.css?v=20260805b"' in index.text
+    assert 'src="/assets/index-DUrFdX-d.js?v=20260805c"' in index.text
+    assert 'src="/extensions/tempris-bootstrap.js?v=20260805c"' in index.text
+    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260805c"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260805c"')
+    assert 'src="/extensions/tempris-modules.js?v=20260805c"' in index.text
+    assert 'href="/extensions/tempris-modules.css?v=20260805c"' in index.text
     assert script.status_code == 200
     assert script.headers["cache-control"] == "no-store, max-age=0"
     assert bootstrap.headers["cache-control"] == "no-store, max-age=0"
@@ -113,6 +113,12 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     assert "Client Report Service" in script.text
     assert "'/api/reports/poc/generate'" in script.text
     assert "client_consent_for_partner" in script.text
+    assert "Customer Exposure Assignments" in script.text
+    assert "Suggestions are highlighted but never selected automatically" in script.text
+    assert "data-recent-toggle" in script.text
+    assert "method: 'PUT'" in script.text
+    assert script.text.index("[data-asset-picker-options]').addEventListener('change'") < script.text.index("[data-asset-picker-confirm]').addEventListener('click'")
+    assert "Select at least one affected customer asset" not in script.text
     assert "data-report-format" in script.text
     assert "window.prompt" not in script.text
     assert "Backend package-entitlement enforcement is not implemented" not in script.text

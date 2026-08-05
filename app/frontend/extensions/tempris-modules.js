@@ -694,7 +694,7 @@
     return days < 0 ? 'overdue' : days <= 7 ? 'due_soon' : 'scheduled';
   };
 
-  function renderSssIntake(host, findings, config, assets = [], overview = {}) {
+  function renderSssIntake(host, findings, config, assets = [], overview = {}, exposureRecords = {}, exposureActivity = {}) {
     host.dataset.temprisExtensionRoute = '/sss-intake';
     const canSubmit = Boolean(config?.can_submit_sss);
     const canManage = Boolean(config?.can_manage_sss);
@@ -788,29 +788,36 @@
       ?? ((overview.exposure?.unlinked_count || 0) + (overview.exposure?.invalid_asset_link_count || 0));
     const catalogCount = overview.exposure?.catalog_intelligence_count || 0;
     const candidateCount = overview.exposure?.candidate_match_count || 0;
-    const unmapped = overview.exposure?.mapping_queue || [
-      ...(overview.exposure?.unlinked_findings || []),
-      ...(overview.exposure?.invalid_asset_links || []),
-    ];
-    const mappingById = new Map(unmapped.map((item) => [item.finding_id, item]));
-    const mappingRows = unmapped.map((item) => {
+    const mappingById = new Map((exposureRecords.data || []).map((item) => [item.finding_id, item]));
+    const exposureReason = (item) => {
       const candidates = item.candidate_assets || [];
-      const reason = item.mapping_reason === 'candidate_match'
-        ? `${candidates.length} evidence-based asset candidate${candidates.length === 1 ? '' : 's'}`
-        : item.mapping_reason === 'invalid_asset_link'
-          ? 'Previous asset is inactive; review required'
-          : 'Manual intake requires an analyst-confirmed asset';
-      const candidateNames = candidates.length
-        ? `<div class="tmx-candidate-summary">Suggested: ${candidates.map((candidate) => `${escapeHtml(candidate.name)} (${Math.round(candidate.confidence * 100)}%)`).join(', ')}</div>`
-        : '';
-      return `<div class="tmx-list-row tmx-mapping-row" data-mapping-row="${escapeHtml(item.finding_id)}"><div><div class="tmx-list-title">${escapeHtml(item.title)}</div><div class="tmx-list-detail">${escapeHtml(item.cve || item.source)} - ${escapeHtml(item.priority || 'No priority')} - ${escapeHtml(reason)}</div>${candidateNames}</div><div class="tmx-mapping-controls"><button type="button" class="tmx-button" data-map-finding="${escapeHtml(item.finding_id)}" ${assets.length ? '' : 'disabled'}>Review assets</button></div></div>`;
-    }).join('');
+      if (item.mapping_reason === 'confirmed') return `Confirmed on ${item.confirmed_asset_ids?.length || 0} asset${item.confirmed_asset_ids?.length === 1 ? '' : 's'}`;
+      if (item.mapping_reason === 'candidate_match') return `${candidates.length} suggested asset match${candidates.length === 1 ? '' : 'es'} - analyst confirmation required`;
+      if (item.mapping_reason === 'invalid_asset_link') return 'Previous asset is inactive - review required';
+      if (item.mapping_reason === 'catalogue_reference') return 'Catalogue reference - no customer exposure confirmed';
+      return 'Manual intake - no customer asset confirmed';
+    };
+    const exposureRowsHtml = (records) => records.length ? records.map((item) => {
+      const candidates = item.candidate_assets || [];
+      const confirmedNames = (item.confirmed_assets || []).map((asset) => asset.name);
+      const context = confirmedNames.length
+        ? `<div class="tmx-candidate-summary">Assigned: ${escapeHtml(confirmedNames.join(', '))}</div>`
+        : candidates.length
+          ? `<div class="tmx-candidate-summary">Suggested only: ${candidates.map((candidate) => `${escapeHtml(candidate.name)} (${Math.round(candidate.confidence * 100)}%)`).join(', ')}</div>`
+          : '';
+      return `<div class="tmx-list-row tmx-mapping-row" data-mapping-row="${escapeHtml(item.finding_id)}"><div><div class="tmx-list-title">${escapeHtml(item.title)}</div><div class="tmx-list-detail">${escapeHtml(item.cve || item.source)} - ${escapeHtml(item.priority || 'No priority')} - ${escapeHtml(exposureReason(item))}</div>${context}</div><div class="tmx-mapping-controls"><button type="button" class="tmx-button" data-map-finding="${escapeHtml(item.finding_id)}" ${assets.length ? '' : 'disabled'}>${item.confirmed_asset_ids?.length ? 'Manage assets' : 'Assign assets'}</button></div></div>`;
+    }).join('') : '<div class="tmx-empty">No vulnerabilities match this search and assignment filter.</div>';
+    const recentRows = (exposureActivity.data || []).length
+      ? exposureActivity.data.map((item) => `<div class="tmx-recent-change"><div><strong>${escapeHtml(item.change)} - ${escapeHtml(item.cve || item.finding_id)}</strong><span>${escapeHtml(item.title)} - ${escapeHtml((item.asset_names || []).join(', ') || 'No assets assigned')} - ${escapeHtml(item.recorded_by || 'Unknown user')}</span></div><button type="button" class="tmx-button tmx-button-secondary" data-map-finding="${escapeHtml(item.finding_id)}">Manage assets</button></div>`).join('')
+      : '<div class="tmx-empty">No asset-assignment changes have been recorded yet.</div>';
     const mappingQueue = canManage ? `<section class="tmx-panel">
-      <div class="tmx-panel-header"><div><h2>Customer Exposure Review</h2><p>Only analyst-confirmed asset occurrences feed TES and CISO. Global CISA/NVD records stay reference intelligence until recorded asset evidence produces a candidate match.</p></div><span class="tmx-status ${mappingTotal ? 'tmx-status-high' : 'tmx-status-available'}">${escapeHtml(mappingTotal)} to review</span></div>
+      <div class="tmx-panel-header"><div><h2>Customer Exposure Assignments</h2><p>Search any tenant CVE or finding, then add, remove, replace, or clear its customer assets. Suggestions are highlighted but never selected automatically.</p></div><div class="tmx-header-actions"><button type="button" class="tmx-button tmx-button-secondary" data-recent-toggle aria-expanded="false">Recent changes</button><span class="tmx-status ${mappingTotal ? 'tmx-status-high' : 'tmx-status-available'}">${escapeHtml(mappingTotal)} to review</span></div></div>
       <div class="tmx-exposure-summary"><div><strong>${escapeHtml(candidateCount)}</strong><span>candidate matches</span></div><div><strong>${escapeHtml(catalogCount)}</strong><span>catalogue-only records</span></div><div><strong>${escapeHtml(overview.exposure?.confirmed_exposure_count || 0)}</strong><span>confirmed occurrences</span></div></div>
-      <div class="tmx-panel-body">${mappingRows ? `<div class="tmx-list">${mappingRows}</div>` : '<div class="tmx-empty">No records currently require asset mapping. Catalogue intelligence remains available in SCOUT.</div>'}</div>
+      <div class="tmx-recent-changes" data-recent-changes hidden><div class="tmx-recent-heading"><strong>Five most recent assignment changes</strong><span>Full history remains in the tamper-evident Audit Log.</span></div>${recentRows}</div>
+      <div class="tmx-exposure-tools"><label><span>Search vulnerabilities</span><input class="tmx-search" type="search" data-exposure-search placeholder="CVE, finding ID, title, vendor, or product"></label><label><span>Assignment</span><select data-exposure-filter><option value="all">All records</option><option value="confirmed">Assigned</option><option value="unassigned">Unassigned</option></select></label><span data-exposure-count>${escapeHtml(exposureRecords.total || 0)} records</span></div>
+      <div class="tmx-panel-body"><div class="tmx-list" data-exposure-results>${exposureRowsHtml(exposureRecords.data || [])}</div></div>
     </section>` : '';
-    const assetPicker = canManage ? `<div class="tmx-asset-picker-backdrop" data-asset-picker hidden><section class="tmx-asset-picker" role="dialog" aria-modal="true" aria-labelledby="tmx-asset-picker-title"><header><div><h2 id="tmx-asset-picker-title">Confirm affected assets</h2><p data-asset-picker-context></p></div><button type="button" class="tmx-icon-button" data-asset-picker-close aria-label="Close asset picker">x</button></header><div class="tmx-asset-picker-body"><label class="tmx-field"><span>Search customer inventory</span><input type="search" data-asset-picker-search placeholder="Asset name, hostname, IP, owner, or environment"></label><div class="tmx-asset-options" data-asset-picker-options></div><label class="tmx-field"><span>Evidence (recommended)</span><textarea rows="3" maxlength="2000" data-asset-picker-evidence placeholder="Scanner observation, software inventory, SBOM, service banner, or analyst verification"></textarea></label><div class="tmx-form-message" data-asset-picker-message></div></div><footer><button type="button" class="tmx-button tmx-button-secondary" data-asset-picker-close>Cancel</button><button type="button" class="tmx-button" data-asset-picker-confirm>Confirm selected assets</button></footer></section></div>` : '';
+    const assetPicker = canManage ? `<div class="tmx-asset-picker-backdrop" data-asset-picker hidden><section class="tmx-asset-picker" role="dialog" aria-modal="true" aria-labelledby="tmx-asset-picker-title"><header><div><h2 id="tmx-asset-picker-title">Manage affected assets</h2><p data-asset-picker-context></p></div><button type="button" class="tmx-icon-button" data-asset-picker-close aria-label="Close asset picker">x</button></header><div class="tmx-asset-picker-body"><label class="tmx-field"><span>Search customer inventory</span><input type="search" data-asset-picker-search placeholder="Asset name, hostname, IP, owner, or environment"></label><div class="tmx-asset-options" data-asset-picker-options></div><label class="tmx-field"><span>Change evidence / note</span><textarea rows="3" maxlength="2000" data-asset-picker-evidence placeholder="Scanner observation, software inventory, SBOM, service banner, analyst verification, or reason for removal"></textarea></label><div class="tmx-form-message" data-asset-picker-message></div></div><footer><button type="button" class="tmx-button tmx-button-danger" data-asset-picker-clear>Clear all</button><span class="tmx-picker-spacer"></span><button type="button" class="tmx-button tmx-button-secondary" data-asset-picker-close>Cancel</button><button type="button" class="tmx-button" data-asset-picker-confirm>Save assignment</button></footer></section></div>` : '';
     host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="sss-intake">
       <header class="tmx-heading"><div><h1>Non-CVE Intake & Triage</h1><p>Record evidence, map it to a real customer asset, then manage the EDIP response decision. Unmapped records remain triage data.</p></div><button type="button" class="tmx-button tmx-button-secondary" data-sss-refresh>Refresh</button></header>
       <div class="tmx-coverage-flow"><div><strong>1</strong><span>Record evidence</span></div><b>→</b><div><strong>2</strong><span>Map customer asset</span></div><b>→</b><div><strong>3</strong><span>Prioritise in SPECTRUM</span></div><b>→</b><div><strong>4</strong><span>Summarise in CISO</span></div></div>
@@ -931,6 +938,7 @@
     }));
     const picker = host.querySelector('[data-asset-picker]');
     let activeMappingId = null;
+    let exposureSearchTimer = null;
     const pickerSelection = new Set();
     const closeAssetPicker = () => {
       if (!picker) return;
@@ -949,57 +957,104 @@
       }).filter((asset) => !normalizedQuery || assetLabel(asset).toLowerCase().includes(normalizedQuery));
       options.innerHTML = ordered.length ? ordered.map((asset) => {
         const candidate = candidateMap.get(asset.id);
-        return `<label class="tmx-asset-option ${candidate ? 'tmx-asset-option-candidate' : ''}"><input type="checkbox" value="${escapeHtml(asset.id)}" ${pickerSelection.has(asset.id) ? 'checked' : ''}><span><strong>${escapeHtml(asset.name)}</strong><small>${escapeHtml([asset.hostname || asset.ip_address, asset.environment, asset.owner].filter(Boolean).join(' - ') || asset.id)}</small>${candidate ? `<em>Suggested ${Math.round(candidate.confidence * 100)}% - ${escapeHtml(candidate.evidence)}</em>` : ''}</span></label>`;
+        return `<label class="tmx-asset-option ${candidate ? 'tmx-asset-option-candidate' : ''}"><input type="checkbox" value="${escapeHtml(asset.id)}" ${pickerSelection.has(asset.id) ? 'checked' : ''}><span><strong>${escapeHtml(asset.name)}</strong><small>${escapeHtml([asset.hostname || asset.ip_address, asset.environment, asset.owner].filter(Boolean).join(' - ') || asset.id)}</small>${candidate ? `<em>Suggested only ${Math.round(candidate.confidence * 100)}% - ${escapeHtml(candidate.evidence)}</em>` : ''}</span></label>`;
       }).join('') : '<div class="tmx-empty">No active asset matches this search.</div>';
     };
-    host.querySelectorAll('[data-map-finding]').forEach((button) => button.addEventListener('click', () => {
+    const fetchMappingItem = async (findingId) => {
+      if (mappingById.has(findingId)) return mappingById.get(findingId);
+      const result = await api(`/api/workflow/exposures?q=${encodeURIComponent(findingId)}&limit=10`);
+      const item = (result.data || []).find((row) => row.finding_id === findingId);
+      if (item) mappingById.set(item.finding_id, item);
+      return item;
+    };
+    const openAssetPicker = async (findingId) => {
       if (!picker) return;
-      const item = mappingById.get(button.dataset.mapFinding);
+      const item = await fetchMappingItem(findingId);
       if (!item) return;
       activeMappingId = item.finding_id;
       picker.hidden = false;
       pickerSelection.clear();
+      (item.confirmed_asset_ids || []).forEach((assetId) => pickerSelection.add(assetId));
       document.body.classList.add('tmx-modal-open');
       picker.querySelector('[data-asset-picker-context]').textContent = `${item.cve || item.source}: ${item.title}`;
       picker.querySelector('[data-asset-picker-search]').value = '';
       picker.querySelector('[data-asset-picker-evidence]').value = '';
-      picker.querySelector('[data-asset-picker-message]').textContent = item.mapping_reason === 'candidate_match'
-        ? 'Suggestions are not proof. Select only assets supported by recorded evidence.'
-        : 'One vulnerability can be confirmed on several assets in a single review.';
+      picker.querySelector('[data-asset-picker-message]').textContent = item.confirmed_asset_ids?.length
+        ? 'Checked assets are currently assigned. Uncheck, add, replace, or clear them, then save.'
+        : 'Suggestions are not proof and are not preselected. Check only assets supported by evidence.';
       renderAssetPickerOptions(item);
       picker.querySelector('[data-asset-picker-search]').focus();
-    }));
+    };
+    const refreshExposureResults = async () => {
+      const search = host.querySelector('[data-exposure-search]');
+      const filter = host.querySelector('[data-exposure-filter]');
+      const results = host.querySelector('[data-exposure-results]');
+      const count = host.querySelector('[data-exposure-count]');
+      if (!search || !filter || !results) return;
+      results.innerHTML = '<div class="tmx-empty">Searching tenant findings...</div>';
+      try {
+        const payload = await api(`/api/workflow/exposures?q=${encodeURIComponent(search.value.trim())}&assignment=${encodeURIComponent(filter.value)}&limit=50`);
+        mappingById.clear();
+        (payload.data || []).forEach((item) => mappingById.set(item.finding_id, item));
+        results.innerHTML = exposureRowsHtml(payload.data || []);
+        count.textContent = `${payload.total || 0} records`;
+      } catch (error) {
+        results.innerHTML = `<div class="tmx-error">${escapeHtml(error.message || 'Exposure search failed.')}</div>`;
+      }
+    };
+    const recentToggle = host.querySelector('[data-recent-toggle]');
+    if (recentToggle) recentToggle.addEventListener('click', () => {
+      const panel = host.querySelector('[data-recent-changes]');
+      panel.hidden = !panel.hidden;
+      recentToggle.setAttribute('aria-expanded', String(!panel.hidden));
+      recentToggle.textContent = panel.hidden ? 'Recent changes' : 'Hide recent changes';
+    });
+    const exposureSearch = host.querySelector('[data-exposure-search]');
+    if (exposureSearch) exposureSearch.addEventListener('input', () => {
+      window.clearTimeout(exposureSearchTimer);
+      exposureSearchTimer = window.setTimeout(refreshExposureResults, 250);
+    });
+    const exposureFilter = host.querySelector('[data-exposure-filter]');
+    if (exposureFilter) exposureFilter.addEventListener('change', refreshExposureResults);
+    host.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-map-finding]');
+      if (button) openAssetPicker(button.dataset.mapFinding).catch((error) => window.alert(error.message || 'Unable to load the finding.'));
+    });
     if (picker) {
       picker.querySelectorAll('[data-asset-picker-close]').forEach((button) => button.addEventListener('click', closeAssetPicker));
       picker.addEventListener('click', (event) => { if (event.target === picker) closeAssetPicker(); });
-      picker.querySelector('[data-asset-picker-search]').addEventListener('input', (event) => {
-        const item = mappingById.get(activeMappingId);
-        if (item) renderAssetPickerOptions(item, event.target.value);
-      });
-      picker.querySelector('[data-asset-picker-confirm]').addEventListener('click', async (event) => {
       picker.querySelector('[data-asset-picker-options]').addEventListener('change', (event) => {
         if (!event.target.matches('input[type="checkbox"]')) return;
         if (event.target.checked) pickerSelection.add(event.target.value);
         else pickerSelection.delete(event.target.value);
       });
+      picker.querySelector('[data-asset-picker-search]').addEventListener('input', (event) => {
+        const item = mappingById.get(activeMappingId);
+        if (item) renderAssetPickerOptions(item, event.target.value);
+      });
+      picker.querySelector('[data-asset-picker-clear]').addEventListener('click', () => {
+        pickerSelection.clear();
+        const item = mappingById.get(activeMappingId);
+        if (item) renderAssetPickerOptions(item, picker.querySelector('[data-asset-picker-search]').value);
+        picker.querySelector('[data-asset-picker-message]').textContent = 'No assets selected. Saving will clear this vulnerability assignment and record the change.';
+      });
+      picker.querySelector('[data-asset-picker-confirm]').addEventListener('click', async (event) => {
         const item = mappingById.get(activeMappingId);
         const message = picker.querySelector('[data-asset-picker-message]');
         const assetIds = [...pickerSelection];
         const evidence = picker.querySelector('[data-asset-picker-evidence]').value.trim();
-        if (!assetIds.length) {
-          message.textContent = 'Select at least one affected customer asset.';
-          return;
-        }
-        if (item?.mapping_reason === 'candidate_match' && evidence.length < 10) {
-          message.textContent = 'Record the scanner, inventory, SBOM, or analyst evidence before confirming a catalogue match.';
+        const currentIds = new Set(item?.confirmed_asset_ids || []);
+        const addsCatalogueExposure = item?.is_catalog && assetIds.some((assetId) => !currentIds.has(assetId));
+        if (addsCatalogueExposure && evidence.length < 10) {
+          message.textContent = 'Record the scanner, inventory, SBOM, or analyst evidence before adding a catalogue vulnerability to an asset.';
           return;
         }
         const button = event.currentTarget;
         button.disabled = true;
-        message.textContent = 'Confirming asset exposure...';
+        message.textContent = 'Saving asset assignment...';
         try {
           await api(`/api/workflow/findings/${encodeURIComponent(activeMappingId)}/assets`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ asset_ids: assetIds, evidence: evidence || null }),
           });
           closeAssetPicker();
@@ -1009,7 +1064,7 @@
           await renderSssRoute(host, true);
         } catch (error) {
           button.disabled = false;
-          message.textContent = error.message || 'Asset mapping failed.';
+          message.textContent = error.message || 'Asset assignment failed.';
         }
       });
     }
@@ -1053,11 +1108,13 @@
     try {
       const [findings, config] = await Promise.all([loadSssFindings(force), loadPackageConfig(force)]);
       const staff = config.role !== 'Researcher';
-      const [assets, overview] = await Promise.all([
+      const [assets, overview, exposureRecords, exposureActivity] = await Promise.all([
         staff ? loadTenantAssets(force).catch(() => []) : Promise.resolve([]),
         staff ? loadWorkflowOverview(force).catch(() => ({})) : Promise.resolve({}),
+        staff ? api('/api/workflow/exposures?limit=50').catch(() => ({ data: [], total: 0 })) : Promise.resolve({ data: [], total: 0 }),
+        staff ? api('/api/workflow/exposure-activity?limit=5').catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
       ]);
-      if (window.location.pathname === '/sss-intake') renderSssIntake(host, findings, config, assets, overview);
+      if (window.location.pathname === '/sss-intake') renderSssIntake(host, findings, config, assets, overview, exposureRecords, exposureActivity);
     } catch (error) {
       if (window.location.pathname !== '/sss-intake') return;
       host.innerHTML = `<div data-tempris-extension-root class="tmx-page"><div class="tmx-panel tmx-error">${escapeHtml(error.message || 'SSS intake is unavailable.')}<div style="margin-top:16px"><button type="button" class="tmx-button" data-sss-retry>Retry</button></div></div></div>`;

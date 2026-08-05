@@ -953,6 +953,86 @@ body.tmx-extension-active #root main {
 .tmx-candidate-summary { margin-top: 7px; color: #34d399; font-size: 11px; }
 .tmx-mapping-controls { min-width: auto; }
 
+
+.tmx-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tmx-exposure-tools {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(150px, 220px) auto;
+  align-items: end;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid #27272a;
+  background: #111113;
+}
+
+.tmx-exposure-tools label {
+  display: grid;
+  gap: 6px;
+  color: #a1a1aa;
+  font-size: 11px;
+}
+
+.tmx-exposure-tools input,
+.tmx-exposure-tools select {
+  min-height: 40px;
+  border: 1px solid #3f3f46;
+  border-radius: 7px;
+  background: #09090b;
+  color: #f4f4f5;
+  padding: 0 11px;
+}
+
+.tmx-exposure-tools [data-exposure-count] {
+  align-self: center;
+  color: #a1a1aa;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.tmx-recent-changes {
+  display: grid;
+  gap: 1px;
+  padding: 0 18px 14px;
+  border-bottom: 1px solid #27272a;
+  background: #18181b;
+}
+
+.tmx-recent-changes[hidden] { display: none !important; }
+
+.tmx-recent-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 0 10px;
+  color: #f4f4f5;
+  font-size: 12px;
+}
+
+.tmx-recent-heading span { color: #a1a1aa; font-size: 11px; }
+
+.tmx-recent-change {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #27272a;
+  border-radius: 7px;
+  background: #101012;
+}
+
+.tmx-recent-change > div { display: grid; gap: 4px; min-width: 0; }
+.tmx-recent-change strong { color: #e4e4e7; font-size: 12px; }
+.tmx-recent-change span { overflow-wrap: anywhere; color: #a1a1aa; font-size: 11px; }
+.tmx-button-danger { border-color: #7f1d1d; color: #fca5a5; background: rgb(127 29 29 / 18%); }
+.tmx-picker-spacer { flex: 1; }
 .tmx-modal-open { overflow: hidden; }
 
 .tmx-asset-picker-backdrop {
@@ -1039,4 +1119,7 @@ body.tmx-extension-active #root main {
   .tmx-coverage-flow b { transform: rotate(90deg); text-align: center; }
   .tmx-list-row { grid-template-columns: 1fr; }
   .tmx-mapping-controls { min-width: 0; }
+  .tmx-exposure-tools { grid-template-columns: 1fr; }
+  .tmx-recent-change { grid-template-columns: 1fr; }
+  .tmx-recent-heading { align-items: flex-start; flex-direction: column; }
 }

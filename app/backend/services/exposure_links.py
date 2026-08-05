@@ -111,6 +111,62 @@ def confirm_finding_assets(
     return confirmed
 
 
+def set_finding_assets(
+    db: Session,
+    finding: Finding,
+    assets: list[Asset],
+    recorded_by: str,
+    evidence: str | None = None,
+) -> tuple[list[str], list[str], list[str], list[str]]:
+    """Replace a finding's active asset set and retain removed rows for provenance."""
+    existing = {
+        row.asset_id: row
+        for row in exposure_rows_for_finding(db, finding.tenant_id, finding.id)
+    }
+    before = sorted(
+        asset_id for asset_id, row in existing.items()
+        if row.status in CONFIRMED_STATUSES
+    )
+    if finding.asset_id and finding.asset_id not in before:
+        before.append(finding.asset_id)
+    selected = {asset.id: asset for asset in assets}
+    after = sorted(selected)
+
+    for asset_id, row in existing.items():
+        if asset_id not in selected and row.status in CONFIRMED_STATUSES:
+            row.status = "removed"
+            row.recorded_by = recorded_by
+            if evidence:
+                row.evidence = evidence
+
+    confirm_finding_assets(db, finding, assets, recorded_by, evidence)
+    if assets:
+        primary = assets[0]
+        finding.asset_id = primary.id
+        finding.asset_data = {
+            "asset_id": primary.id,
+            "name": primary.name,
+            "hostname": primary.hostname,
+            "ip_address": primary.ip_address,
+            "criticality": primary.criticality,
+            "owner": primary.owner,
+            "environment": primary.environment,
+            "source": "tenant_asset_inventory",
+        }
+    else:
+        finding.asset_id = None
+        finding.asset_data = None
+
+    before_set = set(before)
+    after_set = set(after)
+    return (
+        before,
+        after,
+        sorted(after_set - before_set),
+        sorted(before_set - after_set),
+    )
+
+
 def is_catalog_finding(finding: Finding) -> bool:
     return bool(finding.cisa_kev) or (finding.source or "").strip().lower() in CATALOG_SOURCES
 

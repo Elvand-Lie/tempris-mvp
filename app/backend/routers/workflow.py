@@ -2,20 +2,24 @@
 
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
-from models import Asset, AssetExposure, Finding
+from models import Asset, AssetExposure, AuditLog, Finding
 from routers.audit import AuditEntry, append_to_audit_log_db
 from routers.auth import get_auth_context, require_role
 from services.database import get_db
 from services.entitlements import require_module
 from services.workflow_connections import build_workflow_overview
 from services.exposure_links import (
+    active_asset_map,
+    candidate_assets,
+    confirmed_asset_ids_by_finding,
     confirm_finding_assets,
-    exposure_rows_for_finding,
     is_catalog_finding,
+    set_finding_assets,
 )
 
 
@@ -63,6 +67,17 @@ class FindingAssetConfirmation(BaseModel):
         return normalized
 
 
+class FindingAssetReplacement(BaseModel):
+    asset_ids: list[str] = Field(default_factory=list, max_length=100)
+    evidence: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("asset_ids")
+    @classmethod
+    def normalize_asset_ids(cls, values: list[str]) -> list[str]:
+        return list(dict.fromkeys(value.strip() for value in values if value.strip()))
+
+
+
 @router.get("/overview")
 def workflow_overview(
     db: Session = Depends(get_db),
@@ -72,6 +87,176 @@ def workflow_overview(
     if not auth.tenant_id:
         raise HTTPException(status_code=400, detail="Missing tenant context")
     return build_workflow_overview(db, auth.tenant_id)
+
+def _asset_summary(asset: Asset) -> dict:
+    return {
+        "id": asset.id,
+        "name": asset.name,
+        "hostname": asset.hostname,
+        "ip_address": asset.ip_address,
+        "environment": asset.environment,
+        "owner": asset.owner,
+    }
+
+
+@router.get("/exposures")
+def list_exposure_records(
+    q: str = Query(default="", max_length=200),
+    assignment: str = Query(default="all", pattern="^(all|confirmed|unassigned)$"),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    user=Depends(require_role("Superadmin", "Admin", "Analyst", "Viewer", "Read-only")),
+):
+    """Search tenant findings and manage confirmed asset occurrences at PoC scale."""
+    auth = get_auth_context(user)
+    if not auth.tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant context")
+
+    query = db.query(Finding).filter(Finding.tenant_id == auth.tenant_id)
+    normalized = q.strip()
+    if normalized:
+        pattern = f"%{normalized}%"
+        query = query.filter(or_(
+            Finding.id.ilike(pattern),
+            Finding.cve.ilike(pattern),
+            Finding.cve_id.ilike(pattern),
+            Finding.title.ilike(pattern),
+            Finding.vendor.ilike(pattern),
+            Finding.product.ilike(pattern),
+        ))
+
+    assets = active_asset_map(db, auth.tenant_id)
+    links = confirmed_asset_ids_by_finding(db, auth.tenant_id, assets)
+    rows = query.all()
+    if assignment == "confirmed":
+        rows = [row for row in rows if links.get(row.id)]
+    elif assignment == "unassigned":
+        rows = [row for row in rows if not links.get(row.id)]
+
+    priority_order = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+    rows.sort(key=lambda row: (
+        priority_order.get((row.priority or "").upper(), 4),
+        (row.cve or row.cve_id or row.id).lower(),
+        row.id,
+    ))
+    total = len(rows)
+    page = rows[offset:offset + limit]
+    data = []
+    for finding in page:
+        asset_ids = sorted(links.get(finding.id, set()))
+        candidates = candidate_assets(finding, assets)
+        if asset_ids:
+            mapping_reason = "confirmed"
+        elif finding.asset_id and finding.asset_id not in assets:
+            mapping_reason = "invalid_asset_link"
+        elif candidates:
+            mapping_reason = "candidate_match"
+        elif is_catalog_finding(finding):
+            mapping_reason = "catalogue_reference"
+        else:
+            mapping_reason = "manual_intake"
+        data.append({
+            "finding_id": finding.id,
+            "cve": finding.cve or finding.cve_id,
+            "title": finding.title,
+            "vendor": finding.vendor,
+            "product": finding.product,
+            "source": finding.source or "unknown",
+            "priority": finding.priority,
+            "status": finding.status,
+            "mapping_reason": mapping_reason,
+            "is_catalog": is_catalog_finding(finding),
+            "confirmed_asset_ids": asset_ids,
+            "confirmed_assets": [_asset_summary(assets[asset_id]) for asset_id in asset_ids],
+            "candidate_assets": candidates,
+        })
+    return {"data": data, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/exposure-activity")
+def list_exposure_activity(
+    q: str = Query(default="", max_length=200),
+    limit: int = Query(default=5, ge=1, le=25),
+    db: Session = Depends(get_db),
+    user=Depends(require_role("Superadmin", "Admin", "Analyst", "Viewer", "Read-only")),
+):
+    """Return recent tamper-evident finding-to-asset assignment changes."""
+    auth = get_auth_context(user)
+    if not auth.tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant context")
+
+    rows = db.query(AuditLog).filter(
+        AuditLog.tenant_id == auth.tenant_id,
+        AuditLog.action.in_((
+            "FINDING_ASSETS_CONFIRMED",
+            "FINDING_ASSET_ASSIGNMENT_UPDATED",
+        )),
+    ).order_by(AuditLog.id.desc()).limit(250).all()
+    finding_ids = {
+        str((row.metadata_ or {}).get("finding_id"))
+        for row in rows if (row.metadata_ or {}).get("finding_id")
+    }
+    findings = {
+        row.id: row
+        for row in db.query(Finding).filter(
+            Finding.tenant_id == auth.tenant_id,
+            Finding.id.in_(finding_ids),
+        ).all()
+    } if finding_ids else {}
+    assets = active_asset_map(db, auth.tenant_id)
+    normalized = q.strip().lower()
+    data = []
+    for row in rows:
+        metadata = dict(row.metadata_ or {})
+        finding_id = str(metadata.get("finding_id") or "")
+        finding = findings.get(finding_id)
+        after_ids = list(metadata.get("after_asset_ids") or metadata.get("asset_ids") or [])
+        before_ids = list(metadata.get("before_asset_ids") or [])
+        added_ids = list(metadata.get("added_asset_ids") or after_ids)
+        removed_ids = list(metadata.get("removed_asset_ids") or [])
+        if added_ids and removed_ids:
+            change = "Reassigned"
+        elif removed_ids and not after_ids:
+            change = "Cleared"
+        elif removed_ids:
+            change = "Removed asset"
+        elif before_ids:
+            change = "Updated"
+        else:
+            change = "Assigned"
+        asset_names = [
+            assets[asset_id].name if asset_id in assets else asset_id
+            for asset_id in after_ids
+        ]
+        item = {
+            "audit_id": row.id,
+            "finding_id": finding_id,
+            "cve": (finding.cve or finding.cve_id) if finding else None,
+            "title": finding.title if finding else finding_id,
+            "change": change,
+            "asset_ids": after_ids,
+            "asset_names": asset_names,
+            "added_asset_ids": added_ids,
+            "removed_asset_ids": removed_ids,
+            "recorded_by": row.user_email,
+            "recorded_at": row.timestamp.isoformat() if row.timestamp else None,
+            "evidence_recorded": bool(metadata.get("evidence_recorded")),
+        }
+        searchable = " ".join([
+            finding_id,
+            item["cve"] or "",
+            item["title"] or "",
+            item["recorded_by"] or "",
+            *asset_names,
+        ]).lower()
+        if normalized and normalized not in searchable:
+            continue
+        data.append(item)
+        if len(data) >= limit:
+            break
+    return {"data": data}
+
 
 
 @router.post("/findings/{finding_id}/assets")
@@ -111,7 +296,7 @@ def confirm_finding_asset_links(
             detail=f"Assets are not active in this tenant: {', '.join(missing)}",
         )
     ordered_assets = [by_id[asset_id] for asset_id in req.asset_ids]
-    links = confirm_finding_assets(
+    confirm_finding_assets(
         db, finding, ordered_assets, auth.user_id, req.evidence,
     )
     append_to_audit_log_db(
@@ -130,12 +315,107 @@ def confirm_finding_asset_links(
         commit=False,
     )
     db.commit()
+    active_ids = sorted(
+        confirmed_asset_ids_by_finding(db, auth.tenant_id).get(finding.id, set())
+    )
     return {
         "status": "confirmed",
         "finding_id": finding.id,
-        "confirmed_asset_ids": [row.asset_id for row in links],
-        "confirmed_exposure_count": len(exposure_rows_for_finding(db, auth.tenant_id, finding.id)),
+        "confirmed_asset_ids": active_ids,
+        "confirmed_exposure_count": len(active_ids),
     }
+
+@router.put("/findings/{finding_id}/assets")
+def replace_finding_asset_links(
+    finding_id: str,
+    req: FindingAssetReplacement,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("Superadmin", "Admin", "Analyst")),
+):
+    """Replace, expand, or clear the full active asset assignment for a finding."""
+    auth = get_auth_context(user)
+    if not auth.tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant context")
+    finding = db.query(Finding).filter(
+        Finding.id == finding_id,
+        Finding.tenant_id == auth.tenant_id,
+    ).first()
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found")
+
+    rows = []
+    if req.asset_ids:
+        rows = db.query(Asset).filter(
+            Asset.tenant_id == auth.tenant_id,
+            Asset.id.in_(req.asset_ids),
+            Asset.status != "decommissioned",
+        ).all()
+    by_id = {asset.id: asset for asset in rows}
+    missing = [asset_id for asset_id in req.asset_ids if asset_id not in by_id]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Assets are not active in this tenant: {', '.join(missing)}",
+        )
+
+    assets_map = active_asset_map(db, auth.tenant_id)
+    current_ids = set(
+        confirmed_asset_ids_by_finding(db, auth.tenant_id, assets_map).get(finding.id, set())
+    )
+    requested_ids = set(req.asset_ids)
+    added_ids = requested_ids - current_ids
+    evidence = (req.evidence or "").strip()
+    if added_ids and is_catalog_finding(finding) and len(evidence) < 10:
+        raise HTTPException(
+            status_code=422,
+            detail="New catalogue vulnerability links require recorded scanner, inventory, SBOM, or analyst evidence",
+        )
+
+    ordered_assets = [by_id[asset_id] for asset_id in req.asset_ids]
+    before, after, added, removed = set_finding_assets(
+        db, finding, ordered_assets, auth.user_id, evidence or None,
+    )
+    if before == after:
+        db.rollback()
+        return {
+            "status": "unchanged",
+            "finding_id": finding.id,
+            "confirmed_asset_ids": after,
+            "added_asset_ids": [],
+            "removed_asset_ids": [],
+        }
+
+    append_to_audit_log_db(
+        db,
+        AuditEntry(
+            user=auth.user_id,
+            action="FINDING_ASSET_ASSIGNMENT_UPDATED",
+            module="SPECTRUM",
+            detail=(
+                f"Updated {finding.id} asset assignment: "
+                f"{len(added)} added, {len(removed)} removed, {len(after)} active"
+            ),
+            metadata={
+                "finding_id": finding.id,
+                "before_asset_ids": before,
+                "after_asset_ids": after,
+                "added_asset_ids": added,
+                "removed_asset_ids": removed,
+                "evidence_recorded": bool(evidence),
+            },
+        ),
+        commit=False,
+    )
+    db.commit()
+    return {
+        "status": "updated",
+        "finding_id": finding.id,
+        "confirmed_asset_ids": after,
+        "added_asset_ids": added,
+        "removed_asset_ids": removed,
+    }
+
 
 
 @router.patch("/findings/{finding_id}")
