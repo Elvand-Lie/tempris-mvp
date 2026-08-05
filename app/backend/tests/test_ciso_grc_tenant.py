@@ -120,7 +120,13 @@ def seed_executive_data():
             sla=1,
             asset_id='ASSET-ALPHA',
             created_at=now - timedelta(days=3),
-            raw_inputs={'agm': 1.2, 'drf': 0.4, 'tef': 0.7},
+            raw_inputs={
+                'cvss': 8.0,
+                'exploitability': 8.0,
+                'business_impact': 8.0,
+                'asset_criticality': 8.0,
+                'threat_actor_activity': 8.0,
+            },
         ),
         Finding(
             id='F-BETA',
@@ -241,11 +247,13 @@ def test_ciso_summary_is_tenant_scoped_and_redacted():
     assert data['findings'] == {
         'total': 1,
         'unresolved': 1,
-        'overdue': 1,
         'critical': 1,
         'high': 0,
     }
     assert data['risk_trend']['direction'] == 'improving'
+    assert data['deadline_summary']['counts']['remediation_sla']['overdue'] == 1
+    assert data['exposure_coverage']['asset_linked_count'] == 1
+    assert data['exposure_coverage']['aggregate_tes'] == 8.0
     assert [item['asset_id'] for item in data['highest_risk_assets']['items']] == ['ASSET-ALPHA']
     assert [item['report_id'] for item in data['recent_escalations']['items']] == ['INC-ALPHA']
     assert [item['report_id'] for item in data['report_links']['items']] == ['REPORT-ALPHA']
@@ -373,10 +381,31 @@ def test_audit_log_and_hash_chain_are_tenant_scoped():
     assert client.get('/api/audit/verify', headers=beta_headers).json()['intact'] is True
 
 
-def test_synthesis_uses_only_tenant_snapshots_and_no_fictional_health():
+def test_synthesis_uses_asset_linked_tes_tenant_snapshots_and_repository_health():
     now = datetime.now(timezone.utc)
     db = TestingSessionLocal()
     db.add_all([
+        Asset(
+            id='ASSET-SYNTH',
+            tenant_id='tenant-alpha',
+            name='Synthesis test asset',
+            criticality='medium',
+        ),
+        Finding(
+            id='F-SYNTH',
+            tenant_id='tenant-alpha',
+            title='Asset-linked synthesis finding',
+            priority='P0',
+            status='unmitigated',
+            asset_id='ASSET-SYNTH',
+            raw_inputs={
+                'cvss': 4.0,
+                'exploitability': 4.0,
+                'business_impact': 4.0,
+                'asset_criticality': 4.0,
+                'threat_actor_activity': 4.0,
+            },
+        ),
         TesSnapshot(
             tenant_id='tenant-alpha',
             aggregate_tes=2.0,
@@ -400,9 +429,13 @@ def test_synthesis_uses_only_tenant_snapshots_and_no_fictional_health():
     response = client.get('/api/synthesis/dashboard', headers=headers)
     assert response.status_code == 200
     data = response.json()
-    assert data['tes_trend'] == '-2.0'
+    assert data['aggregate_tes'] == 4.0
+    assert data['tes_trend'] == '+2.0'
+    assert data['exposure_coverage']['asset_linked_count'] == 1
+    assert data['exposure_coverage']['asset_link_coverage_pct'] == 100.0
     assert data['alerts'] == []
-    assert {item['status'] for item in data['module_health']} == {'unavailable'}
+    assert {item['status'] for item in data['module_health']} == {'operational'}
+    assert any(item['data_status'] == 'no_data' for item in data['module_health'])
     assert data['final_update']['surge_scope_status'] == 'unavailable'
 
     created = client.post('/api/synthesis/tes-snapshot', headers=headers)
@@ -413,6 +446,78 @@ def test_synthesis_uses_only_tenant_snapshots_and_no_fictional_health():
     db.close()
     assert alpha_count == 2
     assert beta_count == 1
+
+
+def test_workflow_connections_require_explicit_tenant_scoped_records():
+    seed_executive_data()
+    db = TestingSessionLocal()
+    db.add(Finding(
+        id='F-UNLINKED-KEV',
+        tenant_id='tenant-alpha',
+        title='Unlinked catalog finding',
+        priority='P0',
+        status='unmitigated',
+        cisa_kev=True,
+        raw_inputs={
+            'cvss': 9.0,
+            'exploitability': 9.0,
+            'business_impact': 9.0,
+            'asset_criticality': 9.0,
+            'threat_actor_activity': 9.0,
+        },
+    ))
+    db.commit()
+    db.close()
+
+    client = TestClient(app)
+    admin = headers_for('alpha-admin@example.test')
+    analyst = headers_for('alpha-analyst@example.test')
+
+    overview = client.get('/api/workflow/overview', headers=admin)
+    assert overview.status_code == 200
+    exposure = overview.json()['exposure']
+    assert exposure['open_finding_count'] == 2
+    assert exposure['asset_linked_count'] == 1
+    assert exposure['unlinked_count'] == 1
+    assert exposure['asset_linked_cisa_kev_count'] == 0
+
+    cross_tenant = client.patch(
+        '/api/workflow/findings/F-UNLINKED-KEV',
+        headers=analyst,
+        json={'asset_id': 'ASSET-BETA'},
+    )
+    assert cross_tenant.status_code == 422
+
+    recorded = client.patch(
+        '/api/workflow/findings/F-UNLINKED-KEV',
+        headers=analyst,
+        json={
+            'asset_id': 'ASSET-ALPHA',
+            'sla_days': 14,
+            'business_impact': 'Customer portal availability',
+            'effort': 'Engineering estimate recorded by the analyst',
+            'revalidate_by': '2026-09-01',
+            'remediation_verification': 'Retest evidence must be attached after remediation',
+        },
+    )
+    assert recorded.status_code == 200
+    assert recorded.json()['provenance'] == 'explicit_analyst_update'
+
+    updated = client.get('/api/workflow/overview', headers=admin).json()
+    assert updated['exposure']['asset_linked_count'] == 2
+    assert updated['exposure']['asset_linked_cisa_kev_count'] == 1
+    assert updated['workflow']['business_impact']['recorded'] == 1
+    assert updated['workflow']['effort']['recorded'] == 1
+    assert updated['workflow']['insurance_tier']['status'] == 'not_configured'
+
+    db = TestingSessionLocal()
+    finding = db.query(Finding).filter(Finding.id == 'F-UNLINKED-KEV').one()
+    assert finding.asset_id == 'ASSET-ALPHA'
+    assert finding.sla == 14
+    assert finding.sss_data['workflow_provenance']['asset_id']['source'] == 'explicit_analyst_update'
+    audit = db.query(AuditLog).filter(AuditLog.action == 'FINDING_WORKFLOW_UPDATED').one()
+    assert audit.tenant_id == 'tenant-alpha'
+    db.close()
 
 
 def test_sql_shaped_ids_and_tenant_mass_assignment_fail_closed():

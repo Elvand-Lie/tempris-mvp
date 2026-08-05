@@ -33,6 +33,8 @@
   let vdpSubmissions = null;
   let vdpRequest = null;
   let rootObserver = null;
+  let workflowOverview = null;
+  let workflowRequest = null;
 
   function getExtensionHost() {
     let host = document.getElementById(EXTENSION_HOST_ID);
@@ -365,6 +367,18 @@
     return packageRequest;
   }
 
+  async function loadWorkflowOverview(force = false) {
+    if (workflowOverview && !force) return workflowOverview;
+    if (workflowRequest && !force) return workflowRequest;
+    workflowRequest = api('/api/workflow/overview')
+      .then((payload) => {
+        workflowOverview = payload;
+        return payload;
+      })
+      .finally(() => { workflowRequest = null; });
+    return workflowRequest;
+  }
+
   async function loadVdpSubmissions(force = false) {
     if (vdpSubmissions && !force) return vdpSubmissions;
     if (vdpRequest && !force) return vdpRequest;
@@ -442,6 +456,15 @@
     return `<div class="tmx-list">${items.map(renderItem).join('')}</div>`;
   }
 
+  function reportActions(report) {
+    if (report.report_type === 'poc' && report.artifacts) {
+      return ['html', 'json', 'csv'].map((format) => (
+        `<button type="button" class="tmx-report-button" data-report-path="${escapeHtml(report.artifacts[format])}" data-report-format="${format}">${format === 'html' ? 'Preview' : format.toUpperCase()}</button>`
+      )).join(' ');
+    }
+    return `<button type="button" class="tmx-report-button" data-report-path="${escapeHtml(report.api_path)}" data-report-format="json">Open JSON</button>`;
+  }
+
   function renderCiso(host, data) {
     const findings = data.findings || {};
     const posture = titleCase(data.overall_risk_posture);
@@ -462,7 +485,6 @@
         <div class="tmx-metric"><div class="tmx-metric-label">Critical</div><div class="tmx-metric-value tmx-tone-critical">${escapeHtml(findings.critical ?? 0)}</div></div>
         <div class="tmx-metric"><div class="tmx-metric-label">High</div><div class="tmx-metric-value tmx-tone-high">${escapeHtml(findings.high ?? 0)}</div></div>
         <div class="tmx-metric"><div class="tmx-metric-label">Unresolved</div><div class="tmx-metric-value tmx-tone-neutral">${escapeHtml(findings.unresolved ?? 0)}</div></div>
-        <div class="tmx-metric"><div class="tmx-metric-label">Overdue</div><div class="tmx-metric-value ${Number(findings.overdue) > 0 ? 'tmx-tone-high' : 'tmx-tone-success'}">${escapeHtml(findings.overdue ?? 0)}</div></div>
       </section>
       <div class="tmx-grid">
         <section class="tmx-panel">
@@ -492,27 +514,111 @@
           <div class="tmx-panel-body">${listRows(escalations, (item) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(item.report_id)}</div><div class="tmx-list-detail">${escapeHtml(formatDate(item.generated_at))}</div></div><span class="tmx-status ${statusClass(item.severity)}">${escapeHtml(item.severity)}</span></div>`, 'No recent critical or high escalations are available.')}</div>
         </section>
         <section class="tmx-panel tmx-panel-wide">
+          <div class="tmx-panel-header"><div><h2>Client Report Service</h2><p>Generate one approved CTEM/EDIP dataset as HTML, JSON, and CSV.</p></div><span class="tmx-status">On demand</span></div>
+          <form class="tmx-panel-body tmx-intake-form" data-poc-report-form>
+            <label class="tmx-field"><span>Client organisation</span><input name="organisation" required maxlength="255" autocomplete="organization"></label>
+            <label class="tmx-field"><span>Client contact</span><input name="contact" required maxlength="255" autocomplete="name"></label>
+            <label class="tmx-field"><span>Engagement ID</span><input name="engagement_id" required maxlength="50" placeholder="ENG-ND-001"></label>
+            <label class="tmx-field"><span>Environment</span><input name="environment" required maxlength="100" placeholder="Production"></label>
+            <label class="tmx-field"><span>Period start</span><input name="period_start" type="date" required></label>
+            <label class="tmx-field"><span>Period end</span><input name="period_end" type="date" required></label>
+            <label class="tmx-field"><span>Delivery recipients (comma-separated)</span><input name="recipients" maxlength="1000" placeholder="security@client.example"></label>
+            <label class="tmx-field"><span>Alliance partner (optional)</span><input name="alliance_partner" maxlength="255"></label>
+            <label class="tmx-check-label tmx-field-wide"><input name="partner_consent" type="checkbox"><span>Client consent to share with the named partner is recorded</span></label>
+            <label class="tmx-field"><span>Assessor (optional)</span><input name="assessor" maxlength="255"></label>
+            <label class="tmx-field"><span>Attested by (optional)</span><input name="attested_by" maxlength="255"></label>
+            <label class="tmx-field tmx-field-wide"><span>Attestation statement (optional)</span><textarea name="attestation" maxlength="2000" placeholder="Only include a statement that a named assessor or CSRO has approved."></textarea></label>
+            <label class="tmx-field tmx-field-wide"><span>In scope (one item per line)</span><textarea name="scope" maxlength="4000" required placeholder="Customer portal&#10;Production API"></textarea></label>
+            <label class="tmx-field tmx-field-wide"><span>Out of scope (one item per line)</span><textarea name="out_of_scope" maxlength="4000" required placeholder="Independent penetration testing&#10;Legal compliance opinion"></textarea></label>
+            <div class="tmx-form-actions"><button type="submit" class="tmx-button">Generate report package</button><span data-poc-report-status aria-live="polite"></span></div>
+          </form>
+        </section>
+        <section class="tmx-panel tmx-panel-wide">
           <div class="tmx-panel-header"><h2>Recent Reports</h2><span class="tmx-status">${escapeHtml(reports.length)}</span></div>
           <div class="tmx-table-wrap"><table class="tmx-table"><thead><tr><th>Report</th><th>Type</th><th>Created</th><th>Action</th></tr></thead><tbody>${reports.length
-            ? reports.map((report) => `<tr><td>${escapeHtml(report.report_id)}</td><td>${escapeHtml(titleCase(report.report_type))}</td><td>${escapeHtml(formatDate(report.created_at))}</td><td><button type="button" class="tmx-report-button" data-report-path="${escapeHtml(report.api_path)}">Open JSON</button></td></tr>`).join('')
+            ? reports.map((report) => `<tr><td>${escapeHtml(report.report_id)}</td><td>${escapeHtml(titleCase(report.report_type))}</td><td>${escapeHtml(formatDate(report.created_at))}</td><td>${reportActions(report)}</td></tr>`).join('')
             : '<tr><td colspan="4" class="tmx-empty">No tenant reports are available.</td></tr>'}</tbody></table></div>
         </section>
       </div>
     </div>`;
 
     host.querySelector('[data-ciso-refresh]').addEventListener('click', () => renderCisoRoute(host, true));
-    host.querySelectorAll('[data-report-path]').forEach((button) => button.addEventListener('click', () => openReport(button.dataset.reportPath)));
+    host.querySelectorAll('[data-report-path]').forEach((button) => button.addEventListener('click', () => (
+      openReport(button.dataset.reportPath, button.dataset.reportFormat || 'json')
+    )));
+    host.querySelector('[data-poc-report-form]').addEventListener('submit', (event) => generatePocReport(event, host));
   }
 
-  async function openReport(path) {
+  async function generatePocReport(event, host) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const submit = form.querySelector('button[type="submit"]');
+    const status = form.querySelector('[data-poc-report-status]');
+    const fields = new FormData(form);
+    const lineItems = (name) => String(fields.get(name) || '').split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    submit.disabled = true;
+    status.textContent = 'Generating tenant-scoped report package...';
+    try {
+      const result = await api('/api/reports/poc/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          configuration: {
+            title: 'Tempris CTEM & EDIP Client Report',
+            engagement_id: fields.get('engagement_id'),
+            client: {
+              organisation: fields.get('organisation'),
+              contact: fields.get('contact'),
+              environment: fields.get('environment'),
+            },
+            period: {
+              start: fields.get('period_start'),
+              end: fields.get('period_end'),
+            },
+            delivery: {
+              recipients: String(fields.get('recipients') || '').split(',').map((value) => value.trim()).filter(Boolean),
+              alliance_partner: fields.get('alliance_partner'),
+              client_consent_for_partner: fields.get('partner_consent') === 'on',
+            },
+            assessment: {
+              assessor: fields.get('assessor'),
+              attested_by: fields.get('attested_by'),
+              attestation: fields.get('attestation'),
+            },
+            coverage: {
+              scope: lineItems('scope'),
+              out_of_scope: lineItems('out_of_scope'),
+            },
+          },
+        }),
+      });
+      status.textContent = `Generated ${result.report_id}. Opening the client preview...`;
+      await openReport(result.manifest.artifacts.html, 'html');
+      await renderCisoRoute(host, true);
+    } catch (error) {
+      status.textContent = error.message || 'Report generation failed.';
+      submit.disabled = false;
+    }
+  }
+
+  async function openReport(path, format = 'json') {
     const token = localStorage.getItem(TOKEN_KEY);
+    const previewWindow = format === 'html' ? window.open('about:blank', '_blank') : null;
     const response = await fetch(path, { headers: { Authorization: `Bearer ${token}` } });
-    if (!response.ok) return;
+    if (!response.ok) {
+      previewWindow?.close();
+      return;
+    }
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
+    if (format === 'html' && previewWindow) {
+      previewWindow.location = url;
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      return;
+    }
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `${path.split('/').at(-2) || 'tempris-report'}.json`;
+    anchor.download = `${path.split('/').at(-3) || 'tempris-report'}.${format}`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -947,15 +1053,19 @@
       .find((node) => ['Module Status', 'Enabled Modules'].includes(node.textContent.trim()));
     if (!heading) return;
     const panel = heading.closest('.glass-panel');
-    const grid = heading.nextElementSibling;
+    const grid = panel?.querySelector('.tmx-module-grid') || heading.nextElementSibling;
     if (!panel || !grid) return;
+
+    if (!workflowOverview && !workflowRequest) {
+      loadWorkflowOverview().then(schedule).catch(() => { workflowOverview = { unavailable: true }; schedule(); });
+    }
 
     const visible = (packageConfig.effective_modules || []).filter((name) => {
       if (!MODULE_PATHS[name]) return false;
       if (name === 'CISO' && !['Superadmin', 'Admin'].includes(packageConfig.role)) return false;
       return true;
     });
-    const fingerprint = `${packageConfig.package_code}:${packageConfig.role}:${visible.join(',')}`;
+    const fingerprint = `${packageConfig.package_code}:${packageConfig.role}:${visible.join(',')}:${workflowOverview?.generated_at || 'loading'}`;
     if (panel.dataset.temprisWorkspacePanel === fingerprint) return;
     panel.dataset.temprisWorkspacePanel = fingerprint;
     heading.textContent = 'Enabled Modules';
@@ -969,6 +1079,23 @@
     summary.className = 'tmx-module-summary';
     summary.innerHTML = `<div><strong>${escapeHtml(packageConfig.package_code)} package</strong><span>${visible.length} accessible modules</span></div><p><strong>SPEAK</strong> is the always-on conversational assistant. <strong>SSS / EDIP</strong> is the server-authoritative decision engine.</p>`;
 
+    let connections = panel.querySelector('[data-tempris-connection-summary]');
+    if (!connections) {
+      connections = document.createElement('div');
+      connections.dataset.temprisConnectionSummary = 'true';
+      summary.insertAdjacentElement('afterend', connections);
+    }
+    connections.className = 'tmx-connection-summary';
+    const exposure = workflowOverview?.exposure;
+    const readiness = workflowOverview?.workflow;
+    connections.innerHTML = exposure
+      ? `<div><strong>Asset-linked exposure</strong><span>${escapeHtml(exposure.asset_linked_count)} / ${escapeHtml(exposure.open_finding_count)} open findings</span></div>
+        <div><strong>TES coverage</strong><span>${escapeHtml(exposure.scored_asset_linked_count)} scored | ${escapeHtml(exposure.aggregate_tes ?? 'Unavailable')}</span></div>
+        <div><strong>CISA exposure</strong><span>${escapeHtml(exposure.asset_linked_cisa_kev_count)} asset-linked KEV findings</span></div>
+        <div><strong>Workflow records</strong><span>${escapeHtml(readiness?.owners?.recorded ?? 0)} owners | ${escapeHtml(readiness?.edip?.decisions_with_rationale ?? 0)} explained EDIP decisions</span></div>`
+      : '<div><strong>Connections</strong><span>Loading recorded workflow coverage...</span></div>';
+
+    const healthMap = new Map((workflowOverview?.module_health || []).map((row) => [row.name, row]));
     grid.className = 'tmx-module-grid';
     grid.replaceChildren();
     visible.forEach((name) => {
@@ -981,6 +1108,11 @@
       const purpose = document.createElement('span');
       purpose.textContent = MODULE_PURPOSES[name] || 'Enabled tenant capability';
       item.append(title, purpose);
+      const health = healthMap.get(name);
+      const state = document.createElement('small');
+      state.className = `tmx-module-health tmx-module-health-${health?.status || 'unknown'}`;
+      state.textContent = health ? `${titleCase(health.status)} | ${titleCase(health.data_status)}` : 'Checking service';
+      item.append(state);
       item.addEventListener('click', (event) => {
         event.preventDefault();
         navigate(MODULE_PATHS[name]);
@@ -1147,6 +1279,8 @@
     packageRequest = null;
     vdpSubmissions = null;
     vdpRequest = null;
+    workflowOverview = null;
+    workflowRequest = null;
     schedule();
   });
   function observeReactRoot() {

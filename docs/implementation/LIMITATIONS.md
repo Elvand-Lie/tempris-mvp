@@ -25,9 +25,10 @@ This document records the accepted architectural, infrastructure, and tool limit
 ---
 
 ## 4. PDF Report Generation (REPORT-C08)
-- **Classification:** `COMPLETE_WITH_LIMITATION / PDF_DEPENDENCY_MISSING`
-- **Description:** Safe, native PDF layout generation engines (e.g., ReportLab, WeasyPrint) require complex C-libraries (such as Pango, cairo) that are missing on the local VPS/Windows host environments. 
-- **Local Fallback:** Generating reports in PDF format is blocked and throws a clean `PDF_GENERATION_BLOCKED` validation error. All compliance requirements are met via fully supported, versioned structured exports in JSON and CSV formats.
+- **Classification:** `COMPLETE_WITH_LIMITATION / BROWSER_PRINT_PDF`
+- **Description:** Tempris now generates a branded, customer-facing HTML report from the same canonical data used for JSON and CSV. The HTML is designed for A4 browser printing and saving as PDF, avoiding a second presentation implementation.
+- **Native API boundary:** The legacy request `report_type=pdf` remains blocked with `PDF_GENERATION_BLOCKED`; the backend does not run a native PDF renderer on the VPS.
+- **Operational method:** Admins preview the authenticated HTML artifact and use the browser's **Save as PDF** function. See `docs/reporting/POC_REPORT_SERVICE.md`.
 
 ---
 

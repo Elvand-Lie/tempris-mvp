@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from passlib.hash import bcrypt
 
 from index import app
-from middleware.rate_limit import _Bucket
+import middleware.rate_limit as rate_limit
 from models import AuditLog, Finding, SurgeResearcher, SurgeSubmission
 from routers import auth
 from services.database import Base, SessionLocal, engine
@@ -16,7 +16,8 @@ OUTSIDER_EMAIL = "customer.admin@example.test"
 
 @pytest.fixture(autouse=True)
 def vdp_state(monkeypatch):
-    monkeypatch.setattr(_Bucket, "consume", lambda self: True)
+    rate_limit._buckets.clear()
+    monkeypatch.setattr(rate_limit._Bucket, "consume", lambda self: True)
     Base.metadata.create_all(bind=engine)
     auth.USERS[STAFF_EMAIL] = {
         "password": bcrypt.hash(PASSWORD),
@@ -32,6 +33,8 @@ def vdp_state(monkeypatch):
     }
     db = SessionLocal()
     db.query(SurgeSubmission).delete()
+    auth._login_attempts.pop(STAFF_EMAIL, None)
+    auth._login_attempts.pop(OUTSIDER_EMAIL, None)
     db.query(SurgeResearcher).delete()
     db.query(Finding).filter(Finding.source == "surge").delete()
     db.query(AuditLog).filter(AuditLog.action == "VDP_SUBMISSION_RECEIVED").delete()
@@ -141,7 +144,7 @@ def test_vdp_is_canonical_and_security_txt_is_rfc_9116_scoped():
 
     policy = client.get("/vdp")
     assert policy.status_code == 200
-    assert "/extensions/tempris-modules.js?v=20260724d" in policy.text
+    assert "/extensions/tempris-modules.js?v=20260805a" in policy.text
 
     security_txt = client.get("/.well-known/security.txt")
     assert security_txt.status_code == 200

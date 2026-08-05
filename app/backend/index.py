@@ -21,9 +21,9 @@ logger = logging.getLogger("tempris")
 # Add the api directory to the Python path for Vercel Serverless
 sys.path.append(os.path.dirname(__file__))
 
-from routers import auth, spectrum, audit, synthesis, scout, scanner, strike, standard, assets, grc, edip, surge, blflaw, partner, reports, aev, ocq, threats, ciso, packages
+from routers import auth, spectrum, audit, synthesis, scout, scanner, strike, standard, assets, grc, edip, surge, blflaw, partner, reports, aev, ocq, threats, ciso, packages, workflow
 from routers.audit import append_to_audit_log, AuditEntry
-from routers.auth import get_current_user
+from routers.auth import get_auth_context, get_current_user
 from services.kev_loader import ensure_findings_seeded, get_finding_stats
 from services.database import get_db, init_db, SessionLocal
 from models import SpotlightReport, ChatSession, ChatMessage, TesSnapshot
@@ -91,6 +91,7 @@ app.include_router(ocq.router, prefix="/api/ocq", tags=["ocq"])
 app.include_router(threats.router, prefix="/api/threats", tags=["threats"])
 app.include_router(ciso.router, prefix="/api/ciso", tags=["ciso"])
 app.include_router(packages.router, prefix="/api/packages", tags=["packages"])
+app.include_router(workflow.router, prefix="/api/workflow", tags=["workflow"])
 
 # ─ Startup: Init DB, Seed data ──────────────────────────────────────────────────
 
@@ -174,7 +175,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         
         # Global Serializer Redaction Boundary (CORE-C03)
         content_type = response.headers.get("content-type", "")
-        if "application/json" in content_type:
+        canonical_artifact = response.headers.get("X-Tempris-Canonical-Artifact") == "1"
+        if "application/json" in content_type and not canonical_artifact:
             import json
             from services.redactor import redact_private_fields
             body = []
@@ -202,11 +204,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                         yield chunk
                 response.body_iterator = re_iterate()
 
+        if "X-Tempris-Canonical-Artifact" in response.headers:
+            del response.headers["X-Tempris-Canonical-Artifact"]
+
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'"
+        response.headers.setdefault("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'")
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
         
         # H-10: Strip server fingerprint headers to block reconnaissance
@@ -419,7 +424,10 @@ def speak_chat(
         logger.warning(f"FreeLLMAPI Error: {e}")
         
         # Data-aware fallback responses using structured context
-        tes_score = structured.get("tes_score", 0)
+        tes_score = structured.get("tes_score")
+        tes_display = (
+            f"{tes_score:.1f}" if isinstance(tes_score, (int, float)) else "not included (asset-matched scoring coverage is incomplete)"
+        )
         kev_total = structured.get("kev_total", 0)
         kev_critical = structured.get("kev_critical", 0)
         kev_ransomware = structured.get("kev_ransomware", 0)
@@ -456,17 +464,28 @@ def speak_chat(
                 fallback = "No MAS TRM incident draft has been generated yet. Use STANDARD -> MAS TRM 1-Hour Incident Notice to create the draft report from current TES, SCOUT, STRIKE, and vulnerability data."
         elif "compliance" in query_lower or "framework" in query_lower or "regulation" in query_lower or "mas" in query_lower:
             total_controls = structured.get("compliance_total_controls", 0)
+            assessed = structured.get("compliance_assessed_controls", 0)
             compliant = structured.get("compliance_compliant", 0)
             non_compliant = structured.get("compliance_non_compliant", 0)
             gaps_text = "\n".join([f"- WARNING: {g}" for g in compliance_gaps[:5]])
-            fallback = f"Across **8 regulatory frameworks**, you have **{compliant}/{total_controls} controls compliant** with **{non_compliant} non-compliant**.\n\nNon-compliant controls:\n{gaps_text}\n\nRemediation priority: Focus on MAS TRM 11.1.1 (patching) and IM8A AM-3 (patch management) which carry regulatory penalties."
+            if assessed:
+                fallback = (
+                    f"Tempris records **{assessed} control assessment(s)** out of {total_controls} reference controls: "
+                    f"**{compliant} compliant** and **{non_compliant} non-compliant**."
+                    f"\n\nRecorded non-compliant controls:\n{gaps_text or '- None recorded.'}"
+                )
+            else:
+                fallback = f"No tenant control assessments are recorded. Tempris has {total_controls} reference controls, but they are not evidence of compliance."
         elif "grc" in query_lower or "iso 42001" in query_lower or "ai governance" in query_lower:
-            grc = structured.get("grc_tes", {})
-            fallback = f"**ISO/IEC 42001:2023 AI Governance Status**:\n- Composite TES: **{grc.get('score', 'N/A')}** ({grc.get('band', 'N/A')})\n- AGM (AI Governance Modifier): {grc.get('agm', 'N/A')}\n- DRF (Data Readiness Factor): {grc.get('drf', 'N/A')}\n- TEF (Third-party Exposure Factor): {grc.get('tef', 'N/A')}\n\nNavigate to the GRC module for per-control sign-off status and SOP management."
+            grc = structured.get("grc_tes")
+            if grc:
+                fallback = f"**ISO/IEC 42001:2023 AI Governance Status**:\n- Composite TES: **{grc.get('score', 'Not recorded')}** ({grc.get('band', 'Not recorded')})\n- AGM (AI Governance Modifier): {grc.get('agm', 'Not recorded')}\n- DRF (Data Readiness Factor): {grc.get('drf', 'Not recorded')}\n- TEF (Third-party Exposure Factor): {grc.get('tef', 'Not recorded')}\n\nNavigate to the GRC module for per-control sign-off status and SOP management."
+            else:
+                fallback = "No tenant GRC state is recorded, so Tempris does not present a GRC composite TES or governance-factor status."
         elif "ransomware" in query_lower:
             top5 = structured.get("kev_top5", [])
             top_text = "\n".join([f"- **{f['cve']}**: {f['title']} (CVSS: {f.get('cvss',0)})" for f in top5[:3]])
-            fallback = f"Your environment has **{kev_ransomware} ransomware-linked vulnerabilities** out of {kev_total} total KEV findings. Top threats:\n\n{top_text}\n\nRecommendation: Use SPECTRUM's EDIP engine to triage these findings and assign mitigation ownership."
+            fallback = f"Your tenant has **{kev_ransomware} recorded asset-linked ransomware findings** out of {kev_total} asset-linked KEV findings. Recorded critical items:\n\n{top_text or '- None recorded.'}"
         elif "edip" in query_lower or "decision" in query_lower:
             edip = structured.get("edip_recent", [])
             if edip:
@@ -475,7 +494,8 @@ def speak_chat(
             else:
                 fallback = "No EDIP decisions have been recorded yet. Navigate to SPECTRUM to begin triaging findings through the Escalate/Defer/Investigate/Patch workflow."
         else:
-            fallback = f"I'm tracking **{kev_total:,} known exploited vulnerabilities** ({kev_critical} critical, {kev_ransomware} ransomware-linked). TES is **{tes_score:.1f}** (Critical). You have **{asset_count} managed assets**, **{len(compliance_gaps)} compliance gaps**, and STRIKE found **{strike_exploitable} exploitable techniques**. How can I help you assess your exposure?"
+            strike_summary = f"STRIKE records {strike_exploitable} exploitable technique(s)" if structured.get("strike_sim_id") else "no STRIKE simulation result is recorded"
+            fallback = f"I'm tracking **{kev_total:,} asset-linked KEV findings** ({kev_critical} critical, {kev_ransomware} ransomware-linked). Aggregate TES is **{tes_display}**. The tenant has **{asset_count} active assets**, **{len(compliance_gaps)} recorded compliance gaps**, and {strike_summary}. How can I help you assess your exposure?"
 
         from services.edip_engine import _build_context_binding_footer
         fallback += _build_context_binding_footer(
@@ -509,7 +529,11 @@ def generate_spotlight_report(
     user = Depends(get_current_user),
 ):
     """Generate AI board narrative with full platform data, RAG context, and persist to DB."""
-    user_email = user.get("sub", "Current User")
+    auth_ctx = get_auth_context(user)
+    tenant_id = auth_ctx.tenant_id
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant context")
+    user_email = auth_ctx.user_id
 
     from services.ai_context import build_service_ai_context, build_spotlight_prompt, sanitize_user_focus
     safe_focus = sanitize_user_focus(req.custom_focus)
@@ -520,13 +544,14 @@ def generate_spotlight_report(
         safe_focus or default_rag_query,
         n_results=8,
         extra_query=default_rag_query,
+        tenant_id=tenant_id,
     )
     context_text = ctx["full_text"]
     structured = ctx["structured"]
     rag_text = ctx["rag_text"]
     rag_sources = ctx["rag_sources"]
 
-    tes_score = structured.get("tes_score", 0)
+    tes_score = structured.get("tes_score")
     kev_total = structured.get("kev_total", 0)
     asset_count = structured.get("asset_count", 0)
 
@@ -569,45 +594,92 @@ def generate_spotlight_report(
         strike_blocked = structured.get("strike_blocked", 0)
         grc = structured.get("grc_tes", {})
         compliance_compliant = structured.get("compliance_compliant", 0)
-        compliance_total = structured.get("compliance_total_controls", 0)
         
-        top_cve = top5[0] if top5 else {"cve": "N/A", "title": "N/A", "vendor": "N/A", "cvss": 0.0}
+        if top5:
+            top_cve = top5[0]
+            top_cvss = top_cve.get("cvss")
+            cvss_text = f"{top_cvss:.1f}" if isinstance(top_cvss, (int, float)) else "Not recorded"
+            top_risk_text = (
+                f"The highest recorded asset-linked critical finding is "
+                f"**{top_cve.get('cve') or top_cve.get('title') or 'Not recorded'}** "
+                f"on asset **{top_cve.get('asset_id') or 'Not recorded'}** "
+                f"(vendor: {top_cve.get('vendor') or 'Not recorded'}, CVSS: {cvss_text})."
+            )
+        else:
+            top_risk_text = (
+                "No asset-linked critical CVE is recorded, so this report does not claim "
+                "a primary vulnerability driver."
+            )
+
+        if structured.get("strike_sim_id"):
+            strike_text = (
+                f"The latest recorded STRIKE simulation contains **{strike_exploitable} exploitable** "
+                f"and **{strike_blocked} blocked** technique result(s)."
+            )
+        else:
+            strike_text = "No STRIKE simulation result is recorded."
+
+        compliance_assessed = structured.get("compliance_assessed_controls", 0)
+        grc_text = (
+            f"ISO/IEC 42001:2023 AI Governance composite TES: **{grc.get('score')}** "
+            f"({grc.get('band')})."
+            if grc else
+            "No tenant GRC state is recorded, so a GRC composite TES is not included."
+        )
+
         
         # Build compliance gap text
         gaps_text = ""
         for g in compliance_gaps[:5]:
             gaps_text += f"\n- {g}"
 
+        compliance_text = (
+            f"Of **{compliance_assessed} recorded control assessments**, "
+            f"**{compliance_compliant}** are compliant. Recorded gaps:"
+            f"{gaps_text if gaps_text else ' None recorded.'}"
+        )
+
+        action_items = []
+        if kev_total:
+            action_items.append(f"Review the {kev_total} recorded asset-linked CISA KEV finding(s).")
+        if compliance_gaps:
+            action_items.append("Assign owners and treatment dates to the recorded non-compliant controls.")
+        if strike_exploitable:
+            action_items.append("Remediate the exploitable techniques recorded by the latest STRIKE simulation.")
+        actions_text = "\n".join(
+            f"{number}. {action}" for number, action in enumerate(action_items, 1)
+        ) or "No prioritized action is generated because no supported action-driving data is recorded."
+
         narrative = f"""## Security Posture Overview
 
-As of today, the organization's **Tempris Exposure Score (TES)** stands at **{tes_score:.1f}** ({'Critical' if tes_score >= 7 else 'High' if tes_score >= 5 else 'Medium' if tes_score >= 3 else 'Low'}). This score is computed across **{kev_total:,} known exploited vulnerabilities** tracked by the US Cybersecurity & Infrastructure Security Agency (CISA KEV catalog). Of these, **{kev_ransomware}** have confirmed ties to active ransomware campaigns, and **{kev_critical}** are classified as P0 (critical priority).
+Aggregate TES is **not included** because validated asset-matched scoring coverage is not recorded for every tenant finding.
 
-The organization manages **{asset_count} active assets** across its infrastructure, including critical network appliances, servers, and applications.
+Tempris records **{kev_total} asset-linked CISA KEV finding(s)** for this tenant; **{kev_ransomware}** are ransomware-linked and **{kev_critical}** are P0. The shared CISA catalog is reference intelligence and is not treated as proof of client exposure without an asset link.
+
+The tenant asset inventory records **{asset_count} active asset(s)**.
 
 ## Key Risk Highlights
 
-The primary driver of elevated risk is **{top_cve.get('cve', 'N/A')}** - {top_cve.get('title', 'N/A')}, affecting {top_cve.get('vendor', 'N/A')} with a CVSS score of **{top_cve.get('cvss', 0.0):.1f}**.
+{top_risk_text}
 
-STRIKE adversary simulations identified **{strike_exploitable} exploitable techniques** out of {strike_exploitable + strike_blocked} tested, indicating {'significant' if strike_exploitable > 2 else 'moderate' if strike_exploitable > 0 else 'minimal'} attack surface exposure.
+{strike_text}
 
 ## Regulatory Compliance
 
-Across 8 regulatory frameworks (MAS TRM, PDPA, ISO 27001, IM8A, NIST CSF, SOC 2, PCI DSS, CSA Cyber Trust), **{compliance_compliant}/{compliance_total} controls are compliant**. Notable gaps:{gaps_text if gaps_text else ' None identified.'}
+{compliance_text}
 
-ISO/IEC 42001:2023 AI Governance composite TES: **{grc.get('score', 'N/A')}** ({grc.get('band', 'N/A')}).
+{grc_text}
 
 ## Recommended Actions
 
-1. **Immediate**: Prioritize all CISA KEV vulnerabilities with confirmed ransomware ties using the EDIP decision engine in SPECTRUM.
-2. **Short-term**: Address non-compliant MAS TRM and IM8A controls to meet regulatory SLAs.
-3. **Medium-term**: Remediate exploitable techniques identified by STRIKE simulations.
-4. **Ongoing**: Complete ISO 42001 SOP sign-offs in the GRC module to improve the AI Governance Modifier (AGM)."""
+{actions_text}"""
         if req.custom_focus.strip():
             narrative += f"\n\n## Custom Focus\nThis report prioritized **{req.custom_focus.strip()}** using service-wide Tempris context and available RAG results."
         model = "offline"
 
     # Persist report to DB
     report = SpotlightReport(
+        tenant_id=tenant_id,
         report_type=req.report_type, narrative=narrative,
         tes_score=tes_score, metadata_={"model": model, "custom_focus": req.custom_focus.strip() or None, "rag_chunks": bool(rag_text), "rag_sources": rag_sources},
         generated_by=user_email
@@ -616,9 +688,12 @@ ISO/IEC 42001:2023 AI Governance composite TES: **{grc.get('score', 'N/A')}** ({
     db.commit()
     db.refresh(report)
 
+    tes_audit = (
+        str(tes_score) if isinstance(tes_score, (int, float)) else "not included"
+    )
     append_to_audit_log(AuditEntry(
         user=user_email, action="SPOTLIGHT_REPORT_GENERATED", module="SPOTLIGHT",
-        detail=f"AI {req.report_type} report generated. TES: {tes_score}, Findings: {kev_total}, Assets: {asset_count}" + (f" Focus: {req.custom_focus[:50]}" if req.custom_focus.strip() else "")
+        detail=f"AI {req.report_type} report generated. TES: {tes_audit}, Asset-linked KEV findings: {kev_total}, Assets: {asset_count}" + (f" Focus: {req.custom_focus[:50]}" if req.custom_focus.strip() else "")
     ))
 
     return {"ai_narrative": narrative, "metadata": {"model": model, "rag_sources": rag_sources}, "report_id": report.id}
@@ -630,14 +705,19 @@ def get_spotlight_history(
 ):
     """Return previously generated reports from DB.
     
-    IDOR fix: Superadmin/Admin see all reports; other roles only see their own.
+    Admin roles see tenant reports; other roles see only their own tenant reports.
     """
-    user_email = user.get("sub", "")
-    user_role = user.get("role", "")
+    auth_ctx = get_auth_context(user)
+    if not auth_ctx.tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant context")
+    user_email = auth_ctx.user_id
+    user_role = auth_ctx.role
     
-    query = db.query(SpotlightReport).order_by(SpotlightReport.generated_at.desc())
+    query = db.query(SpotlightReport).filter(
+        SpotlightReport.tenant_id == auth_ctx.tenant_id
+    ).order_by(SpotlightReport.generated_at.desc())
     
-    # Non-admin users can only see their own reports
+    # Non-admin users can only see their own reports inside their tenant.
     if user_role not in ("Superadmin", "Admin"):
         query = query.filter(SpotlightReport.generated_by == user_email)
     

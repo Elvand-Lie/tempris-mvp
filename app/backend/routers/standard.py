@@ -942,7 +942,7 @@ def generate_incident_report(
     # Get TES score
     from routers.synthesis import get_dashboard_data
     dashboard = get_dashboard_data(db, tenant_id=tenant_id)
-    tes_score = dashboard.get("aggregate_tes", 0)
+    tes_score = dashboard.get("aggregate_tes")
 
     # Build the structured report
     report_id = f"INC-{now.strftime('%Y%m%d%H%M%S%f')}"
@@ -965,8 +965,8 @@ def generate_incident_report(
         },
 
         "threat_landscape": {
-            "tempris_exposure_score": round(tes_score, 2),
-            "risk_band": "Critical" if tes_score >= 8.0 else "High" if tes_score >= 6.0 else "Medium" if tes_score >= 4.0 else "Low",
+            "tempris_exposure_score": round(tes_score, 2) if tes_score is not None else None,
+            "risk_band": ("Critical" if tes_score >= 8.0 else "High" if tes_score >= 6.0 else "Medium" if tes_score >= 4.0 else "Low") if tes_score is not None else "Unavailable",
             "critical_cves_tracked": p0_count,
             "ransomware_linked_cves": ransomware_count,
             "total_kev_findings": kev_stats["total_findings"],

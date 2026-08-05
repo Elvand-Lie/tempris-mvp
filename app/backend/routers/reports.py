@@ -1,11 +1,12 @@
+from datetime import date
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
+from fastapi.responses import Response
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 from services.database import get_db
 from models import GeneratedReport, Finding, ControlEvidence
 from routers.auth import get_current_user, require_role, get_auth_context
 from routers.audit import append_to_audit_log_db, AuditEntry
-from typing import Any
 
 from services.entitlements import require_module
 
@@ -29,6 +30,72 @@ class ReportGenerateReq(BaseModel):
     source_finding_ids: list[str] = Field(default_factory=list)
     source_evidence_ids: list[str] = Field(default_factory=list)
     framework_configuration: dict = Field(default_factory=dict)
+
+class PocClientReq(BaseModel):
+    organisation: str = Field(min_length=1, max_length=255)
+    contact: str = Field(min_length=1, max_length=255)
+    environment: str = Field(min_length=1, max_length=100)
+
+
+class PocPeriodReq(BaseModel):
+    start: date
+    end: date
+
+    @model_validator(mode='after')
+    def validate_period(self):
+        if self.end < self.start:
+            raise ValueError('Reporting period end must be on or after its start')
+        return self
+
+
+class PocDeliveryReq(BaseModel):
+    recipients: list[str] = Field(default_factory=list, max_length=50)
+    alliance_partner: str | None = Field(default=None, max_length=255)
+    client_consent_for_partner: bool = False
+
+    @model_validator(mode='after')
+    def validate_partner_consent(self):
+        if self.client_consent_for_partner and not (self.alliance_partner or '').strip():
+            raise ValueError('Alliance partner name is required when partner consent is recorded')
+        return self
+
+
+class PocAssessmentReq(BaseModel):
+    method: str | None = Field(default=None, max_length=1000)
+    assessor: str | None = Field(default=None, max_length=255)
+    attestation: str | None = Field(default=None, max_length=2000)
+    attested_by: str | None = Field(default=None, max_length=255)
+    limitations: str | None = Field(default=None, max_length=2000)
+
+
+class PocCoverageReq(BaseModel):
+    scope: list[str] = Field(min_length=1, max_length=100)
+    out_of_scope: list[str] = Field(min_length=1, max_length=100)
+    identities: list[str] = Field(default_factory=list, max_length=100)
+
+
+class PocConfigurationReq(BaseModel):
+    title: str = Field(default='Tempris CTEM & EDIP Client Report', max_length=255)
+    engagement_id: str = Field(
+        min_length=1, max_length=50, pattern=r'^[A-Za-z0-9._-]+$',
+    )
+    classification: str = Field(default='Client Confidential', max_length=100)
+    retention: str = Field(
+        default='Retain according to the client agreement', max_length=500,
+    )
+    client: PocClientReq
+    period: PocPeriodReq
+    delivery: PocDeliveryReq = Field(default_factory=PocDeliveryReq)
+    assessment: PocAssessmentReq = Field(default_factory=PocAssessmentReq)
+    coverage: PocCoverageReq
+    executive_narrative: str | None = Field(default=None, max_length=4000)
+    next_steps: list[str] = Field(default_factory=list, max_length=50)
+
+
+class PocReportGenerateReq(BaseModel):
+    approved_by: str | None = None
+    source_finding_ids: list[str] = Field(default_factory=list, max_length=500)
+    configuration: PocConfigurationReq
 
 
 def _verified_approval(approved_by: str | None, auth_ctx) -> str | None:
@@ -146,6 +213,31 @@ def generate_report(
     except Exception:
         raise HTTPException(status_code=500, detail='Report generation failed')
 
+@router.post("/poc/generate")
+def generate_poc_report(
+    req: PocReportGenerateReq,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("Superadmin", "Admin", "Analyst")),
+):
+    auth_ctx = get_auth_context(user)
+    if not auth_ctx.tenant_id:
+        raise HTTPException(status_code=400, detail='Missing tenant context')
+    approved_by = _verified_approval(req.approved_by, auth_ctx)
+    from services.reporting_engine import generate_poc_report_pipeline
+    try:
+        return generate_poc_report_pipeline(
+            db,
+            tenant_id=auth_ctx.tenant_id,
+            requested_by=auth_ctx.user_id,
+            approved_by=approved_by,
+            source_finding_ids=req.source_finding_ids,
+            configuration=req.configuration.model_dump(mode='json'),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        raise HTTPException(status_code=500, detail='Client report generation failed')
+
 @router.get("")
 def list_reports(
     db: Session = Depends(get_db),
@@ -158,8 +250,76 @@ def list_reports(
     query = db.query(GeneratedReport).filter(
         GeneratedReport.tenant_id == auth_ctx.tenant_id
     )
-        
-    return query.all()
+    reports = query.order_by(GeneratedReport.created_at.desc()).all()
+    return [
+        {
+            'id': report.id,
+            'engagement_id': report.engagement_id,
+            'report_type': report.report_type,
+            'generator_version': report.generator_version,
+            'requested_by': report.requested_by,
+            'approved_by': report.approved_by,
+            'source_finding_ids': report.source_finding_ids,
+            'source_evidence_ids': report.source_evidence_ids,
+            'content_hash': report.content_hash,
+            'created_at': report.created_at.isoformat() if report.created_at else None,
+            'artifacts': (
+                {
+                    fmt: f'/api/reports/{report.id}/artifact/{fmt}'
+                    for fmt in ('html', 'json', 'csv')
+                } if report.report_type == 'poc' else {}
+            ),
+        }
+        for report in reports
+    ]
+
+@router.get("/{report_id}/artifact/{artifact_format}")
+def get_poc_artifact(
+    report_id: str,
+    artifact_format: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    artifact_format = artifact_format.lower()
+    auth_ctx = get_auth_context(user)
+    report = db.query(GeneratedReport).filter(
+        GeneratedReport.id == report_id,
+        GeneratedReport.tenant_id == auth_ctx.tenant_id,
+        GeneratedReport.report_type == 'poc',
+    ).first()
+    if not report:
+        raise HTTPException(status_code=404, detail='Report artifact not found')
+    from services.reporting_engine import poc_artifact_path
+    try:
+        artifact_path = poc_artifact_path(report_id, artifact_format.lower())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not artifact_path.is_file():
+        raise HTTPException(status_code=404, detail='Report artifact not found')
+    media_types = {
+        'html': 'text/html; charset=utf-8',
+        'json': 'application/json',
+        'csv': 'text/csv; charset=utf-8',
+    }
+    disposition = 'inline' if artifact_format == 'html' else 'attachment'
+    headers = {
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Tempris-Canonical-Artifact': '1',
+        'Content-Disposition': (
+            f'{disposition}; filename="{report_id}.{artifact_format}"'
+        ),
+    }
+    if artifact_format == 'html':
+        headers['Content-Security-Policy'] = (
+            "default-src 'none'; style-src 'unsafe-inline'; "
+            "img-src data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+        )
+    return Response(
+        content=artifact_path.read_bytes(),
+        media_type=media_types[artifact_format],
+        headers=headers,
+    )
 
 @router.get("/{report_id}/raw")
 def get_raw_report(

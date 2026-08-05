@@ -1,7 +1,7 @@
 '''Tenant-scoped, read-only executive security summary.'''
 
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -20,6 +20,11 @@ from services.database import get_db
 
 
 from services.entitlements import require_module
+from services.workflow_connections import (
+    build_deadline_summary,
+    build_exposure_coverage,
+    build_workflow_readiness,
+)
 
 router = APIRouter(dependencies=[Depends(require_module("CISO"))])
 EXECUTIVE_ROLES = ('Superadmin', 'Admin')
@@ -69,11 +74,6 @@ def _as_utc(value: datetime | None) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
-def _is_overdue(finding: Finding, now: datetime) -> bool:
-    created_at = _as_utc(finding.created_at)
-    if not _is_open(finding) or not created_at or not finding.sla:
-        return False
-    return created_at + timedelta(days=finding.sla) < now
 
 
 def _risk_trend(snapshots: list[TesSnapshot]) -> dict:
@@ -130,6 +130,7 @@ def _highest_risk_assets(
             'asset_id': asset.id,
             'name': asset.name,
             'criticality': asset.criticality,
+            'owner': asset.owner,
             **summary,
         })
     rows.sort(key=lambda row: (
@@ -201,7 +202,6 @@ def get_ciso_summary(
     else:
         posture = 'no_data'
 
-    now = datetime.now(timezone.utc)
     snapshots = (
         db.query(TesSnapshot)
         .filter(TesSnapshot.tenant_id == tenant_id)
@@ -254,13 +254,15 @@ def get_ciso_summary(
         'findings': {
             'total': len(findings),
             'unresolved': len(open_findings),
-            'overdue': sum(_is_overdue(finding, now) for finding in open_findings),
             'critical': severities['critical'],
             'high': severities['high'],
         },
         'risk_trend': _risk_trend(snapshots),
         'highest_risk_assets': _highest_risk_assets(open_findings, assets),
         'compliance_gaps': _compliance_gaps(controls),
+        'exposure_coverage': build_exposure_coverage(db, tenant_id),
+        'deadline_summary': build_deadline_summary(db, tenant_id),
+        'workflow_readiness': build_workflow_readiness(db, tenant_id),
         'recent_escalations': {
             'status': 'available' if escalations else 'unavailable',
             'items': escalations,
@@ -277,6 +279,12 @@ def get_ciso_summary(
                     'report_type': report.report_type,
                     'created_at': report.created_at.isoformat() if report.created_at else None,
                     'api_path': f'/api/reports/{report.id}/raw',
+                    'artifacts': (
+                        {
+                            fmt: f'/api/reports/{report.id}/artifact/{fmt}'
+                            for fmt in ('html', 'json', 'csv')
+                        } if report.report_type == 'poc' else {}
+                    ),
                 }
                 for report in reports
             ],

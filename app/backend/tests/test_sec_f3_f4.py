@@ -512,7 +512,8 @@ def test_missing_tenant_id_fails_closed():
         "/api/standard/frameworks/mas_trm_2024/controls/MAS-TRM-5.1.1/evidence/101/download",
         headers=headers
     )
-    assert response.status_code == 404
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Missing tenant context"
 
 # ── 24. A tampered JWT cannot modify tenant or role
 def test_tampered_jwt_rejected():

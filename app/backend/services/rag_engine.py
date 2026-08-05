@@ -208,10 +208,10 @@ def sync_knowledge_base(db=None):
     
     Called on application startup to ensure the vector DB is populated with:
     1. Policy documents (ISO 42001, Bug Bounty, Air-Gapped Readiness)
-    2. CISA KEV vulnerability summaries (top critical CVEs)
+    2. Shared control and policy references (tenant findings are excluded)
     3. GRC control descriptions
     4. Compliance framework definitions
-    5. Recent audit log context
+    Tenant audit logs are deliberately excluded from the shared vector store.
     """
     collection = _get_collection()
     if collection is None:
@@ -250,8 +250,7 @@ def sync_knowledge_base(db=None):
 
     # ── 2. CISA KEV Critical CVE Summaries ────────────────────────────────
     try:
-        from services.kev_loader import get_all_findings
-        findings = get_all_findings()
+        findings = []  # Tenant findings cannot be embedded in the shared vector store.
         critical = [f for f in findings if f.get("priority") == "P0"]
 
         # Embed top 50 critical CVEs as individual documents
@@ -271,6 +270,7 @@ def sync_knowledge_base(db=None):
             )
             cve_texts.append(cve_text)
 
+        _delete_by_source("kev__critical_cves")
         if cve_texts:
             combined_cve = "\n\n---\n\n".join(cve_texts)
             _delete_by_source("kev__critical_cves")
@@ -290,7 +290,7 @@ def sync_knowledge_base(db=None):
             f"and contains vulnerabilities with confirmed active exploitation in the wild."
         )
         _delete_by_source("kev__summary")
-        total_embedded += embed_document("kev__summary", kev_summary, {"type": "reference"})
+        total_embedded += embed_document("kev__summary", kev_summary, {"type": "reference"}) if findings else 0
 
     except Exception as e:
         logger.warning(f"Failed to embed KEV data: {e}")
@@ -327,7 +327,7 @@ def sync_knowledge_base(db=None):
         logger.warning(f"Failed to embed compliance frameworks: {e}")
 
     # ── 5. Recent Audit Logs ──────────────────────────────────────────────
-    if db:
+    if False and db:  # Shared store cannot contain tenant audit logs.
         try:
             from models import AuditLog
             recent_logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(50).all()
@@ -340,6 +340,8 @@ def sync_knowledge_base(db=None):
                 total_embedded += embed_document("tacf__recent_logs", audit_text, {"type": "audit"})
         except Exception as e:
             logger.warning(f"Failed to embed audit logs: {e}")
+
+    _delete_by_source("tacf__recent_logs")
 
     logger.info(f"Knowledge sync complete. Total chunks embedded: {total_embedded}. "
                 f"Collection size: {collection.count()}")

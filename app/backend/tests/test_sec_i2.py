@@ -77,7 +77,9 @@ def test_tenant_isolation_in_context_building():
             cvss=9.8,
             priority="P0",
             status="unmitigated",
-            tenant_id="tenantA"
+            tenant_id="tenantA",
+            asset_id="ASSET-TEST-A",
+            cisa_kev=True,
         )
         f_b = Finding(
             id="F-TEST-B",
@@ -88,7 +90,9 @@ def test_tenant_isolation_in_context_building():
             cvss=9.5,
             priority="P0",
             status="unmitigated",
-            tenant_id="tenantB"
+            tenant_id="tenantB",
+            asset_id="ASSET-TEST-B",
+            cisa_kev=True,
         )
         db.add(f_a)
         db.add(f_b)

@@ -1,13 +1,13 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from services.kev_loader import get_finding_stats, get_top_critical_findings, get_ransomware_findings, get_all_findings
-from services.tes_engine import calculate_finding_tes
 from services.database import get_db, SessionLocal
 from models import TesSnapshot
 from routers.auth import get_current_user
 from datetime import datetime, timedelta, timezone
 
 from services.entitlements import require_module
+from services.workflow_connections import build_exposure_coverage, build_module_health
 
 router = APIRouter(dependencies=[Depends(require_module("SYNTHESIS"))])
 
@@ -21,15 +21,16 @@ def get_dashboard_data(db: Session = None, tenant_id: str = "tempris"):
     try:
         stats = get_finding_stats(db, tenant_id=tenant_id)
 
-        # Compute aggregate TES from top-20 critical findings, including SSS/NHI paths
-        critical = get_top_critical_findings(db, limit=20, tenant_id=tenant_id)
-        tes_scores = [calculate_finding_tes(f) for f in critical]
-        aggregate_tes = sum(tes_scores) / len(tes_scores) if tes_scores else 0
+        exposure = build_exposure_coverage(db, tenant_id)
+        aggregate_tes = exposure["aggregate_tes"]
 
-        # Real alerts from ransomware-linked findings
+        # A CISA/KEV alert is customer exposure only after an explicit tenant asset link.
         ransomware_list = get_ransomware_findings(db, limit=5, tenant_id=tenant_id)
         alerts = []
+        linked_kev_ids = set(exposure["asset_linked_cisa_kev_ids"])
         for f in ransomware_list:
+            if f.get("id") not in linked_kev_ids:
+                continue
             alerts.append({
                 "id": hash(f["cve"]) % 10000,
                 "module": "SPECTRUM",
@@ -57,14 +58,11 @@ def get_dashboard_data(db: Session = None, tenant_id: str = "tempris"):
             "surge_open_submissions": None,
             "surge_scope_status": "unavailable",
         }
-        # No module telemetry source exists in the repository.
-        module_health = [
-            {"name": name, "status": "unavailable"}
-            for name in ("SPECTRUM", "SCOUT", "STRIKE", "STANDARD", "SPOTLIGHT", "SPEAK", "SURGE")
-        ]
+        module_health = build_module_health(db, tenant_id)
 
         return {
-            "aggregate_tes": round(aggregate_tes, 1),
+            "aggregate_tes": round(aggregate_tes, 1) if aggregate_tes is not None else None,
+            "exposure_coverage": exposure,
             "module_health": module_health,
             "alerts": alerts,
             "final_update": final_update,
@@ -80,14 +78,14 @@ def dashboard(db: Session = Depends(get_db), user = Depends(get_current_user)):
     data = get_dashboard_data(db, tenant_id=tenant_id)
 
     # Compute TES trend from DB snapshots
-    tes_trend = "+0.0"
+    tes_trend = None
     thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
     old_snapshot = db.query(TesSnapshot).filter(
         TesSnapshot.tenant_id == tenant_id,
         TesSnapshot.snapshot_at >= thirty_days_ago
     ).order_by(TesSnapshot.snapshot_at.asc()).first()
 
-    if old_snapshot:
+    if old_snapshot and data["aggregate_tes"] is not None:
         delta = data["aggregate_tes"] - old_snapshot.aggregate_tes
         sign = "+" if delta >= 0 else ""
         tes_trend = f"{sign}{delta:.1f}"
@@ -102,6 +100,11 @@ def take_tes_snapshot(db: Session = Depends(get_db), user = Depends(get_current_
     """Manually trigger a TES snapshot (also called on startup)."""
     tenant_id = user.get("tenant_id", "tempris")
     data = get_dashboard_data(db, tenant_id=tenant_id)
+    if data["aggregate_tes"] is None:
+        raise HTTPException(
+            status_code=409,
+            detail="TES snapshot requires at least one open finding with a valid tenant asset link and complete TES inputs",
+        )
     stats = data.get("_stats", get_finding_stats(db, tenant_id=tenant_id))
 
     snapshot = TesSnapshot(

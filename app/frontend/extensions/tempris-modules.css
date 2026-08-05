@@ -627,6 +627,34 @@ body.tmx-extension-active #root main {
 }
 .tmx-module-summary p { margin: 0; }
 
+.tmx-connection-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 18px;
+}
+
+.tmx-connection-summary > div {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  background: #101012;
+}
+
+.tmx-connection-summary strong {
+  color: #a1a1aa;
+  font-size: 9px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.tmx-connection-summary span {
+  color: #e4e4e7;
+  font-size: 11px;
+}
+
 .tmx-module-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -668,6 +696,23 @@ body.tmx-extension-active #root main {
   color: #a1a1aa;
   font-size: 11px;
   line-height: 1.4;
+}
+
+.tmx-module-card .tmx-module-health {
+  align-self: end;
+  color: #71717a;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.tmx-module-card .tmx-module-health-operational {
+  color: #34d399;
+}
+
+.tmx-module-card .tmx-module-health-degraded {
+  color: #f87171;
 }
 
 /* Public VDP / SURGE intake */
@@ -804,10 +849,12 @@ body.tmx-extension-active #root main {
 
 @media (max-width: 900px) {
   .tmx-module-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tmx-connection-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 640px) {
   .tmx-module-grid,
+  .tmx-connection-summary,
   .tmx-vdp-form { grid-template-columns: 1fr; }
   .tmx-vdp-wide { grid-column: auto; }
   .tmx-vdp-intake { padding: 18px; }
