@@ -3,7 +3,7 @@
 
   const TOKEN_KEY = 'tempris_token';
   const USER_KEY = 'tempris_user';
-  const EXTENSION_ROUTES = new Set(['/ciso', '/packages', '/sss-intake', '/vdp-queue']);
+  const EXTENSION_ROUTES = new Set(['/ciso', '/reports', '/packages', '/sss-intake', '/vdp-queue']);
   const EXTENSION_HOST_ID = 'tempris-extension-host';
   const RETRY_DELAYS = [1000, 3000, 8000];
   const MODULE_PATHS = {
@@ -37,6 +37,8 @@
   let workflowRequest = null;
   let tenantAssets = null;
   let tenantAssetsRequest = null;
+  let clientReports = null;
+  let clientReportsRequest = null;
 
   function getExtensionHost() {
     let host = document.getElementById(EXTENSION_HOST_ID);
@@ -140,7 +142,9 @@
           throw error;
         }
         if (!response.ok) {
-          const error = new Error(`API error: ${response.status}`);
+          const payload = await response.json().catch(() => null);
+          const detail = typeof payload?.detail === 'string' ? payload.detail : null;
+          const error = new Error(detail || `API error: ${response.status}`);
           error.status = response.status;
           if ([429, 502, 503, 504].includes(response.status) && attempt + 1 < attempts) {
             await new Promise((resolve) => window.setTimeout(resolve, RETRY_DELAYS[attempt]));
@@ -460,6 +464,13 @@
     if (cisoEligible && !cisoItem) {
       createNavItem(nav, 'CISO', '/ciso', 0);
     }
+    const reportsEligible = effective.has('SPOTLIGHT')
+      && ['Superadmin', 'Admin', 'Analyst'].includes(packageConfig.role);
+    const reportsItem = nav.querySelector('[data-tempris-extension-nav="/reports"]');
+    if (reportsItem) reportsItem.style.display = reportsEligible ? '' : 'none';
+    if (reportsEligible && !reportsItem) {
+      createNavItem(nav, 'CLIENT REPORTS', '/reports', 1);
+    }
     if (packageConfig.can_manage && !nav.querySelector('[data-tempris-extension-nav="/packages"]')) {
       createNavItem(nav, 'TENANT ACCESS', '/packages', 4);
     }
@@ -510,65 +521,53 @@
       </header>
       <section class="tmx-metrics" aria-label="Executive metrics">
         <div class="tmx-metric"><div class="tmx-metric-label">Confirmed posture</div><div class="tmx-metric-value ${metricTone(posture)}">${escapeHtml(posture)}</div></div>
-        <div class="tmx-metric"><div class="tmx-metric-label">Linked critical</div><div class="tmx-metric-value tmx-tone-critical">${escapeHtml(findings.critical ?? 0)}</div></div>
-        <div class="tmx-metric"><div class="tmx-metric-label">Linked high</div><div class="tmx-metric-value tmx-tone-high">${escapeHtml(findings.high ?? 0)}</div></div>
-        <div class="tmx-metric"><div class="tmx-metric-label">Open confirmed</div><div class="tmx-metric-value tmx-tone-neutral">${escapeHtml(findings.unresolved ?? 0)}</div></div>
-        <div class="tmx-metric"><div class="tmx-metric-label">Needs mapping</div><div class="tmx-metric-value ${coverage.unlinked_count ? 'tmx-tone-high' : 'tmx-tone-success'}">${escapeHtml(coverage.unlinked_count ?? 0)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Confirmed critical vulnerabilities</div><div class="tmx-metric-value tmx-tone-critical">${escapeHtml(findings.critical ?? 0)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Confirmed high vulnerabilities</div><div class="tmx-metric-value tmx-tone-high">${escapeHtml(findings.high ?? 0)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Confirmed vulnerabilities</div><div class="tmx-metric-value tmx-tone-neutral">${escapeHtml(findings.unresolved ?? 0)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Awaiting analyst mapping</div><div class="tmx-metric-value ${coverage.mapping_required_count ? 'tmx-tone-high' : 'tmx-tone-success'}">${escapeHtml(coverage.mapping_required_count ?? 0)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Reference intelligence</div><div class="tmx-metric-value tmx-tone-neutral">${escapeHtml(coverage.catalog_intelligence_count ?? 0)}</div></div>
       </section>
       <div class="tmx-grid">
         <section class="tmx-panel tmx-panel-wide">
-          <div class="tmx-panel-header"><div><h2>Exposure Coverage</h2><p>This explains exactly how recorded findings become confirmed customer exposure.</p></div><span class="tmx-status ${coverage.unlinked_count ? 'tmx-status-high' : 'tmx-status-available'}">${escapeHtml(coverage.asset_link_coverage_pct ?? 0)}% mapped</span></div>
-          <div class="tmx-panel-body tmx-coverage-flow"><div><strong>${escapeHtml(coverage.open_finding_count ?? 0)}</strong><span>Open records</span></div><b>→</b><div><strong>${escapeHtml(coverage.confirmed_exposure_count ?? coverage.asset_linked_count ?? 0)}</strong><span>Confirmed asset occurrences</span></div><b>→</b><div><strong>${escapeHtml(coverage.scored_asset_linked_count ?? 0)}</strong><span>Scored vulnerability records</span></div></div>
-          ${coverage.unlinked_count ? `<div class="tmx-notice"><strong>Action required:</strong><span>${escapeHtml(coverage.unlinked_count)} open record(s) remain in Intake & Triage until an analyst maps them to an asset.</span></div>` : ''}
+          <div class="tmx-panel-header"><div><h2>Customer Exposure Evidence</h2><p>A vulnerability becomes confirmed only when evidence links it to an active customer asset. Global catalogue entries remain reference intelligence.</p></div></div>
+          <div class="tmx-panel-body tmx-coverage-flow"><div><strong>${escapeHtml(coverage.asset_linked_count ?? 0)}</strong><span>Confirmed vulnerabilities</span></div><b>·</b><div><strong>${escapeHtml(coverage.confirmed_exposure_count ?? 0)}</strong><span>Affected asset links</span></div><b>·</b><div><strong>${escapeHtml(coverage.scored_asset_linked_count ?? 0)}</strong><span>With complete TES inputs</span></div></div>
+          <div class="tmx-panel-body tmx-exposure-explainer">One vulnerability linked to three assets equals one confirmed vulnerability and three affected asset links.</div>
+          ${coverage.mapping_required_count ? `<div class="tmx-notice"><strong>Analyst review:</strong><span>${escapeHtml(coverage.mapping_required_count)} record(s) require asset confirmation in Intake &amp; Triage. The ${escapeHtml(coverage.catalog_intelligence_count ?? 0)} reference-only records do not require manual mapping.</span></div>` : ''}
         </section>
         <section class="tmx-panel">
           <div class="tmx-panel-header"><h2>Risk Trend</h2><span class="tmx-status ${statusClass(trend)}">${escapeHtml(trend)}</span></div>
           <div class="tmx-panel-body">${data.risk_trend?.status === 'available'
-            ? `<div class="tmx-list-row"><div><div class="tmx-list-title">Current findings</div><div class="tmx-list-detail">Previous: ${escapeHtml(data.risk_trend.previous_findings ?? 0)}</div></div><strong>${escapeHtml(data.risk_trend.current_findings ?? 0)}</strong></div><div class="tmx-list-row"><div><div class="tmx-list-title">Current critical</div><div class="tmx-list-detail">Previous: ${escapeHtml(data.risk_trend.previous_critical ?? 0)}</div></div><strong>${escapeHtml(data.risk_trend.current_critical ?? 0)}</strong></div>`
-            : `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(data.risk_trend?.status === 'baseline' ? 'Baseline recorded' : 'No confirmed baseline')}</div><div class="tmx-list-detail">${escapeHtml(data.risk_trend?.reason || 'A second snapshot is required for comparison.')}</div></div>${data.risk_trend?.status === 'baseline' ? `<strong>${escapeHtml(data.risk_trend.current_findings ?? 0)} open</strong>` : ''}</div>`}</div>
+            ? `<div class="tmx-list-row"><div><div class="tmx-list-title">Confirmed vulnerabilities at latest snapshot</div><div class="tmx-list-detail">${escapeHtml(formatDate(data.risk_trend.current_snapshot_at))}; previous ${escapeHtml(formatDate(data.risk_trend.previous_snapshot_at))}: ${escapeHtml(data.risk_trend.previous_findings ?? 0)}</div></div><strong>${escapeHtml(data.risk_trend.current_findings ?? 0)}</strong></div><div class="tmx-list-row"><div><div class="tmx-list-title">Critical vulnerabilities at latest snapshot</div><div class="tmx-list-detail">Previous snapshot: ${escapeHtml(data.risk_trend.previous_critical ?? 0)}</div></div><strong>${escapeHtml(data.risk_trend.current_critical ?? 0)}</strong></div>`
+            : data.risk_trend?.status === 'baseline'
+              ? `<div class="tmx-list-row"><div><div class="tmx-list-title">Saved baseline: ${escapeHtml(data.risk_trend.baseline_findings ?? 0)} confirmed vulnerabilities</div><div class="tmx-list-detail">Saved ${escapeHtml(formatDate(data.risk_trend.baseline_at))}. Current live view: ${escapeHtml(data.risk_trend.current_findings ?? 0)}. ${escapeHtml(data.risk_trend.reason)}</div></div></div>`
+              : `<div class="tmx-list-row"><div><div class="tmx-list-title">No saved baseline</div><div class="tmx-list-detail">${escapeHtml(data.risk_trend?.reason || 'A saved snapshot is required for comparison.')}</div></div></div>`}</div>
         </section>
         <section class="tmx-panel">
-          <div class="tmx-panel-header"><h2>Compliance Gaps</h2><span class="tmx-status">${escapeHtml(gaps.status || 'unavailable')}</span></div>
-          <div class="tmx-panel-body">${gaps.status === 'available'
-            ? `<div class="tmx-list-row"><div class="tmx-list-title">Assessed controls</div><strong>${escapeHtml(gaps.assessed_controls ?? 0)}</strong></div><div class="tmx-list-row"><div class="tmx-list-title">Open gaps</div><strong>${escapeHtml(gaps.gap_count ?? 0)}</strong></div>`
+          <div class="tmx-panel-header"><h2>Recorded Control Assessments</h2><span class="tmx-status">${escapeHtml(gaps.assessed_controls ?? 0)} recorded</span></div>
+          <div class="tmx-panel-body">${gaps.status === 'recorded'
+            ? `${listRows(gaps.items, (item) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(item.control_id)}</div><div class="tmx-list-detail">${escapeHtml(titleCase(item.framework_id))}</div></div><span class="tmx-status ${statusClass(item.status)}">${escapeHtml(titleCase(item.status))}</span></div>`, 'No control assessments recorded.')}<div class="tmx-form-actions"><strong>${escapeHtml(gaps.gap_count ?? 0)} require attention</strong><button type="button" class="tmx-button tmx-button-secondary" data-open-standard>Open STANDARD</button></div>`
             : `<div class="tmx-empty">${escapeHtml(gaps.reason || 'Compliance data is unavailable.')}</div>`}</div>
         </section>
         <section class="tmx-panel tmx-panel-wide">
-          <div class="tmx-panel-header"><h2>Highest-risk Assets</h2><span class="tmx-status">Top ${escapeHtml(assets.length)}</span></div>
-          <div class="tmx-table-wrap"><table class="tmx-table"><thead><tr><th>Asset</th><th>Criticality</th><th>Highest severity</th><th>Open findings</th><th>Critical / High</th></tr></thead><tbody>${assets.length
+          <div class="tmx-panel-header"><div><h2>Most Exposed Assets</h2><p>Active customer assets ranked by their worst confirmed open vulnerability, then by critical and high vulnerability counts. The recorded asset criticality is shown for context; it does not alter this ranking.</p></div><span class="tmx-status">Top ${escapeHtml(assets.length)}</span></div>
+          <div class="tmx-table-wrap"><table class="tmx-table"><thead><tr><th>Asset</th><th>Recorded asset criticality</th><th>Worst linked severity</th><th>Confirmed open vulnerabilities</th><th>Critical / High</th></tr></thead><tbody>${assets.length
             ? assets.map((asset) => `<tr><td>${escapeHtml(asset.name)}</td><td>${escapeHtml(asset.criticality || 'Unavailable')}</td><td><span class="tmx-status ${statusClass(asset.highest_severity)}">${escapeHtml(asset.highest_severity)}</span></td><td>${escapeHtml(asset.open_findings ?? 0)}</td><td>${escapeHtml(asset.critical_findings ?? 0)} / ${escapeHtml(asset.high_findings ?? 0)}</td></tr>`).join('')
             : '<tr><td colspan="5" class="tmx-empty">No tenant findings are linked to tenant assets.</td></tr>'}</tbody></table></div>
         </section>
         <section class="tmx-panel">
-          <div class="tmx-panel-header"><h2>Executive Actions</h2><span class="tmx-status">${escapeHtml(actions.length)}</span></div>
-          <div class="tmx-panel-body">${listRows(actions, (item) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(item.title)}</div><div class="tmx-list-detail">${escapeHtml(item.required_action || 'No required action recorded')}</div></div><span class="tmx-status ${statusClass(item.severity)}">${escapeHtml(item.severity)}</span></div>`, 'No critical or high executive actions are available.')}</div>
+          <div class="tmx-panel-header"><div><h2>Priority Remediation Items</h2><p>The five oldest confirmed open critical/high vulnerabilities, with critical shown before high. The text is stored remediation guidance—not an executive approval or completed action.</p></div><span class="tmx-status">${escapeHtml(actions.length)}</span></div>
+          <div class="tmx-panel-body">${listRows(actions, (item) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(item.title)}</div><div class="tmx-list-detail">${escapeHtml(item.required_action || 'No required action recorded')}</div></div><span class="tmx-status ${statusClass(item.severity)}">${escapeHtml(item.severity)}</span></div>`, 'No confirmed critical or high remediation items are available.')}</div>
         </section>
         <section class="tmx-panel">
-          <div class="tmx-panel-header"><h2>Recent Escalations</h2><span class="tmx-status">${escapeHtml(escalations.length)}</span></div>
-          <div class="tmx-panel-body">${listRows(escalations, (item) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(item.report_id)}</div><div class="tmx-list-detail">${escapeHtml(formatDate(item.generated_at))}</div></div><span class="tmx-status ${statusClass(item.severity)}">${escapeHtml(item.severity)}</span></div>`, 'No recent critical or high escalations are available.')}</div>
+          <div class="tmx-panel-header"><div><h2>Recent Incident Drafts</h2><p>The newest high/critical MAS TRM incident-report drafts generated in STANDARD. These are saved drafts, not live alerts or an escalation workflow.</p></div><span class="tmx-status">${escapeHtml(escalations.length)}</span></div>
+          <div class="tmx-panel-body">${listRows(escalations, (item) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(item.report_id)}</div><div class="tmx-list-detail">${escapeHtml(formatDate(item.generated_at))}</div></div><span class="tmx-status ${statusClass(item.severity)}">${escapeHtml(item.severity)}</span></div>`, 'No recent high or critical incident drafts are available.')}</div>
         </section>
         <section class="tmx-panel tmx-panel-wide">
-          <div class="tmx-panel-header"><div><h2>Client Report Service</h2><p>Generate HTML, JSON, and CSV from confirmed asset-linked findings only. Unmapped intake is excluded.</p></div><span class="tmx-status">On demand</span></div>
-          <form class="tmx-panel-body tmx-intake-form" data-poc-report-form>
-            <label class="tmx-field"><span>Client organisation</span><input name="organisation" required maxlength="255" autocomplete="organization"></label>
-            <label class="tmx-field"><span>Client contact</span><input name="contact" required maxlength="255" autocomplete="name"></label>
-            <label class="tmx-field"><span>Engagement ID</span><input name="engagement_id" required maxlength="50" placeholder="ENG-ND-001"></label>
-            <label class="tmx-field"><span>Environment</span><input name="environment" required maxlength="100" placeholder="Production"></label>
-            <label class="tmx-field"><span>Period start</span><input name="period_start" type="date" required></label>
-            <label class="tmx-field"><span>Period end</span><input name="period_end" type="date" required></label>
-            <label class="tmx-field"><span>Delivery recipients (comma-separated)</span><input name="recipients" maxlength="1000" placeholder="security@client.example"></label>
-            <label class="tmx-field"><span>Alliance partner (optional)</span><input name="alliance_partner" maxlength="255"></label>
-            <label class="tmx-check-label tmx-field-wide"><input name="partner_consent" type="checkbox"><span>Client consent to share with the named partner is recorded</span></label>
-            <label class="tmx-field"><span>Assessor (optional)</span><input name="assessor" maxlength="255"></label>
-            <label class="tmx-field"><span>Attested by (optional)</span><input name="attested_by" maxlength="255"></label>
-            <label class="tmx-field tmx-field-wide"><span>Attestation statement (optional)</span><textarea name="attestation" maxlength="2000" placeholder="Only include a statement that a named assessor or CSRO has approved."></textarea></label>
-            <label class="tmx-field tmx-field-wide"><span>In scope (one item per line)</span><textarea name="scope" maxlength="4000" required placeholder="Customer portal&#10;Production API"></textarea></label>
-            <label class="tmx-field tmx-field-wide"><span>Out of scope (one item per line)</span><textarea name="out_of_scope" maxlength="4000" required placeholder="Independent penetration testing&#10;Legal compliance opinion"></textarea></label>
-            <div class="tmx-form-actions"><button type="submit" class="tmx-button">Generate report package</button><span data-poc-report-status aria-live="polite"></span></div>
-          </form>
+          <div class="tmx-panel-header"><div><h2>Client Report Service</h2><p>Create and manage immutable HTML, JSON, and CSV report packages from confirmed customer exposure.</p></div><button type="button" class="tmx-button" data-open-client-reports>Open Client Reports</button></div>
+          <div class="tmx-panel-body tmx-exposure-explainer">Report generation now lives on its own page so this dashboard remains an executive summary.</div>
         </section>
         <section class="tmx-panel tmx-panel-wide">
-          <div class="tmx-panel-header"><h2>Recent Reports</h2><span class="tmx-status">${escapeHtml(reports.length)}</span></div>
+          <div class="tmx-panel-header"><div><h2>Recent Client Reports</h2><p>This is a read-only dashboard summary. Open Client Reports to inspect, create a revised version, archive, restore, or delete a report.</p></div><button type="button" class="tmx-button tmx-button-secondary" data-open-client-reports>Manage reports</button></div>
           <div class="tmx-table-wrap"><table class="tmx-table"><thead><tr><th>Report</th><th>Type</th><th>Created</th><th>Action</th></tr></thead><tbody>${reports.length
             ? reports.map((report) => `<tr><td>${escapeHtml(report.report_id)}</td><td>${escapeHtml(titleCase(report.report_type))}</td><td>${escapeHtml(formatDate(report.created_at))}</td><td>${reportActions(report)}</td></tr>`).join('')
             : '<tr><td colspan="4" class="tmx-empty">No tenant reports are available.</td></tr>'}</tbody></table></div>
@@ -580,7 +579,10 @@
     host.querySelectorAll('[data-report-path]').forEach((button) => button.addEventListener('click', () => (
       openReport(button.dataset.reportPath, button.dataset.reportFormat || 'json')
     )));
-    host.querySelector('[data-poc-report-form]').addEventListener('submit', (event) => generatePocReport(event, host));
+    host.querySelector('[data-open-standard]')?.addEventListener('click', () => navigate('/standard'));
+    host.querySelectorAll('[data-open-client-reports]').forEach((button) => {
+      button.addEventListener('click', () => navigate('/reports'));
+    });
   }
 
   async function generatePocReport(event, host) {
@@ -628,7 +630,10 @@
       });
       status.textContent = `Generated ${result.report_id}. Opening the client preview...`;
       await openReport(result.manifest.artifacts.html, 'html');
-      await renderCisoRoute(host, true);
+      clientReports = null;
+      cisoSummary = null;
+      if (window.location.pathname === '/reports') await renderReportsRoute(host, true);
+      else await renderCisoRoute(host, true);
     } catch (error) {
       status.textContent = error.message || 'Report generation failed.';
       submit.disabled = false;
@@ -655,6 +660,165 @@
     anchor.download = `${path.split('/').at(-3) || 'tempris-report'}.${format}`;
     anchor.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function loadClientReports(force = false) {
+    if (clientReports && !force) return clientReports;
+    if (clientReportsRequest && !force) return clientReportsRequest;
+    clientReportsRequest = api('/api/reports?include_archived=true&limit=100')
+      .then((payload) => {
+        clientReports = Array.isArray(payload) ? payload : [];
+        return clientReports;
+      })
+      .finally(() => { clientReportsRequest = null; });
+    return clientReportsRequest;
+  }
+
+  function clientReportForm() {
+    return `<form class="tmx-panel-body tmx-intake-form" data-poc-report-form>
+      <label class="tmx-field"><span>Client organisation</span><input name="organisation" required maxlength="255" autocomplete="organization"></label>
+      <label class="tmx-field"><span>Client contact</span><input name="contact" required maxlength="255" autocomplete="name"></label>
+      <label class="tmx-field"><span>Engagement ID</span><input name="engagement_id" required maxlength="50" placeholder="ENG-ND-001"></label>
+      <label class="tmx-field"><span>Environment</span><input name="environment" required maxlength="100" placeholder="Production"></label>
+      <label class="tmx-field"><span>Assessment period start</span><input name="period_start" type="date" required></label>
+      <label class="tmx-field"><span>Assessment period end</span><input name="period_end" type="date" required></label>
+      <div class="tmx-notice tmx-field-wide"><strong>Current snapshot:</strong><span>The dates are report context. The package uses the current confirmed asset-linked exposure because historical finding-state reconstruction is not yet recorded.</span></div>
+      <label class="tmx-field"><span>Intended recipients (not automatically emailed)</span><input name="recipients" maxlength="1000" placeholder="security@client.example"></label>
+      <label class="tmx-field"><span>Alliance partner (optional)</span><input name="alliance_partner" maxlength="255"></label>
+      <label class="tmx-check-label tmx-field-wide"><input name="partner_consent" type="checkbox"><span>Client consent to share with the named partner is recorded</span></label>
+      <label class="tmx-field"><span>Assessor (optional)</span><input name="assessor" maxlength="255"></label>
+      <label class="tmx-field"><span>Attested by (optional)</span><input name="attested_by" maxlength="255"></label>
+      <label class="tmx-field tmx-field-wide"><span>Attestation statement (optional)</span><textarea name="attestation" maxlength="2000" placeholder="Only include an approved statement from the named assessor or CSRO."></textarea></label>
+      <label class="tmx-field tmx-field-wide"><span>In scope (one item per line)</span><textarea name="scope" maxlength="4000" required placeholder="Customer portal&#10;Production API"></textarea></label>
+      <label class="tmx-field tmx-field-wide"><span>Out of scope (one item per line)</span><textarea name="out_of_scope" maxlength="4000" required placeholder="Independent penetration testing&#10;Legal compliance opinion"></textarea></label>
+      <div class="tmx-form-actions"><button type="submit" class="tmx-button">Generate immutable report package</button><span data-poc-report-status aria-live="polite"></span></div>
+    </form>`;
+  }
+
+  function managedReportActions(report) {
+    const admin = ['Superadmin', 'Admin'].includes(currentUserRole());
+    const actions = [`<button type="button" class="tmx-report-button" data-report-details="${escapeHtml(report.id)}">Details</button>`];
+    const html = report.artifacts?.html;
+    const json = report.artifacts?.json;
+    const csv = report.artifacts?.csv;
+    const primary = report.artifacts?.primary;
+    if (html?.url) actions.push(`<button type="button" class="tmx-report-button" data-managed-report-path="${escapeHtml(html.url)}" data-report-format="html">Preview</button>`);
+    if (json?.url) actions.push(`<button type="button" class="tmx-report-button" data-managed-report-path="${escapeHtml(json.url)}" data-report-format="json">JSON</button>`);
+    if (csv?.url) actions.push(`<button type="button" class="tmx-report-button" data-managed-report-path="${escapeHtml(csv.url)}" data-report-format="csv">CSV</button>`);
+    if (primary?.url) actions.push(`<button type="button" class="tmx-report-button" data-managed-report-path="${escapeHtml(primary.url)}" data-report-format="${escapeHtml(report.report_type || 'json')}">Download</button>`);
+    if (report.report_type === 'poc') {
+      actions.push(`<button type="button" class="tmx-report-button" data-report-template="${escapeHtml(report.id)}">Edit as new report</button>`);
+      actions.push(`<button type="button" class="tmx-report-button" data-report-regenerate="${escapeHtml(report.id)}">Regenerate v${escapeHtml((report.document_version || 1) + 1)}</button>`);
+    }
+    if (admin) {
+      actions.push(`<button type="button" class="tmx-report-button" data-report-archive="${escapeHtml(report.id)}" data-archived="${report.archived ? 'true' : 'false'}">${report.archived ? 'Restore' : 'Archive'}</button>`);
+      actions.push(`<button type="button" class="tmx-report-button tmx-report-danger" data-report-delete="${escapeHtml(report.id)}">Delete</button>`);
+    }
+    return actions.join(' ');
+  }
+
+  function renderClientReports(host, reports) {
+    host.dataset.temprisExtensionRoute = '/reports';
+    host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="reports">
+      <header class="tmx-heading"><div><h1>Client Reports</h1><p>Create immutable client packages, inspect their source counts and integrity hashes, and manage their lifecycle.</p></div><button type="button" class="tmx-button tmx-button-secondary" data-reports-refresh>Refresh</button></header>
+      <section class="tmx-panel"><div class="tmx-panel-header"><div><h2>Create Client Report</h2><p>Only confirmed asset-linked findings are included. Reference-only intelligence is excluded.</p></div><span class="tmx-status">HTML · JSON · CSV</span></div>${clientReportForm()}</section>
+      <section class="tmx-panel"><div class="tmx-panel-header"><div><h2>Report Registry</h2><p>Generated reports cannot be edited in place because that would invalidate their integrity hash. Edit as new report or regenerate to create a traceable new version.</p></div><span class="tmx-status">${escapeHtml(reports.length)} records</span></div>
+        <div class="tmx-table-wrap"><table class="tmx-table"><thead><tr><th>Report</th><th>Client / engagement</th><th>Sources</th><th>Artifact</th><th>Created</th><th>Actions</th></tr></thead><tbody>${reports.length ? reports.map((report) => {
+          const state = report.archived ? 'Archived' : report.artifact_status === 'available' ? 'Available' : 'Artifact missing';
+          const client = report.engagement_id || 'No engagement';
+          return `<tr><td><strong>${escapeHtml(report.id)}</strong><div class="tmx-list-detail">${escapeHtml(titleCase(report.report_type))} · v${escapeHtml(report.document_version || 1)}</div></td><td>${escapeHtml(client)}</td><td>${escapeHtml(report.finding_count || 0)} findings · ${escapeHtml(report.evidence_count || 0)} evidence</td><td><span class="tmx-status ${state === 'Available' ? 'tmx-status-available' : state === 'Artifact missing' ? 'tmx-status-high' : ''}">${escapeHtml(state)}</span></td><td>${escapeHtml(formatDate(report.created_at))}</td><td class="tmx-report-actions">${managedReportActions(report)}</td></tr>`;
+        }).join('') : '<tr><td colspan="6" class="tmx-empty">No reports have been generated.</td></tr>'}</tbody></table></div>
+      </section>
+      <section class="tmx-panel" data-report-detail-panel hidden></section>
+    </div>`;
+
+    host.querySelector('[data-poc-report-form]').addEventListener('submit', (event) => generatePocReport(event, host));
+    host.querySelector('[data-reports-refresh]').addEventListener('click', () => renderReportsRoute(host, true));
+    host.querySelectorAll('[data-managed-report-path]').forEach((button) => button.addEventListener('click', () => openReport(button.dataset.managedReportPath, button.dataset.reportFormat || 'json')));
+    host.querySelectorAll('[data-report-details]').forEach((button) => button.addEventListener('click', () => showReportDetails(host, button.dataset.reportDetails)));
+    host.querySelectorAll('[data-report-template]').forEach((button) => button.addEventListener('click', () => useReportTemplate(host, button.dataset.reportTemplate)));
+    host.querySelectorAll('[data-report-regenerate]').forEach((button) => button.addEventListener('click', () => regenerateReport(host, button.dataset.reportRegenerate)));
+    host.querySelectorAll('[data-report-archive]').forEach((button) => button.addEventListener('click', () => setReportArchived(host, button.dataset.reportArchive, button.dataset.archived !== 'true')));
+    host.querySelectorAll('[data-report-delete]').forEach((button) => button.addEventListener('click', () => deleteManagedReport(host, button.dataset.reportDelete)));
+  }
+
+  async function showReportDetails(host, reportId) {
+    const panel = host.querySelector('[data-report-detail-panel]');
+    try {
+      const report = await api(`/api/reports/${encodeURIComponent(reportId)}`);
+      const config = report.configuration || {};
+      panel.hidden = false;
+      panel.innerHTML = `<div class="tmx-panel-header"><div><h2>${escapeHtml(report.id)}</h2><p>Immutable report metadata</p></div><button type="button" class="tmx-report-button" data-close-report-details>Close</button></div><div class="tmx-panel-body tmx-report-detail-grid">
+        <div><span>Client</span><strong>${escapeHtml(config.client?.organisation || 'Not recorded')}</strong></div><div><span>Engagement</span><strong>${escapeHtml(report.engagement_id || 'Not recorded')}</strong></div><div><span>Version</span><strong>${escapeHtml(report.document_version || 1)}</strong></div><div><span>Parent report</span><strong>${escapeHtml(report.parent_report_id || 'None')}</strong></div><div><span>Findings</span><strong>${escapeHtml(report.finding_count || 0)}</strong></div><div><span>Evidence</span><strong>${escapeHtml(report.evidence_count || 0)}</strong></div><div><span>Requested by</span><strong>${escapeHtml(report.requested_by)}</strong></div><div><span>Approved by</span><strong>${escapeHtml(report.approved_by || 'Not approved')}</strong></div><div class="tmx-field-wide"><span>Integrity hash</span><code>${escapeHtml(report.content_hash)}</code></div>
+      </div>`;
+      panel.querySelector('[data-close-report-details]').addEventListener('click', () => { panel.hidden = true; });
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (error) {
+      panel.hidden = false;
+      panel.innerHTML = `<div class="tmx-panel-body tmx-error">${escapeHtml(error.message || 'Report details are unavailable.')}</div>`;
+    }
+  }
+
+  async function useReportTemplate(host, reportId) {
+    const report = await api(`/api/reports/${encodeURIComponent(reportId)}`);
+    const config = report.configuration || {};
+    const form = host.querySelector('[data-poc-report-form]');
+    const set = (name, value) => { const field = form.elements.namedItem(name); if (field) field.value = value || ''; };
+    set('organisation', config.client?.organisation);
+    set('contact', config.client?.contact);
+    set('engagement_id', config.engagement_id || report.engagement_id);
+    set('environment', config.client?.environment);
+    set('period_start', config.period?.start);
+    set('period_end', config.period?.end);
+    set('recipients', (config.delivery?.recipients || []).join(', '));
+    set('alliance_partner', config.delivery?.alliance_partner);
+    set('assessor', config.assessment?.assessor);
+    set('attested_by', config.assessment?.attested_by);
+    set('attestation', config.assessment?.attestation);
+    set('scope', (config.coverage?.scope || []).join('\n'));
+    set('out_of_scope', (config.coverage?.out_of_scope || []).join('\n'));
+    const consent = form.elements.namedItem('partner_consent');
+    if (consent) consent.checked = Boolean(config.delivery?.client_consent_for_partner);
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  async function regenerateReport(host, reportId) {
+    if (!window.confirm(`Generate a new immutable version from ${reportId}?`)) return;
+    await api(`/api/reports/${encodeURIComponent(reportId)}/regenerate`, { method: 'POST' });
+    clientReports = null;
+    await renderReportsRoute(host, true);
+  }
+
+  async function setReportArchived(host, reportId, archived) {
+    await api(`/api/reports/${encodeURIComponent(reportId)}/archive`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ archived }),
+    });
+    clientReports = null;
+    await renderReportsRoute(host, true);
+  }
+
+  async function deleteManagedReport(host, reportId) {
+    const confirmed = window.confirm(`Permanently delete ${reportId} and its managed artifacts? This action is audit-logged and cannot be undone.`);
+    if (!confirmed) return;
+    await api(`/api/reports/${encodeURIComponent(reportId)}`, {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm_report_id: reportId }),
+    });
+    clientReports = null;
+    cisoSummary = null;
+    await renderReportsRoute(host, true);
+  }
+
+  async function renderReportsRoute(host, force = false) {
+    host.dataset.temprisExtensionRoute = '/reports';
+    host.innerHTML = '<div data-tempris-extension-root class="tmx-panel tmx-loading">Loading client reports...</div>';
+    try {
+      const reports = await loadClientReports(force);
+      if (window.location.pathname === '/reports') renderClientReports(host, reports);
+    } catch (error) {
+      if (window.location.pathname !== '/reports') return;
+      host.innerHTML = `<div data-tempris-extension-root class="tmx-page"><div class="tmx-panel tmx-error">${escapeHtml(error.message || 'Client reports are unavailable.')}<div style="margin-top:16px"><button type="button" class="tmx-button" data-reports-retry>Retry</button></div></div></div>`;
+      host.querySelector('[data-reports-retry]').addEventListener('click', () => renderReportsRoute(host, true));
+    }
   }
 
   async function renderCisoRoute(host, force = false) {
@@ -1462,6 +1626,7 @@
     if (host.dataset.temprisRenderedRoute === path && host.children.length) return;
     host.dataset.temprisRenderedRoute = path;
     if (path === '/ciso') renderCisoRoute(host);
+    if (path === '/reports') renderReportsRoute(host);
     if (path === '/sss-intake') renderSssRoute(host);
     if (path === '/packages') renderPackagesRoute(host);
     if (path === '/vdp-queue') renderVdpQueueRoute(host);
@@ -1499,6 +1664,7 @@
     deactivateExtensionHost();
     cisoAccess = null;
     cisoSummary = null;
+    clientReports = null;
     sssFindings = null;
     packageConfig = null;
     packageRequest = null;

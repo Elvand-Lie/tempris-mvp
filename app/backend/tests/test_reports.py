@@ -30,9 +30,10 @@ def override_get_db():
         db.close()
 
 @pytest.fixture(autouse=True)
-def setup_db(monkeypatch):
+def setup_db(monkeypatch, tmp_path):
     from middleware.rate_limit import _Bucket
     monkeypatch.setattr(_Bucket, "consume", lambda self: True)
+    monkeypatch.setenv('REPORT_STORAGE_ROOT', str(tmp_path / 'reports'))
 
     app.dependency_overrides[get_db] = override_get_db
     old_engine = services.database.engine
@@ -382,6 +383,148 @@ def test_customer_report_artifacts_are_safe_deterministic_and_tenant_scoped():
 
     for artifact_format in ('html', 'json', 'csv'):
         poc_artifact_path(report_id, artifact_format).unlink(missing_ok=True)
+
+
+def test_client_report_registry_version_archive_delete_and_artifact_status():
+    from routers.auth import USERS
+    from services.reporting_engine import poc_artifact_path
+
+    USERS['report-admin-a@tempris.com'] = {
+        'password': bcrypt.hash('pwd_a'), 'role': 'Admin',
+        'name': 'Report Admin A', 'tenant_id': 'tenantA',
+    }
+    USERS['report-analyst-a@tempris.com'] = {
+        'password': bcrypt.hash('pwd_analyst'), 'role': 'Analyst',
+        'name': 'Report Analyst A', 'tenant_id': 'tenantA',
+    }
+    USERS['report-admin-b@tempris.com'] = {
+        'password': bcrypt.hash('pwd_b'), 'role': 'Admin',
+        'name': 'Report Admin B', 'tenant_id': 'tenantB',
+    }
+    USERS['report-readonly-a@tempris.com'] = {
+        'password': bcrypt.hash('pwd_readonly'), 'role': 'Read-only',
+        'name': 'Report Read-only A', 'tenant_id': 'tenantA',
+    }
+    client = TestClient(app)
+
+    def login(email, password):
+        response = client.post('/api/auth/login', json={'email': email, 'password': password})
+        assert response.status_code == 200
+        return {'Authorization': f"Bearer {response.json()['access_token']}"}
+
+    admin_a = login('report-admin-a@tempris.com', 'pwd_a')
+    analyst_a = login('report-analyst-a@tempris.com', 'pwd_analyst')
+    admin_b = login('report-admin-b@tempris.com', 'pwd_b')
+    readonly_a = login('report-readonly-a@tempris.com', 'pwd_readonly')
+
+    db = TestingSessionLocal()
+    db.add(Asset(
+        id='ASSET-REPORT-A', tenant_id='tenantA', name='Customer API',
+        environment='production', owner='Platform', criticality='high',
+    ))
+    db.add(Finding(
+        id='F-REPORT-A', tenant_id='tenantA', title='Confirmed API exposure',
+        priority='P1', status='unmitigated', asset_id='ASSET-REPORT-A',
+        required_action='Apply the verified vendor fix',
+    ))
+    db.commit()
+    db.close()
+
+    configuration = {
+        'title': 'Customer Exposure Report',
+        'engagement_id': 'ENG-REPORT-001',
+        'client': {
+            'organisation': 'Example Customer',
+            'contact': 'Security Lead',
+            'environment': 'Production',
+        },
+        'period': {'start': '2026-08-01', 'end': '2026-08-10'},
+        'delivery': {'recipients': ['security@example.test']},
+        'coverage': {
+            'scope': ['Customer API'],
+            'out_of_scope': ['Independent penetration testing'],
+        },
+    }
+    generated = client.post(
+        '/api/reports/poc/generate', headers=admin_a,
+        json={'source_finding_ids': ['F-REPORT-A'], 'configuration': configuration},
+    )
+    assert generated.status_code == 200, generated.text
+    report_id = generated.json()['report_id']
+
+    assert client.get('/api/reports', headers=readonly_a).status_code == 403
+    assert client.get(f'/api/reports/{report_id}', headers=readonly_a).status_code == 403
+    assert client.get(
+        f'/api/reports/{report_id}/artifact/html', headers=readonly_a,
+    ).status_code == 403
+
+    listing = client.get('/api/reports?include_archived=true', headers=admin_a)
+    assert listing.status_code == 200
+    listed = next(row for row in listing.json() if row['id'] == report_id)
+    assert listed['finding_count'] == 1
+    assert listed['evidence_count'] == 0
+    assert listed['document_version'] == 1
+    assert listed['parent_report_id'] is None
+    assert listed['artifact_status'] == 'available'
+    assert {item['status'] for item in listed['artifacts'].values()} == {'available'}
+
+    details = client.get(f'/api/reports/{report_id}', headers=admin_a)
+    assert details.status_code == 200
+    assert details.json()['configuration']['client']['organisation'] == 'Example Customer'
+    assert '_lifecycle' not in details.json()['configuration']
+    assert client.get(f'/api/reports/{report_id}', headers=admin_b).status_code == 404
+
+    forbidden = client.patch(
+        f'/api/reports/{report_id}/archive', headers=analyst_a, json={'archived': True},
+    )
+    assert forbidden.status_code == 403
+
+    regenerated = client.post(f'/api/reports/{report_id}/regenerate', headers=analyst_a)
+    assert regenerated.status_code == 200, regenerated.text
+    child_id = regenerated.json()['report_id']
+    child = client.get(f'/api/reports/{child_id}', headers=admin_a).json()
+    assert child['document_version'] == 2
+    assert child['parent_report_id'] == report_id
+    assert child['approved_by'] is None
+
+    archived = client.patch(
+        f'/api/reports/{report_id}/archive', headers=admin_a, json={'archived': True},
+    )
+    assert archived.status_code == 200
+    assert archived.json()['archived'] is True
+    visible_ids = {row['id'] for row in client.get('/api/reports', headers=admin_a).json()}
+    assert report_id not in visible_ids
+    assert child_id in visible_ids
+
+    mismatch = client.request(
+        'DELETE', f'/api/reports/{report_id}', headers=admin_a,
+        json={'confirm_report_id': child_id},
+    )
+    assert mismatch.status_code == 400
+    deleted = client.request(
+        'DELETE', f'/api/reports/{report_id}', headers=admin_a,
+        json={'confirm_report_id': report_id},
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()['artifacts_removed'] == 3
+    assert client.get(f'/api/reports/{report_id}', headers=admin_a).status_code == 404
+    for artifact_format in ('html', 'json', 'csv'):
+        assert not poc_artifact_path(report_id, artifact_format).exists()
+
+    child_delete = client.request(
+        'DELETE', f'/api/reports/{child_id}', headers=admin_a,
+        json={'confirm_report_id': child_id},
+    )
+    assert child_delete.status_code == 200
+
+    db = TestingSessionLocal()
+    actions = {
+        row.action for row in db.query(AuditLog).filter(
+            AuditLog.user_email == 'report-admin-a@tempris.com'
+        ).all()
+    }
+    db.close()
+    assert {'REPORT_ARCHIVED', 'REPORT_DELETED'}.issubset(actions)
 
 
 def test_spotlight_generation_and_history_are_tenant_scoped(monkeypatch):

@@ -89,11 +89,11 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     stylesheet = client.get("/extensions/tempris-modules.css")
     logo = client.get("/brand/tempris-logo-light.png")
 
-    assert 'src="/assets/index-DUrFdX-d.js?v=20260805c"' in index.text
-    assert 'src="/extensions/tempris-bootstrap.js?v=20260805c"' in index.text
-    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260805c"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260805c"')
-    assert 'src="/extensions/tempris-modules.js?v=20260805c"' in index.text
-    assert 'href="/extensions/tempris-modules.css?v=20260805c"' in index.text
+    assert 'src="/assets/index-DUrFdX-d.js?v=20260810a"' in index.text
+    assert 'src="/extensions/tempris-bootstrap.js?v=20260810a"' in index.text
+    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260810a"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260810a"')
+    assert 'src="/extensions/tempris-modules.js?v=20260810a"' in index.text
+    assert 'href="/extensions/tempris-modules.css?v=20260810a"' in index.text
     assert script.status_code == 200
     assert script.headers["cache-control"] == "no-store, max-age=0"
     assert bootstrap.headers["cache-control"] == "no-store, max-age=0"
@@ -111,6 +111,11 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     assert "VDP Security Queue" in script.text
     assert "Confirm resolution" in script.text
     assert "Client Report Service" in script.text
+    assert "Most Exposed Assets" in script.text
+    assert "Priority Remediation Items" in script.text
+    assert "Recent Incident Drafts" in script.text
+    assert "Edit as new report" in script.text
+    assert "96.3% MAPPED" not in script.text
     assert "'/api/reports/poc/generate'" in script.text
     assert "client_consent_for_partner" in script.text
     assert "Customer Exposure Assignments" in script.text

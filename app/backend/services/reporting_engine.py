@@ -110,7 +110,14 @@ def _csv_content(headers: list[str], rows: list[list]) -> str:
 
 def _report_storage_root() -> Path:
     configured = os.environ.get('REPORT_STORAGE_ROOT', '').strip()
-    root = Path(configured) if configured else Path('backups') / 'reports'
+    # /app/data is a persistent bind mount in production.  Keeping generated
+    # artifacts beneath it prevents report files from disappearing whenever
+    # the backend container is rebuilt.
+    root = (
+        Path(configured)
+        if configured
+        else Path(__file__).resolve().parents[1] / 'data' / 'reports'
+    )
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -592,6 +599,8 @@ def generate_poc_report_pipeline(
     source_finding_ids: list[str] | None,
     configuration: dict | None,
     approved_by: str | None = None,
+    parent_report_id: str | None = None,
+    document_version: int = 1,
 ) -> dict:
     if not tenant_id:
         raise ValueError('Missing tenant context')
@@ -628,6 +637,14 @@ def generate_poc_report_pipeline(
             _write_text(paths[artifact_format], content)
             created_paths.append(paths[artifact_format])
         content_hash = hashlib.sha256(json_content.encode('utf-8')).hexdigest()
+        stored_configuration = copy.deepcopy(configuration)
+        stored_configuration['_lifecycle'] = {
+            'archived': False,
+            'archived_at': None,
+            'archived_by': None,
+            'parent_report_id': parent_report_id,
+            'document_version': max(1, int(document_version)),
+        }
         report = GeneratedReport(
             id=report_id,
             tenant_id=tenant_id,
@@ -638,12 +655,7 @@ def generate_poc_report_pipeline(
             approved_by=approved_by,
             source_finding_ids=[finding.id for finding in findings],
             source_evidence_ids=[],
-            framework_configuration={
-                'title': payload['report']['title'],
-                'client': payload['client'],
-                'period': payload['period'],
-                'delivery': payload['delivery'],
-            },
+            framework_configuration=stored_configuration,
             content_hash=content_hash,
             artifact_location=str(paths['html']),
         )
@@ -652,7 +664,10 @@ def generate_poc_report_pipeline(
             user=requested_by,
             action='POC_REPORT_GENERATED',
             module='SYNTHESIS',
-            detail=f'Generated client report {report_id} with JSON hash {content_hash}.',
+            detail=(
+                f'Generated client report {report_id} with JSON hash {content_hash}.'
+                + (f' Regenerated from {parent_report_id}.' if parent_report_id else '')
+            ),
         ))
         db.refresh(report)
     except Exception:
@@ -675,6 +690,8 @@ def generate_poc_report_pipeline(
             'approved_by': report.approved_by,
             'source_finding_ids': report.source_finding_ids,
             'content_hash': report.content_hash,
+            'document_version': stored_configuration['_lifecycle']['document_version'],
+            'parent_report_id': parent_report_id,
             'artifacts': {
                 key: f'/api/reports/{report_id}/artifact/{key}'
                 for key in ('html', 'json', 'csv')

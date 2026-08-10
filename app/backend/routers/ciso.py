@@ -82,17 +82,23 @@ def _risk_trend(
     current_findings: int,
     current_critical: int,
 ) -> dict:
-    if len(snapshots) < 2:
-        if current_findings:
-            return {
-                'status': 'baseline',
-                'current_critical': current_critical,
-                'current_findings': current_findings,
-                'reason': 'Current confirmed exposure is the baseline; trend appears after a second tenant snapshot.',
-            }
+    if not snapshots:
         return {
             'status': 'unavailable',
-            'reason': 'No open asset-linked finding exists to establish a customer risk baseline.',
+            'current_critical': current_critical,
+            'current_findings': current_findings,
+            'reason': 'No saved tenant snapshot exists. Current live exposure is not presented as a historical trend.',
+        }
+    if len(snapshots) == 1:
+        baseline = snapshots[0]
+        return {
+            'status': 'baseline',
+            'baseline_at': baseline.snapshot_at.isoformat() if baseline.snapshot_at else None,
+            'baseline_critical': baseline.critical_count or 0,
+            'baseline_findings': baseline.finding_count or 0,
+            'current_critical': current_critical,
+            'current_findings': current_findings,
+            'reason': 'One saved baseline exists. A second saved snapshot is required before Tempris labels the trend improving or worsening.',
         }
 
     current, previous = snapshots[0], snapshots[1]
@@ -111,6 +117,8 @@ def _risk_trend(
         'previous_critical': previous_counts[0],
         'current_findings': current_counts[1],
         'previous_findings': previous_counts[1],
+        'current_snapshot_at': current.snapshot_at.isoformat() if current.snapshot_at else None,
+        'previous_snapshot_at': previous.snapshot_at.isoformat() if previous.snapshot_at else None,
     }
 
 
@@ -160,15 +168,36 @@ def _highest_risk_assets(
 def _compliance_gaps(controls: list[ControlStatus]) -> dict:
     if not controls:
         return {'status': 'unavailable', 'reason': 'No tenant control assessments exist'}
-    compliant = {'compliant', 'implemented'}
-    gaps = [row for row in controls if (row.status or '').strip().lower() not in compliant]
+    assessed = [
+        row for row in controls
+        if (row.status or '').strip().lower() != 'not_assessed'
+    ]
+    if not assessed:
+        return {
+            'status': 'unavailable',
+            'reason': 'No tenant control has a recorded assessment result',
+        }
+    satisfactory = {'compliant', 'implemented', 'not_applicable'}
+    gaps = [
+        row for row in assessed
+        if (row.status or '').strip().lower() not in satisfactory
+    ]
     by_framework = defaultdict(int)
     for row in gaps:
         by_framework[row.framework_id] += 1
     return {
-        'status': 'available',
-        'assessed_controls': len(controls),
+        'status': 'recorded',
+        'assessed_controls': len(assessed),
         'gap_count': len(gaps),
+        'items': [
+            {
+                'framework_id': row.framework_id,
+                'control_id': row.control_id,
+                'status': (row.status or 'not_assessed').strip().lower(),
+                'updated_at': row.updated_at.isoformat() if row.updated_at else None,
+            }
+            for row in sorted(assessed, key=lambda item: (item.framework_id, item.control_id))
+        ],
         'by_framework': [
             {'framework_id': key, 'gap_count': by_framework[key]}
             for key in sorted(by_framework)
@@ -188,6 +217,16 @@ def _safe_finding(finding: Finding) -> dict:
         'created_at': finding.created_at.isoformat() if finding.created_at else None,
         'updated_at': finding.updated_at.isoformat() if finding.updated_at else None,
     }
+
+
+def _report_is_archived(report: GeneratedReport) -> bool:
+    configuration = (
+        report.framework_configuration
+        if isinstance(report.framework_configuration, dict)
+        else {}
+    )
+    lifecycle = configuration.get('_lifecycle')
+    return bool(lifecycle.get('archived')) if isinstance(lifecycle, dict) else False
 
 
 @router.get('/summary')
@@ -244,13 +283,14 @@ def get_ciso_summary(
         .limit(20)
         .all()
     )
-    reports = (
+    report_candidates = (
         db.query(GeneratedReport)
         .filter(GeneratedReport.tenant_id == tenant_id)
         .order_by(GeneratedReport.created_at.desc())
-        .limit(5)
+        .limit(25)
         .all()
     )
+    reports = [report for report in report_candidates if not _report_is_archived(report)][:5]
 
     escalations = [
         {
