@@ -89,36 +89,12 @@ def _risk_trend(
             'current_findings': current_findings,
             'reason': 'No saved tenant snapshot exists. Current live exposure is not presented as a historical trend.',
         }
-    if len(snapshots) == 1:
-        baseline = snapshots[0]
-        return {
-            'status': 'baseline',
-            'baseline_at': baseline.snapshot_at.isoformat() if baseline.snapshot_at else None,
-            'baseline_critical': baseline.critical_count or 0,
-            'baseline_findings': baseline.finding_count or 0,
-            'current_critical': current_critical,
-            'current_findings': current_findings,
-            'reason': 'One saved baseline exists. A second saved snapshot is required before Tempris labels the trend improving or worsening.',
-        }
-
-    current, previous = snapshots[0], snapshots[1]
-    current_counts = (current.critical_count or 0, current.finding_count or 0)
-    previous_counts = (previous.critical_count or 0, previous.finding_count or 0)
-    if current_counts < previous_counts:
-        direction = 'improving'
-    elif current_counts > previous_counts:
-        direction = 'worsening'
-    else:
-        direction = 'stable'
     return {
-        'status': 'available',
-        'direction': direction,
-        'current_critical': current_counts[0],
-        'previous_critical': previous_counts[0],
-        'current_findings': current_counts[1],
-        'previous_findings': previous_counts[1],
-        'current_snapshot_at': current.snapshot_at.isoformat() if current.snapshot_at else None,
-        'previous_snapshot_at': previous.snapshot_at.isoformat() if previous.snapshot_at else None,
+        'status': 'unavailable',
+        'legacy_snapshot_count': len(snapshots),
+        'current_critical': current_critical,
+        'current_findings': current_findings,
+        'reason': 'Saved TES snapshots predate evidence-scoped asset-link tracking, so their finding totals are not comparable with this dashboard. Tempris will not label a trend until two evidence-scoped snapshots exist.',
     }
 
 

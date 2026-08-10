@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
-from models import Asset, AssetExposure, AuditLog, Finding
+from models import Asset, AssetExposure, AuditLog, Finding, FindingStatusHistory
 from routers.audit import AuditEntry, append_to_audit_log_db
 from routers.auth import get_auth_context, require_role
 from services.database import get_db
@@ -24,6 +24,9 @@ from services.exposure_links import (
 
 
 router = APIRouter(dependencies=[Depends(require_module("SYNTHESIS"))])
+
+EXPOSURE_CLASSIFICATION_STATUSES = {"reference_only", "not_applicable"}
+RESOLVED_FINDING_STATUSES = {"resolved", "mitigated", "closed"}
 
 
 class FindingWorkflowUpdate(BaseModel):
@@ -77,6 +80,19 @@ class FindingAssetReplacement(BaseModel):
         return list(dict.fromkeys(value.strip() for value in values if value.strip()))
 
 
+class FindingExposureClassification(BaseModel):
+    classification: str = Field(pattern="^(needs_review|reference_intelligence|not_applicable)$")
+    rationale: str = Field(min_length=10, max_length=2000)
+
+    @field_validator("rationale")
+    @classmethod
+    def normalize_rationale(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 10:
+            raise ValueError("Rationale must contain at least 10 non-whitespace characters")
+        return normalized
+
+
 
 @router.get("/overview")
 def workflow_overview(
@@ -99,10 +115,47 @@ def _asset_summary(asset: Asset) -> dict:
     }
 
 
+def _mapping_reason(finding: Finding, asset_ids: list[str], candidates: list[dict], assets: dict[str, Asset]) -> str:
+    status = (finding.status or "").strip().lower()
+    if status == "reference_only":
+        return "reference_intelligence"
+    if status == "not_applicable":
+        return "not_applicable"
+    if status in RESOLVED_FINDING_STATUSES:
+        return "closed"
+    if asset_ids:
+        return "asset_linked"
+    if finding.asset_id and finding.asset_id not in assets:
+        return "invalid_asset_link"
+    if candidates:
+        return "candidate_match"
+    if is_catalog_finding(finding):
+        return "catalogue_reference"
+    return "unclassified_intake"
+
+
+def _restore_exposure_review_status(db: Session, finding: Finding, changed_by: str, note: str) -> None:
+    old_status = (finding.status or "").strip().lower()
+    if old_status not in EXPOSURE_CLASSIFICATION_STATUSES:
+        return
+    finding.status = "unmitigated"
+    db.add(FindingStatusHistory(
+        finding_id=finding.id,
+        old_status=old_status,
+        new_status="unmitigated",
+        changed_by=changed_by,
+        notes=note,
+    ))
+
+
 @router.get("/exposures")
 def list_exposure_records(
     q: str = Query(default="", max_length=200),
     assignment: str = Query(default="all", pattern="^(all|confirmed|unassigned)$"),
+    view: str = Query(
+        default="all",
+        pattern="^(all|needs_review|suggested|unclassified|reference|asset_linked|not_applicable)$",
+    ),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -129,33 +182,39 @@ def list_exposure_records(
     assets = active_asset_map(db, auth.tenant_id)
     links = confirmed_asset_ids_by_finding(db, auth.tenant_id, assets)
     rows = query.all()
+    classified_rows = []
+    for row in rows:
+        asset_ids = sorted(links.get(row.id, set()))
+        candidates = candidate_assets(row, assets)
+        reason = _mapping_reason(row, asset_ids, candidates, assets)
+        classified_rows.append((row, asset_ids, candidates, reason))
+
     if assignment == "confirmed":
-        rows = [row for row in rows if links.get(row.id)]
+        classified_rows = [item for item in classified_rows if item[1]]
     elif assignment == "unassigned":
-        rows = [row for row in rows if not links.get(row.id)]
+        classified_rows = [item for item in classified_rows if not item[1]]
+
+    view_reasons = {
+        "needs_review": {"invalid_asset_link", "candidate_match", "unclassified_intake"},
+        "suggested": {"candidate_match"},
+        "unclassified": {"invalid_asset_link", "unclassified_intake"},
+        "reference": {"catalogue_reference", "reference_intelligence"},
+        "asset_linked": {"asset_linked"},
+        "not_applicable": {"not_applicable"},
+    }
+    if view != "all":
+        classified_rows = [item for item in classified_rows if item[3] in view_reasons[view]]
 
     priority_order = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
-    rows.sort(key=lambda row: (
-        priority_order.get((row.priority or "").upper(), 4),
-        (row.cve or row.cve_id or row.id).lower(),
-        row.id,
+    classified_rows.sort(key=lambda item: (
+        priority_order.get((item[0].priority or "").upper(), 4),
+        (item[0].cve or item[0].cve_id or item[0].id).lower(),
+        item[0].id,
     ))
-    total = len(rows)
-    page = rows[offset:offset + limit]
+    total = len(classified_rows)
+    page = classified_rows[offset:offset + limit]
     data = []
-    for finding in page:
-        asset_ids = sorted(links.get(finding.id, set()))
-        candidates = candidate_assets(finding, assets)
-        if asset_ids:
-            mapping_reason = "confirmed"
-        elif finding.asset_id and finding.asset_id not in assets:
-            mapping_reason = "invalid_asset_link"
-        elif candidates:
-            mapping_reason = "candidate_match"
-        elif is_catalog_finding(finding):
-            mapping_reason = "catalogue_reference"
-        else:
-            mapping_reason = "manual_intake"
+    for finding, asset_ids, candidates, mapping_reason in page:
         data.append({
             "finding_id": finding.id,
             "cve": finding.cve or finding.cve_id,
@@ -171,7 +230,86 @@ def list_exposure_records(
             "confirmed_assets": [_asset_summary(assets[asset_id]) for asset_id in asset_ids],
             "candidate_assets": candidates,
         })
-    return {"data": data, "total": total, "limit": limit, "offset": offset}
+    return {"data": data, "total": total, "limit": limit, "offset": offset, "view": view}
+
+
+@router.put("/findings/{finding_id}/exposure-classification")
+def classify_finding_exposure(
+    finding_id: str,
+    req: FindingExposureClassification,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("Superadmin", "Admin", "Analyst")),
+):
+    """Record an analyst decision for an unlinked finding without inventing exposure."""
+    auth = get_auth_context(user)
+    if not auth.tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant context")
+    finding = db.query(Finding).filter(
+        Finding.id == finding_id,
+        Finding.tenant_id == auth.tenant_id,
+    ).first()
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found")
+
+    assets = active_asset_map(db, auth.tenant_id)
+    if confirmed_asset_ids_by_finding(db, auth.tenant_id, assets).get(finding.id):
+        raise HTTPException(
+            status_code=409,
+            detail="Clear the affected asset assignment before classifying this record as reference or not applicable",
+        )
+
+    target_status = {
+        "needs_review": "unmitigated",
+        "reference_intelligence": "reference_only",
+        "not_applicable": "not_applicable",
+    }[req.classification]
+    old_status = (finding.status or "unmitigated").strip().lower()
+    if old_status in RESOLVED_FINDING_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail="Closed or resolved findings must be reopened through their finding workflow before exposure classification",
+        )
+    if req.classification == "needs_review" and old_status not in EXPOSURE_CLASSIFICATION_STATUSES:
+        return {
+            "status": "unchanged",
+            "finding_id": finding.id,
+            "classification": "needs_review",
+        }
+    if old_status == target_status:
+        return {
+            "status": "unchanged",
+            "finding_id": finding.id,
+            "classification": req.classification,
+        }
+
+    finding.status = target_status
+    db.add(FindingStatusHistory(
+        finding_id=finding.id,
+        old_status=old_status,
+        new_status=target_status,
+        changed_by=auth.user_id,
+        notes=req.rationale,
+    ))
+    append_to_audit_log_db(db, AuditEntry(
+        user=auth.user_id,
+        action="FINDING_EXPOSURE_CLASSIFIED",
+        module="SPECTRUM",
+        detail=f"Classified {finding.id} as {req.classification}",
+        metadata={
+            "finding_id": finding.id,
+            "previous_status": old_status,
+            "new_status": target_status,
+            "classification": req.classification,
+            "rationale_recorded": True,
+        },
+    ), commit=False)
+    db.commit()
+    return {
+        "status": "updated",
+        "finding_id": finding.id,
+        "classification": req.classification,
+    }
 
 
 @router.get("/exposure-activity")
@@ -191,6 +329,7 @@ def list_exposure_activity(
         AuditLog.action.in_((
             "FINDING_ASSETS_CONFIRMED",
             "FINDING_ASSET_ASSIGNMENT_UPDATED",
+            "FINDING_EXPOSURE_CLASSIFIED",
         )),
     ).order_by(AuditLog.id.desc()).limit(250).all()
     finding_ids = {
@@ -215,7 +354,10 @@ def list_exposure_activity(
         before_ids = list(metadata.get("before_asset_ids") or [])
         added_ids = list(metadata.get("added_asset_ids") or after_ids)
         removed_ids = list(metadata.get("removed_asset_ids") or [])
-        if added_ids and removed_ids:
+        if row.action == "FINDING_EXPOSURE_CLASSIFIED":
+            classification = str(metadata.get("classification") or "reviewed").replace("_", " ")
+            change = f"Classified: {classification}"
+        elif added_ids and removed_ids:
             change = "Reassigned"
         elif removed_ids and not after_ids:
             change = "Cleared"
@@ -296,6 +438,12 @@ def confirm_finding_asset_links(
             detail=f"Assets are not active in this tenant: {', '.join(missing)}",
         )
     ordered_assets = [by_id[asset_id] for asset_id in req.asset_ids]
+    _restore_exposure_review_status(
+        db,
+        finding,
+        auth.user_id,
+        "Returned to active review because an analyst recorded an affected asset",
+    )
     confirm_finding_assets(
         db, finding, ordered_assets, auth.user_id, req.evidence,
     )
@@ -373,6 +521,13 @@ def replace_finding_asset_links(
         )
 
     ordered_assets = [by_id[asset_id] for asset_id in req.asset_ids]
+    if ordered_assets:
+        _restore_exposure_review_status(
+            db,
+            finding,
+            auth.user_id,
+            "Returned to active review because an analyst recorded an affected asset",
+        )
     before, after, added, removed = set_finding_assets(
         db, finding, ordered_assets, auth.user_id, evidence or None,
     )

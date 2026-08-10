@@ -21,6 +21,7 @@ from models import (
     Base,
     ControlStatus,
     Finding,
+    FindingStatusHistory,
     GeneratedReport,
     GrcPolicyDocument,
     IncidentReport,
@@ -256,7 +257,9 @@ def test_ciso_summary_is_tenant_scoped_and_redacted():
         'unlinked_open': 0,
     }
     assert data['metric_scope'] == 'confirmed_asset_linked_findings'
-    assert data['risk_trend']['direction'] == 'improving'
+    assert data['risk_trend']['status'] == 'unavailable'
+    assert data['risk_trend']['legacy_snapshot_count'] == 2
+    assert 'not comparable' in data['risk_trend']['reason']
     assert data['deadline_summary']['counts']['remediation_sla']['overdue'] == 1
     assert data['exposure_coverage']['asset_linked_count'] == 1
     assert data['exposure_coverage']['aggregate_tes'] == 8.0
@@ -706,6 +709,103 @@ def test_catalogue_record_becomes_actionable_only_after_asset_identity_match():
     assert candidate['candidate_assets'][0]['asset_id'] == 'ASSET-CITRIX'
     assert candidate['candidate_assets'][0]['confidence'] >= 0.9
     assert exposure['asset_linked_count'] == 1  # Existing seeded finding only; no auto-confirmation.
+
+
+def test_exposure_review_views_and_analyst_classification_are_explicit_and_audited():
+    seed_executive_data()
+    db = TestingSessionLocal()
+    db.add_all([
+        Asset(
+            id='ASSET-CITRIX-REVIEW', tenant_id='tenant-alpha',
+            name='Citrix NetScaler ADC', hostname='adc.alpha.test',
+            status='active', tags=['citrix', 'netscaler'],
+        ),
+        Finding(
+            id='F-REVIEW-SUGGESTED', tenant_id='tenant-alpha',
+            cve='CVE-2026-9001', title='Citrix NetScaler ADC vulnerability',
+            vendor='Citrix', product='NetScaler ADC', priority='P0',
+            status='unmitigated', source='kev', cisa_kev=True,
+        ),
+        Finding(
+            id='F-REVIEW-INTAKE', tenant_id='tenant-alpha',
+            cve='SSS-2026-BLFLAW-TEST', title='Business logic intake',
+            priority='P1', status='unmitigated', source='sss',
+        ),
+        Finding(
+            id='F-REFERENCE-CATALOGUE', tenant_id='tenant-alpha',
+            cve='CVE-2026-9002', title='Unmatched catalogue reference',
+            priority='P1', status='unmitigated', source='kev', cisa_kev=True,
+        ),
+    ])
+    db.commit()
+    db.close()
+
+    client = TestClient(app)
+    admin = headers_for('alpha-admin@example.test')
+    analyst = headers_for('alpha-analyst@example.test')
+
+    review = client.get('/api/workflow/exposures?view=needs_review', headers=admin)
+    assert review.status_code == 200
+    assert review.json()['total'] == 2
+    assert {row['mapping_reason'] for row in review.json()['data']} == {
+        'candidate_match', 'unclassified_intake',
+    }
+
+    reference = client.get('/api/workflow/exposures?view=reference', headers=admin)
+    assert reference.status_code == 200
+    assert reference.json()['total'] == 1
+    assert reference.json()['data'][0]['mapping_reason'] == 'catalogue_reference'
+
+    classified = client.put(
+        '/api/workflow/findings/F-REVIEW-INTAKE/exposure-classification',
+        headers=analyst,
+        json={
+            'classification': 'reference_intelligence',
+            'rationale': 'Research record only; no customer asset evidence exists.',
+        },
+    )
+    assert classified.status_code == 200
+    assert classified.json()['classification'] == 'reference_intelligence'
+
+    updated_review = client.get('/api/workflow/exposures?view=needs_review', headers=admin).json()
+    assert updated_review['total'] == 1
+    updated_reference = client.get('/api/workflow/exposures?view=reference', headers=admin).json()
+    assert updated_reference['total'] == 2
+    overview = client.get('/api/workflow/overview', headers=admin).json()['exposure']
+    assert overview['mapping_required_count'] == 1
+    assert overview['analyst_reference_intelligence_count'] == 1
+    assert overview['catalog_intelligence_count'] == 2
+
+    db = TestingSessionLocal()
+    finding = db.query(Finding).filter(Finding.id == 'F-REVIEW-INTAKE').one()
+    assert finding.status == 'reference_only'
+    history = db.query(FindingStatusHistory).filter(
+        FindingStatusHistory.finding_id == finding.id,
+    ).one()
+    assert history.new_status == 'reference_only'
+    assert history.changed_by == 'alpha-analyst@example.test'
+    audit = db.query(AuditLog).filter(
+        AuditLog.action == 'FINDING_EXPOSURE_CLASSIFIED',
+    ).one()
+    assert audit.tenant_id == 'tenant-alpha'
+    db.close()
+
+    linked = client.put(
+        '/api/workflow/findings/F-REVIEW-INTAKE/assets',
+        headers=analyst,
+        json={
+            'asset_ids': ['ASSET-ALPHA'],
+            'evidence': 'Analyst later confirmed the affected application on Alpha Gateway.',
+        },
+    )
+    assert linked.status_code == 200
+    db = TestingSessionLocal()
+    restored = db.query(Finding).filter(Finding.id == 'F-REVIEW-INTAKE').one()
+    assert restored.status == 'unmitigated'
+    assert db.query(FindingStatusHistory).filter(
+        FindingStatusHistory.finding_id == restored.id,
+    ).count() == 2
+    db.close()
 def test_sql_shaped_ids_and_tenant_mass_assignment_fail_closed():
     client = TestClient(app)
     alpha_headers = headers_for('alpha-admin@example.test')

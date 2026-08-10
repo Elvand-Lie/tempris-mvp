@@ -506,7 +506,7 @@
     const posture = titleCase(data.overall_risk_posture);
     const trend = data.risk_trend?.status === 'available'
       ? titleCase(data.risk_trend.direction)
-      : data.risk_trend?.status === 'baseline' ? 'Baseline' : 'No baseline';
+      : 'Not comparable';
     const assets = data.highest_risk_assets?.items || [];
     const actions = data.executive_actions?.items || [];
     const escalations = data.recent_escalations?.items || [];
@@ -516,31 +516,29 @@
 
     host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="ciso">
       <header class="tmx-heading">
-        <div><h1>CISO Dashboard</h1><p>Executive view of confirmed customer exposure. Only open findings linked to active tenant assets affect risk metrics.</p></div>
+        <div><h1>CISO Dashboard</h1><p>Executive view of open vulnerability records linked to active customer assets. Catalogue references and unclassified intake do not affect these risk metrics.</p></div>
         <button type="button" class="tmx-button" data-ciso-refresh>Refresh</button>
       </header>
       <section class="tmx-metrics" aria-label="Executive metrics">
-        <div class="tmx-metric"><div class="tmx-metric-label">Confirmed posture</div><div class="tmx-metric-value ${metricTone(posture)}">${escapeHtml(posture)}</div></div>
-        <div class="tmx-metric"><div class="tmx-metric-label">Confirmed critical vulnerabilities</div><div class="tmx-metric-value tmx-tone-critical">${escapeHtml(findings.critical ?? 0)}</div></div>
-        <div class="tmx-metric"><div class="tmx-metric-label">Confirmed high vulnerabilities</div><div class="tmx-metric-value tmx-tone-high">${escapeHtml(findings.high ?? 0)}</div></div>
-        <div class="tmx-metric"><div class="tmx-metric-label">Confirmed vulnerabilities</div><div class="tmx-metric-value tmx-tone-neutral">${escapeHtml(findings.unresolved ?? 0)}</div></div>
-        <div class="tmx-metric"><div class="tmx-metric-label">Awaiting analyst mapping</div><div class="tmx-metric-value ${coverage.mapping_required_count ? 'tmx-tone-high' : 'tmx-tone-success'}">${escapeHtml(coverage.mapping_required_count ?? 0)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Asset-linked posture</div><div class="tmx-metric-value ${metricTone(posture)}">${escapeHtml(posture)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Asset-linked critical records</div><div class="tmx-metric-value tmx-tone-critical">${escapeHtml(findings.critical ?? 0)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Asset-linked high records</div><div class="tmx-metric-value tmx-tone-high">${escapeHtml(findings.high ?? 0)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Asset-linked open records</div><div class="tmx-metric-value tmx-tone-neutral">${escapeHtml(findings.unresolved ?? 0)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Needs exposure classification</div><div class="tmx-metric-value ${coverage.mapping_required_count ? 'tmx-tone-high' : 'tmx-tone-success'}">${escapeHtml(coverage.mapping_required_count ?? 0)}</div></div>
         <div class="tmx-metric"><div class="tmx-metric-label">Reference intelligence</div><div class="tmx-metric-value tmx-tone-neutral">${escapeHtml(coverage.catalog_intelligence_count ?? 0)}</div></div>
       </section>
       <div class="tmx-grid">
         <section class="tmx-panel tmx-panel-wide">
-          <div class="tmx-panel-header"><div><h2>Customer Exposure Evidence</h2><p>A vulnerability becomes confirmed only when evidence links it to an active customer asset. Global catalogue entries remain reference intelligence.</p></div></div>
-          <div class="tmx-panel-body tmx-coverage-flow"><div><strong>${escapeHtml(coverage.asset_linked_count ?? 0)}</strong><span>Confirmed vulnerabilities</span></div><b>·</b><div><strong>${escapeHtml(coverage.confirmed_exposure_count ?? 0)}</strong><span>Affected asset links</span></div><b>·</b><div><strong>${escapeHtml(coverage.scored_asset_linked_count ?? 0)}</strong><span>With complete TES inputs</span></div></div>
-          <div class="tmx-panel-body tmx-exposure-explainer">One vulnerability linked to three assets equals one confirmed vulnerability and three affected asset links.</div>
-          ${coverage.mapping_required_count ? `<div class="tmx-notice"><strong>Analyst review:</strong><span>${escapeHtml(coverage.mapping_required_count)} record(s) require asset confirmation in Intake &amp; Triage. The ${escapeHtml(coverage.catalog_intelligence_count ?? 0)} reference-only records do not require manual mapping.</span></div>` : ''}
+          <div class="tmx-panel-header"><div><h2>Customer Exposure Links</h2><p>An asset link says a vulnerability record has been associated with an active customer asset. Evidence-backed and imported legacy links are shown separately.</p></div></div>
+          <div class="tmx-panel-body tmx-coverage-flow"><div><strong>${escapeHtml(coverage.asset_linked_count ?? 0)}</strong><span>Asset-linked vulnerability records</span></div><b>·</b><div><strong>${escapeHtml(coverage.confirmed_exposure_count ?? 0)}</strong><span>Affected asset links</span></div><b>·</b><div><strong>${escapeHtml(coverage.scored_asset_linked_count ?? 0)}</strong><span>With complete TES inputs</span></div></div>
+          <div class="tmx-panel-body tmx-exposure-explainer">Evidence-backed links: ${escapeHtml(coverage.evidence_backed_link_count ?? 0)}. Imported legacy links without a dedicated evidence row: ${escapeHtml(coverage.legacy_link_count ?? 0)}. One vulnerability linked to three assets equals one vulnerability record and three affected-asset links.</div>
+          ${coverage.mapping_required_count ? `<div class="tmx-notice"><strong>Analyst action:</strong><span>${escapeHtml(coverage.mapping_required_count)} record(s) need exposure classification in Intake &amp; Triage: assign supported assets, keep as reference intelligence, or mark not applicable with a rationale. The ${escapeHtml(coverage.catalog_intelligence_count ?? 0)} reference-intelligence records are outside this action queue.</span></div>` : ''}
         </section>
         <section class="tmx-panel">
           <div class="tmx-panel-header"><h2>Risk Trend</h2><span class="tmx-status ${statusClass(trend)}">${escapeHtml(trend)}</span></div>
           <div class="tmx-panel-body">${data.risk_trend?.status === 'available'
             ? `<div class="tmx-list-row"><div><div class="tmx-list-title">Confirmed vulnerabilities at latest snapshot</div><div class="tmx-list-detail">${escapeHtml(formatDate(data.risk_trend.current_snapshot_at))}; previous ${escapeHtml(formatDate(data.risk_trend.previous_snapshot_at))}: ${escapeHtml(data.risk_trend.previous_findings ?? 0)}</div></div><strong>${escapeHtml(data.risk_trend.current_findings ?? 0)}</strong></div><div class="tmx-list-row"><div><div class="tmx-list-title">Critical vulnerabilities at latest snapshot</div><div class="tmx-list-detail">Previous snapshot: ${escapeHtml(data.risk_trend.previous_critical ?? 0)}</div></div><strong>${escapeHtml(data.risk_trend.current_critical ?? 0)}</strong></div>`
-            : data.risk_trend?.status === 'baseline'
-              ? `<div class="tmx-list-row"><div><div class="tmx-list-title">Saved baseline: ${escapeHtml(data.risk_trend.baseline_findings ?? 0)} confirmed vulnerabilities</div><div class="tmx-list-detail">Saved ${escapeHtml(formatDate(data.risk_trend.baseline_at))}. Current live view: ${escapeHtml(data.risk_trend.current_findings ?? 0)}. ${escapeHtml(data.risk_trend.reason)}</div></div></div>`
-              : `<div class="tmx-list-row"><div><div class="tmx-list-title">No saved baseline</div><div class="tmx-list-detail">${escapeHtml(data.risk_trend?.reason || 'A saved snapshot is required for comparison.')}</div></div></div>`}</div>
+            : `<div class="tmx-list-row"><div><div class="tmx-list-title">No comparable exposure trend yet</div><div class="tmx-list-detail">${escapeHtml(data.risk_trend?.reason || 'Two evidence-scoped snapshots are required for comparison.')}</div></div></div>`}</div>
         </section>
         <section class="tmx-panel">
           <div class="tmx-panel-header"><h2>Recorded Control Assessments</h2><span class="tmx-status">${escapeHtml(gaps.assessed_controls ?? 0)} recorded</span></div>
@@ -952,14 +950,29 @@
       ?? ((overview.exposure?.unlinked_count || 0) + (overview.exposure?.invalid_asset_link_count || 0));
     const catalogCount = overview.exposure?.catalog_intelligence_count || 0;
     const candidateCount = overview.exposure?.candidate_match_count || 0;
+    const unclassifiedCount = overview.exposure?.unclassified_intake_count || 0;
     const mappingById = new Map((exposureRecords.data || []).map((item) => [item.finding_id, item]));
     const exposureReason = (item) => {
       const candidates = item.candidate_assets || [];
-      if (item.mapping_reason === 'confirmed') return `Confirmed on ${item.confirmed_asset_ids?.length || 0} asset${item.confirmed_asset_ids?.length === 1 ? '' : 's'}`;
+      if (item.mapping_reason === 'asset_linked') return `Linked to ${item.confirmed_asset_ids?.length || 0} active asset${item.confirmed_asset_ids?.length === 1 ? '' : 's'}`;
       if (item.mapping_reason === 'candidate_match') return `${candidates.length} suggested asset match${candidates.length === 1 ? '' : 'es'} - analyst confirmation required`;
       if (item.mapping_reason === 'invalid_asset_link') return 'Previous asset is inactive - review required';
       if (item.mapping_reason === 'catalogue_reference') return 'Catalogue reference - no customer exposure confirmed';
-      return 'Manual intake - no customer asset confirmed';
+      if (item.mapping_reason === 'reference_intelligence') return 'Analyst classified as reference intelligence';
+      if (item.mapping_reason === 'not_applicable') return 'Analyst marked not applicable';
+      if (item.mapping_reason === 'closed') return 'Closed or resolved finding';
+      return 'Intake record - exposure has not been classified';
+    };
+    const exposureActions = (item) => {
+      if (item.mapping_reason === 'asset_linked') {
+        return `<button type="button" class="tmx-button" data-map-finding="${escapeHtml(item.finding_id)}">Manage assets</button>`;
+      }
+      if (item.mapping_reason === 'reference_intelligence' || item.mapping_reason === 'not_applicable') {
+        return `<button type="button" class="tmx-button tmx-button-secondary" data-classify-finding="${escapeHtml(item.finding_id)}" data-classification="needs_review">Return to review</button>`;
+      }
+      if (item.mapping_reason === 'closed') return '';
+      const reviewActions = item.mapping_reason === 'catalogue_reference' ? '' : `<button type="button" class="tmx-button tmx-button-secondary" data-classify-finding="${escapeHtml(item.finding_id)}" data-classification="reference_intelligence">Keep as reference</button><button type="button" class="tmx-button tmx-button-secondary" data-classify-finding="${escapeHtml(item.finding_id)}" data-classification="not_applicable">Not applicable</button>`;
+      return `<button type="button" class="tmx-button" data-map-finding="${escapeHtml(item.finding_id)}" ${assets.length ? '' : 'disabled'}>Assign assets</button>${reviewActions}`;
     };
     const exposureRowsHtml = (records) => records.length ? records.map((item) => {
       const candidates = item.candidate_assets || [];
@@ -969,26 +982,28 @@
         : candidates.length
           ? `<div class="tmx-candidate-summary">Suggested only: ${candidates.map((candidate) => `${escapeHtml(candidate.name)} (${Math.round(candidate.confidence * 100)}%)`).join(', ')}</div>`
           : '';
-      return `<div class="tmx-list-row tmx-mapping-row" data-mapping-row="${escapeHtml(item.finding_id)}"><div><div class="tmx-list-title">${escapeHtml(item.title)}</div><div class="tmx-list-detail">${escapeHtml(item.cve || item.source)} - ${escapeHtml(item.priority || 'No priority')} - ${escapeHtml(exposureReason(item))}</div>${context}</div><div class="tmx-mapping-controls"><button type="button" class="tmx-button" data-map-finding="${escapeHtml(item.finding_id)}" ${assets.length ? '' : 'disabled'}>${item.confirmed_asset_ids?.length ? 'Manage assets' : 'Assign assets'}</button></div></div>`;
-    }).join('') : '<div class="tmx-empty">No vulnerabilities match this search and assignment filter.</div>';
+      return `<div class="tmx-list-row tmx-mapping-row" data-mapping-row="${escapeHtml(item.finding_id)}"><div><div class="tmx-list-title">${escapeHtml(item.title)}</div><div class="tmx-list-detail">${escapeHtml(item.cve || item.source)} - source: ${escapeHtml(item.source)} - ${escapeHtml(item.priority || 'No priority')} - ${escapeHtml(exposureReason(item))}</div>${context}</div><div class="tmx-mapping-controls">${exposureActions(item)}</div></div>`;
+    }).join('') : '<div class="tmx-empty">No vulnerability records match this search and review-state filter.</div>';
     const recentRows = (exposureActivity.data || []).length
       ? exposureActivity.data.map((item) => `<div class="tmx-recent-change"><div><strong>${escapeHtml(item.change)} - ${escapeHtml(item.cve || item.finding_id)}</strong><span>${escapeHtml(item.title)} - ${escapeHtml((item.asset_names || []).join(', ') || 'No assets assigned')} - ${escapeHtml(item.recorded_by || 'Unknown user')}</span></div><button type="button" class="tmx-button tmx-button-secondary" data-map-finding="${escapeHtml(item.finding_id)}">Manage assets</button></div>`).join('')
-      : '<div class="tmx-empty">No asset-assignment changes have been recorded yet.</div>';
+      : '<div class="tmx-empty">No exposure-review changes have been recorded yet.</div>';
     const mappingQueue = canManage ? `<section class="tmx-panel">
-      <div class="tmx-panel-header"><div><h2>Customer Exposure Assignments</h2><p>Search any tenant CVE or finding, then add, remove, replace, or clear its customer assets. Suggestions are highlighted but never selected automatically.</p></div><div class="tmx-header-actions"><button type="button" class="tmx-button tmx-button-secondary" data-recent-toggle aria-expanded="false">Recent changes</button><span class="tmx-status ${mappingTotal ? 'tmx-status-high' : 'tmx-status-available'}">${escapeHtml(mappingTotal)} to review</span></div></div>
-      <div class="tmx-exposure-summary"><div><strong>${escapeHtml(candidateCount)}</strong><span>candidate matches</span></div><div><strong>${escapeHtml(catalogCount)}</strong><span>catalogue-only records</span></div><div><strong>${escapeHtml(overview.exposure?.confirmed_exposure_count || 0)}</strong><span>confirmed occurrences</span></div></div>
-      <div class="tmx-recent-changes" data-recent-changes hidden><div class="tmx-recent-heading"><strong>Five most recent assignment changes</strong><span>Full history remains in the tamper-evident Audit Log.</span></div>${recentRows}</div>
-      <div class="tmx-exposure-tools"><label><span>Search vulnerabilities</span><input class="tmx-search" type="search" data-exposure-search placeholder="CVE, finding ID, title, vendor, or product"></label><label><span>Assignment</span><select data-exposure-filter><option value="all">All records</option><option value="confirmed">Assigned</option><option value="unassigned">Unassigned</option></select></label><span data-exposure-count>${escapeHtml(exposureRecords.total || 0)} records</span></div>
+      <div class="tmx-panel-header"><div><h2>Vulnerability Exposure Review Queue</h2><p>The ${escapeHtml(mappingTotal)} records here are system-selected for review: ${escapeHtml(candidateCount)} have keyword-based asset suggestions and ${escapeHtml(unclassifiedCount)} are non-catalogue intake records. A suggestion is not proof. Assign supported assets, keep the record as reference intelligence, or mark it not applicable with a rationale.</p></div><div class="tmx-header-actions"><button type="button" class="tmx-button tmx-button-secondary" data-recent-toggle aria-expanded="false">Recent changes</button><span class="tmx-status ${mappingTotal ? 'tmx-status-high' : 'tmx-status-available'}">${escapeHtml(mappingTotal)} needs classification</span></div></div>
+      <div class="tmx-exposure-summary"><div><strong>${escapeHtml(candidateCount)}</strong><span>suggested matches</span></div><div><strong>${escapeHtml(unclassifiedCount)}</strong><span>unclassified intake</span></div><div><strong>${escapeHtml(catalogCount)}</strong><span>reference intelligence</span></div></div>
+      <div class="tmx-recent-changes" data-recent-changes hidden><div class="tmx-recent-heading"><strong>Five most recent exposure-review changes</strong><span>Asset assignments and classifications are retained in the tamper-evident Audit Log.</span></div>${recentRows}</div>
+      <div class="tmx-exposure-tools"><label><span>Search vulnerability records</span><input class="tmx-search" type="search" data-exposure-search placeholder="CVE, finding ID, title, vendor, or product"></label><label><span>Review state</span><select data-exposure-filter><option value="needs_review">Needs classification</option><option value="suggested">Suggested asset matches</option><option value="unclassified">Unclassified intake</option><option value="reference">Reference intelligence</option><option value="asset_linked">Asset-linked records</option><option value="not_applicable">Not applicable</option><option value="all">All records</option></select></label><span data-exposure-count>${escapeHtml(exposureRecords.total || 0)} records</span></div>
       <div class="tmx-panel-body"><div class="tmx-list" data-exposure-results>${exposureRowsHtml(exposureRecords.data || [])}</div></div>
     </section>` : '';
     const assetPicker = canManage ? `<div class="tmx-asset-picker-backdrop" data-asset-picker hidden><section class="tmx-asset-picker" role="dialog" aria-modal="true" aria-labelledby="tmx-asset-picker-title"><header><div><h2 id="tmx-asset-picker-title">Manage affected assets</h2><p data-asset-picker-context></p></div><button type="button" class="tmx-icon-button" data-asset-picker-close aria-label="Close asset picker">x</button></header><div class="tmx-asset-picker-body"><label class="tmx-field"><span>Search customer inventory</span><input type="search" data-asset-picker-search placeholder="Asset name, hostname, IP, owner, or environment"></label><div class="tmx-asset-options" data-asset-picker-options></div><label class="tmx-field"><span>Change evidence / note</span><textarea rows="3" maxlength="2000" data-asset-picker-evidence placeholder="Scanner observation, software inventory, SBOM, service banner, analyst verification, or reason for removal"></textarea></label><div class="tmx-form-message" data-asset-picker-message></div></div><footer><button type="button" class="tmx-button tmx-button-danger" data-asset-picker-clear>Clear all</button><span class="tmx-picker-spacer"></span><button type="button" class="tmx-button tmx-button-secondary" data-asset-picker-close>Cancel</button><button type="button" class="tmx-button" data-asset-picker-confirm>Save assignment</button></footer></section></div>` : '';
+    const classificationDialog = canManage ? `<div class="tmx-asset-picker-backdrop" data-classification-dialog hidden><section class="tmx-asset-picker" role="dialog" aria-modal="true" aria-labelledby="tmx-classification-title"><header><div><h2 id="tmx-classification-title" data-classification-title>Classify vulnerability record</h2><p data-classification-context></p></div><button type="button" class="tmx-icon-button" data-classification-close aria-label="Close classification dialog">x</button></header><div class="tmx-asset-picker-body"><div class="tmx-notice"><strong data-classification-label>Classification</strong><span data-classification-help></span></div><label class="tmx-field"><span>Analyst rationale</span><textarea rows="5" minlength="10" maxlength="2000" data-classification-rationale placeholder="Record the evidence or reasoning for this classification."></textarea></label><div class="tmx-form-message" data-classification-message></div></div><footer><span class="tmx-picker-spacer"></span><button type="button" class="tmx-button tmx-button-secondary" data-classification-close>Cancel</button><button type="button" class="tmx-button" data-classification-confirm>Save classification</button></footer></section></div>` : '';
     host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="sss-intake">
-      <header class="tmx-heading"><div><h1>Non-CVE Intake & Triage</h1><p>Record evidence, map it to a real customer asset, then manage the EDIP response decision. Unmapped records remain triage data.</p></div><button type="button" class="tmx-button tmx-button-secondary" data-sss-refresh>Refresh</button></header>
-      <div class="tmx-coverage-flow"><div><strong>1</strong><span>Record evidence</span></div><b>→</b><div><strong>2</strong><span>Map customer asset</span></div><b>→</b><div><strong>3</strong><span>Prioritise in SPECTRUM</span></div><b>→</b><div><strong>4</strong><span>Summarise in CISO</span></div></div>
+      <header class="tmx-heading"><div><h1>Intake &amp; Triage</h1><p>Create tenant-scoped vulnerability records and decide whether they affect customer assets. Every submitted intake is stored in the shared findings database and is searchable in SPECTRUM; it affects CISO exposure only after an active asset is linked.</p></div><button type="button" class="tmx-button tmx-button-secondary" data-sss-refresh>Refresh</button></header>
+      <div class="tmx-coverage-flow"><div><strong>1</strong><span>Submit intake to findings database</span></div><b>→</b><div><strong>2</strong><span>Classify exposure</span></div><b>→</b><div><strong>3</strong><span>Prioritise and decide in SPECTRUM</span></div><b>→</b><div><strong>4</strong><span>Summarise asset-linked risk in CISO</span></div></div>
       ${intake}
       ${postureIntake}
       ${mappingQueue}
       ${assetPicker}
+      ${classificationDialog}
       <section class="tmx-panel"><div class="tmx-panel-header"><h2>Tenant Findings</h2><input class="tmx-search" data-sss-search aria-label="Filter findings" placeholder="Filter by title, ID, class, or status"></div><div class="tmx-panel-body"><div class="tmx-finding-grid" aria-live="polite">${cards}</div></div></section>
     </div>`;
 
@@ -1101,7 +1116,10 @@
       } catch (error) { button.disabled = false; window.alert(error.message || 'Update failed.'); }
     }));
     const picker = host.querySelector('[data-asset-picker]');
+    const classificationModal = host.querySelector('[data-classification-dialog]');
     let activeMappingId = null;
+    let activeClassificationId = null;
+    let activeClassification = null;
     let exposureSearchTimer = null;
     const pickerSelection = new Set();
     const closeAssetPicker = () => {
@@ -1109,6 +1127,36 @@
       picker.hidden = true;
       activeMappingId = null;
       document.body.classList.remove('tmx-modal-open');
+    };
+    const closeClassificationDialog = () => {
+      if (!classificationModal) return;
+      classificationModal.hidden = true;
+      activeClassificationId = null;
+      activeClassification = null;
+      document.body.classList.remove('tmx-modal-open');
+    };
+    const openClassificationDialog = async (findingId, classification) => {
+      if (!classificationModal) return;
+      const item = await fetchMappingItem(findingId);
+      if (!item) return;
+      const descriptions = {
+        reference_intelligence: ['Keep as reference intelligence', 'Use this when the record is useful vulnerability intelligence but there is currently no evidence that it affects a customer asset.'],
+        not_applicable: ['Mark not applicable', 'Use this when evidence shows the vulnerability does not apply to this customer or environment.'],
+        needs_review: ['Return to exposure review', 'Use this when the record must be assessed again for affected customer assets.'],
+      };
+      const [label, help] = descriptions[classification] || descriptions.needs_review;
+      activeClassificationId = item.finding_id;
+      activeClassification = classification;
+      classificationModal.hidden = false;
+      document.body.classList.add('tmx-modal-open');
+      classificationModal.querySelector('[data-classification-title]').textContent = label;
+      classificationModal.querySelector('[data-classification-context]').textContent = `${item.cve || item.source}: ${item.title}`;
+      classificationModal.querySelector('[data-classification-label]').textContent = label;
+      classificationModal.querySelector('[data-classification-help]').textContent = help;
+      classificationModal.querySelector('[data-classification-rationale]').value = '';
+      classificationModal.querySelector('[data-classification-message]').textContent = '';
+      classificationModal.querySelector('[data-classification-confirm]').disabled = false;
+      classificationModal.querySelector('[data-classification-rationale]').focus();
     };
     const renderAssetPickerOptions = (item, query = '') => {
       const options = picker.querySelector('[data-asset-picker-options]');
@@ -1126,7 +1174,7 @@
     };
     const fetchMappingItem = async (findingId) => {
       if (mappingById.has(findingId)) return mappingById.get(findingId);
-      const result = await api(`/api/workflow/exposures?q=${encodeURIComponent(findingId)}&limit=10`);
+      const result = await api(`/api/workflow/exposures?q=${encodeURIComponent(findingId)}&view=all&limit=10`);
       const item = (result.data || []).find((row) => row.finding_id === findingId);
       if (item) mappingById.set(item.finding_id, item);
       return item;
@@ -1157,7 +1205,7 @@
       if (!search || !filter || !results) return;
       results.innerHTML = '<div class="tmx-empty">Searching tenant findings...</div>';
       try {
-        const payload = await api(`/api/workflow/exposures?q=${encodeURIComponent(search.value.trim())}&assignment=${encodeURIComponent(filter.value)}&limit=50`);
+        const payload = await api(`/api/workflow/exposures?q=${encodeURIComponent(search.value.trim())}&view=${encodeURIComponent(filter.value)}&limit=50`);
         mappingById.clear();
         (payload.data || []).forEach((item) => mappingById.set(item.finding_id, item));
         results.innerHTML = exposureRowsHtml(payload.data || []);
@@ -1183,6 +1231,11 @@
     host.addEventListener('click', (event) => {
       const button = event.target.closest('[data-map-finding]');
       if (button) openAssetPicker(button.dataset.mapFinding).catch((error) => window.alert(error.message || 'Unable to load the finding.'));
+      const classificationButton = event.target.closest('[data-classify-finding]');
+      if (classificationButton) openClassificationDialog(
+        classificationButton.dataset.classifyFinding,
+        classificationButton.dataset.classification,
+      ).catch((error) => window.alert(error.message || 'Unable to load the finding.'));
     });
     if (picker) {
       picker.querySelectorAll('[data-asset-picker-close]').forEach((button) => button.addEventListener('click', closeAssetPicker));
@@ -1232,6 +1285,36 @@
         }
       });
     }
+    if (classificationModal) {
+      classificationModal.querySelectorAll('[data-classification-close]').forEach((button) => button.addEventListener('click', closeClassificationDialog));
+      classificationModal.addEventListener('click', (event) => { if (event.target === classificationModal) closeClassificationDialog(); });
+      classificationModal.querySelector('[data-classification-confirm]').addEventListener('click', async (event) => {
+        const rationaleInput = classificationModal.querySelector('[data-classification-rationale]');
+        const message = classificationModal.querySelector('[data-classification-message]');
+        const rationale = rationaleInput.value.trim();
+        if (rationale.length < 10) {
+          message.textContent = 'Record at least 10 characters explaining the classification.';
+          rationaleInput.focus();
+          return;
+        }
+        const button = event.currentTarget;
+        button.disabled = true;
+        message.textContent = 'Saving classification...';
+        try {
+          await api(`/api/workflow/findings/${encodeURIComponent(activeClassificationId)}/exposure-classification`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ classification: activeClassification, rationale }),
+          });
+          closeClassificationDialog();
+          workflowOverview = null;
+          cisoSummary = null;
+          await renderSssRoute(host, true);
+        } catch (error) {
+          button.disabled = false;
+          message.textContent = error.message || 'Classification failed.';
+        }
+      });
+    }
     host.querySelectorAll('[data-sss-resolve]').forEach((button) => button.addEventListener('click', () => {
       const panel = button.closest('.tmx-finding-card').querySelector('[data-sss-resolution-form]');
       panel.hidden = false;
@@ -1275,7 +1358,7 @@
       const [assets, overview, exposureRecords, exposureActivity] = await Promise.all([
         staff ? loadTenantAssets(force).catch(() => []) : Promise.resolve([]),
         staff ? loadWorkflowOverview(force).catch(() => ({})) : Promise.resolve({}),
-        staff ? api('/api/workflow/exposures?limit=50').catch(() => ({ data: [], total: 0 })) : Promise.resolve({ data: [], total: 0 }),
+        staff ? api('/api/workflow/exposures?view=needs_review&limit=50').catch(() => ({ data: [], total: 0 })) : Promise.resolve({ data: [], total: 0 }),
         staff ? api('/api/workflow/exposure-activity?limit=5').catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
       ]);
       if (window.location.pathname === '/sss-intake') renderSssIntake(host, findings, config, assets, overview, exposureRecords, exposureActivity);

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from models import (
     Asset,
+    AssetExposure,
     AuditLog,
     ChatSession,
     ControlStatus,
@@ -30,6 +31,7 @@ from models import (
 )
 from services.entitlements import get_tenant_package
 from services.exposure_links import (
+    CONFIRMED_STATUSES,
     active_asset_map,
     candidate_assets,
     confirmed_asset_ids_by_finding,
@@ -74,11 +76,21 @@ def _date_state(value: str | None, today: date) -> str | None:
 
 
 def build_exposure_coverage(db: Session, tenant_id: str) -> dict:
-    """Separate confirmed customer exposure from global vulnerability intelligence."""
+    """Separate asset-linked records, analyst review, and reference intelligence."""
     assets = active_asset_map(db, tenant_id)
+    tenant_findings = db.query(Finding).filter(Finding.tenant_id == tenant_id).all()
+    explicit_reference = [
+        row for row in tenant_findings
+        if (row.status or "").strip().lower() == "reference_only"
+    ]
+    not_applicable = [
+        row for row in tenant_findings
+        if (row.status or "").strip().lower() == "not_applicable"
+    ]
     findings = [
-        row for row in db.query(Finding).filter(Finding.tenant_id == tenant_id).all()
+        row for row in tenant_findings
         if _is_open(row)
+        and (row.status or "").strip().lower() not in {"reference_only", "not_applicable"}
     ]
     links = confirmed_asset_ids_by_finding(db, tenant_id, assets)
     linked = [row for row in findings if links.get(row.id)]
@@ -116,7 +128,7 @@ def build_exposure_coverage(db: Session, tenant_id: str) -> dict:
         elif candidates:
             reason = "candidate_match"
         else:
-            reason = "manual_intake"
+            reason = "unclassified_intake"
         return {
             "finding_id": row.id,
             "cve": row.cve or row.cve_id,
@@ -132,7 +144,7 @@ def build_exposure_coverage(db: Session, tenant_id: str) -> dict:
         }
 
     priority_order = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
-    reason_order = {"invalid_asset_link": 0, "candidate_match": 1, "manual_intake": 2}
+    reason_order = {"invalid_asset_link": 0, "candidate_match": 1, "unclassified_intake": 2}
     mapping_queue_limit = 50
     mapping_queue = sorted(
         actionable,
@@ -146,6 +158,21 @@ def build_exposure_coverage(db: Session, tenant_id: str) -> dict:
     queued_unlinked_ids = {row.id for row in mapping_queue if row.id not in invalid_ids}
     linked_asset_ids = {asset_id for ids in links.values() for asset_id in ids}
     confirmed_exposure_count = sum(len(ids) for ids in links.values())
+    recorded_link_pairs = {
+        (row.finding_id, row.asset_id)
+        for row in db.query(AssetExposure).filter(
+            AssetExposure.tenant_id == tenant_id,
+            AssetExposure.status.in_(CONFIRMED_STATUSES),
+        ).all()
+        if row.asset_id in assets
+    }
+    open_link_pairs = {
+        (row.id, asset_id)
+        for row in linked
+        for asset_id in links.get(row.id, set())
+    }
+    evidence_backed_pairs = open_link_pairs & recorded_link_pairs
+    evidence_backed_finding_ids = {finding_id for finding_id, _ in evidence_backed_pairs}
     applicable = len(linked) + len(actionable)
     kev_linked = [row for row in linked if bool(row.cisa_kev)]
 
@@ -153,9 +180,12 @@ def build_exposure_coverage(db: Session, tenant_id: str) -> dict:
         "status": "available" if scored else "unavailable",
         "aggregate_tes": aggregate,
         "aggregate_scope": "open_asset_linked_scored_findings",
-        "open_finding_count": len(findings),
+        "open_finding_count": len(findings) + len(explicit_reference),
         "asset_linked_count": len(linked),
         "confirmed_exposure_count": confirmed_exposure_count,
+        "evidence_backed_link_count": len(evidence_backed_pairs),
+        "evidence_backed_finding_count": len(evidence_backed_finding_ids),
+        "legacy_link_count": len(open_link_pairs - recorded_link_pairs),
         "confirmed_asset_count": len(linked_asset_ids),
         "exposure_applicable_count": applicable,
         "asset_link_coverage_pct": round(len(linked) / applicable * 100, 1) if applicable else None,
@@ -164,7 +194,14 @@ def build_exposure_coverage(db: Session, tenant_id: str) -> dict:
         "unlinked_count": len(unlinked),
         "mapping_required_count": len(actionable),
         "candidate_match_count": sum(1 for row in actionable if candidate_cache.get(row.id)),
-        "catalog_intelligence_count": len(catalog_only),
+        "unclassified_intake_count": sum(
+            1 for row in actionable
+            if row.id not in invalid_ids and not candidate_cache.get(row.id)
+        ),
+        "catalog_intelligence_count": len(catalog_only) + len(explicit_reference),
+        "derived_catalog_intelligence_count": len(catalog_only),
+        "analyst_reference_intelligence_count": len(explicit_reference),
+        "not_applicable_count": len(not_applicable),
         "catalog_scope": "reference_only_until_asset_evidence_matches",
         "unlinked_findings": [
             queue_item(row) for row in mapping_queue if row.id in queued_unlinked_ids
