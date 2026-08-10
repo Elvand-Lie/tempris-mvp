@@ -594,6 +594,129 @@ body.tmx-extension-active #root main {
   font-size: 13px;
 }
 
+.tmx-tenant-admin-layout {
+  display: grid;
+  grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.tmx-tenant-directory {
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 8rem);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.tmx-tenant-directory .tmx-panel-header p,
+.tmx-tenant-editor .tmx-panel-header p {
+  margin: 3px 0 0;
+  color: #a1a1aa;
+  font-size: 11px;
+}
+
+.tmx-tenant-search {
+  display: grid;
+  gap: 7px;
+  padding: 14px;
+  border-bottom: 1px solid #27272a;
+}
+
+.tmx-tenant-search label {
+  color: #a1a1aa;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.tmx-tenant-search .tmx-search { max-width: none; }
+
+.tmx-tenant-list {
+  overflow: auto;
+  padding: 8px;
+}
+
+.tmx-tenant-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #f4f4f5;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tmx-tenant-item:hover,
+.tmx-tenant-item:focus-visible { background: #1c1c1f; }
+.tmx-tenant-item.is-selected {
+  border-color: rgb(16 185 129 / 35%);
+  background: rgb(16 185 129 / 10%);
+}
+.tmx-tenant-item > span { display: grid; gap: 3px; min-width: 0; }
+.tmx-tenant-item > span:last-child { text-align: right; }
+.tmx-tenant-item strong,
+.tmx-tenant-item small { overflow-wrap: anywhere; }
+.tmx-tenant-item b { color: #34d399; font-size: 11px; }
+.tmx-tenant-item small { color: #a1a1aa; font-size: 10px; }
+
+.tmx-tenant-editor { display: grid; gap: 20px; min-width: 0; }
+.tmx-tenant-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.tmx-tenant-facts > div {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  background: #0a0a0b;
+}
+.tmx-tenant-facts strong { font-size: 13px; overflow-wrap: anywhere; }
+.tmx-tenant-facts span { color: #a1a1aa; font-size: 10px; }
+.tmx-tenant-constraints {
+  margin: 14px 0 0;
+  padding-left: 20px;
+  color: #a1a1aa;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.tmx-module-purpose { display: block; margin-top: 4px; color: #a1a1aa; font-size: 10px; }
+.tmx-empty { padding: 16px; color: #a1a1aa; font-size: 12px; }
+
+.tmx-dialog {
+  max-width: 560px;
+  padding: 0;
+  border: 1px solid #3f3f46;
+  border-radius: 10px;
+  background: #141416;
+  color: #f4f4f5;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 55%);
+}
+.tmx-dialog::backdrop { background: rgb(0 0 0 / 70%); }
+.tmx-dialog form { display: grid; gap: 14px; padding: 22px; }
+.tmx-dialog h2,
+.tmx-dialog p { margin: 0; }
+.tmx-dialog p { color: #a1a1aa; font-size: 13px; }
+.tmx-dialog-actions { display: flex; justify-content: flex-end; gap: 9px; flex-wrap: wrap; }
+
+@media (max-width: 1050px) {
+  .tmx-tenant-admin-layout { grid-template-columns: 1fr; }
+  .tmx-tenant-directory { position: static; max-height: 420px; }
+}
+
+@media (max-width: 760px) {
+  .tmx-tenant-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 @media (max-width: 720px) {
   .tmx-intake-form { grid-template-columns: 1fr; }
   .tmx-field-wide,

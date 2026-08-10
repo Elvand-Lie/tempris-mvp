@@ -4,12 +4,9 @@ from sqlalchemy.orm import Session
 
 from models import TenantPackage
 from routers.audit import AuditEntry, append_to_audit_log_db
-from routers.auth import get_auth_context, require_role
+from routers.auth import PLATFORM_TENANT_ID, get_auth_context, require_role
 from services.database import get_db
-from services.entitlements import (
-    MODULES, PACKAGE_DESCRIPTIONS, PACKAGE_MODULES, get_tenant_package,
-    normalize_overrides, normalize_package_code,
-)
+from services.entitlements import entitlement_response, normalize_overrides, normalize_package_code
 
 router = APIRouter()
 
@@ -19,26 +16,14 @@ class PackageUpdate(BaseModel):
     module_overrides: dict[str, bool] = Field(default_factory=dict)
 
 
-def _catalog() -> list[dict]:
-    return [
-        {"code": code, "name": code.title(), "description": PACKAGE_DESCRIPTIONS[code],
-         "included_modules": [module for module in MODULES if module in included]}
-        for code, included in PACKAGE_MODULES.items()
-    ]
-
-
 def _response(db: Session, user: dict) -> dict:
     auth = get_auth_context(user)
-    assignment = get_tenant_package(db, auth.tenant_id)
-    if auth.role == "Researcher":
-        assignment["effective_modules"] = []
-    assignment.update({
-        "catalog": _catalog(), "modules": list(MODULES), "role": auth.role,
-        "can_manage": auth.role == "Superadmin",
-        "can_submit_sss": auth.role in {"Superadmin", "Admin", "Analyst", "Researcher"},
-        "can_manage_sss": auth.role in {"Superadmin", "Admin", "Analyst"},
-    })
-    return assignment
+    return entitlement_response(
+        db,
+        auth.tenant_id,
+        role=auth.role,
+        can_manage=auth.role == "Superadmin" and auth.tenant_id == PLATFORM_TENANT_ID,
+    )
 
 
 @router.get("/current")
@@ -71,6 +56,7 @@ def update_package(
     else:
         row.package_code = package_code
         row.module_overrides = overrides
+        row.version = (row.version or 0) + 1
         row.updated_by = auth.user_id
 
     append_to_audit_log_db(

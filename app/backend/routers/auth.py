@@ -658,6 +658,25 @@ def require_role(*allowed_roles):
     return checker
 
 
+PLATFORM_TENANT_ID = os.environ.get("TEMPRIS_PLATFORM_TENANT_ID", "tempris").strip() or "tempris"
+
+
+def require_platform_superadmin():
+    """Require the configured platform tenant as well as the Superadmin role.
+
+    A Superadmin belonging to a customer tenant remains powerful inside that
+    tenant but cannot enumerate or modify other tenants.
+    """
+    async def checker(user=Depends(get_current_user)):
+        if user.get("role") != "Superadmin" or user.get("tenant_id") != PLATFORM_TENANT_ID:
+            raise HTTPException(
+                status_code=403,
+                detail="Platform Superadmin access is required.",
+            )
+        return user
+    return checker
+
+
 # ── Centralized Authorization Abstractions ──────────────────────────────────
 from dataclasses import dataclass
 from enum import Enum

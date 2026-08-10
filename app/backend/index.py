@@ -21,7 +21,7 @@ logger = logging.getLogger("tempris")
 # Add the api directory to the Python path for Vercel Serverless
 sys.path.append(os.path.dirname(__file__))
 
-from routers import auth, spectrum, audit, synthesis, scout, scanner, strike, standard, assets, grc, edip, surge, blflaw, partner, reports, aev, ocq, threats, ciso, packages, workflow
+from routers import auth, spectrum, audit, synthesis, scout, scanner, strike, standard, assets, grc, edip, surge, blflaw, partner, reports, aev, ocq, threats, ciso, packages, tenants, workflow
 from routers.audit import append_to_audit_log, AuditEntry
 from routers.auth import get_auth_context, get_current_user
 from services.kev_loader import ensure_findings_seeded, get_finding_stats
@@ -91,6 +91,7 @@ app.include_router(ocq.router, prefix="/api/ocq", tags=["ocq"])
 app.include_router(threats.router, prefix="/api/threats", tags=["threats"])
 app.include_router(ciso.router, prefix="/api/ciso", tags=["ciso"])
 app.include_router(packages.router, prefix="/api/packages", tags=["packages"])
+app.include_router(tenants.router, prefix="/api/tenants", tags=["tenants"])
 app.include_router(workflow.router, prefix="/api/workflow", tags=["workflow"])
 
 # ─ Startup: Init DB, Seed data ──────────────────────────────────────────────────
@@ -105,9 +106,12 @@ def startup():
         from services.asset_seeder import seed_assets
         seed_assets(db)
         from services.entitlements import ensure_default_tenant_packages
+        from services.tenants import ensure_tenant_registry
+        tenant_ids = {record.get("tenant_id") for record in auth.USERS.values()}
+        ensure_tenant_registry(db, tenant_ids)
         ensure_default_tenant_packages(
             db,
-            {record.get("tenant_id") for record in auth.USERS.values()},
+            tenant_ids,
         )
     finally:
         db.close()
@@ -830,4 +834,3 @@ if FRONTEND_DIR.exists():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("index:app", host="0.0.0.0", port=8000, reload=True)
-

@@ -34,6 +34,18 @@ PACKAGE_DESCRIPTIONS = {
 DEFAULT_PACKAGE = "DOMINATE"
 
 
+def package_catalog() -> list[dict]:
+    return [
+        {
+            "code": code,
+            "name": code.title(),
+            "description": PACKAGE_DESCRIPTIONS[code],
+            "included_modules": [module for module in MODULES if module in included],
+        }
+        for code, included in PACKAGE_MODULES.items()
+    ]
+
+
 def normalize_package_code(value: str) -> str:
     code = str(value or "").strip().upper()
     if code not in PACKAGE_MODULES:
@@ -73,9 +85,53 @@ def get_tenant_package(db: Session, tenant_id: str) -> dict:
         "module_overrides": overrides,
         "effective_modules": effective_modules(package_code, overrides),
         "configured": row is not None,
+        "version": row.version if row else 0,
         "updated_by": row.updated_by if row else None,
         "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
     }
+
+
+def entitlement_response(
+    db: Session,
+    tenant_id: str,
+    *,
+    role: str | None = None,
+    can_manage: bool = False,
+) -> dict:
+    assignment = get_tenant_package(db, tenant_id)
+    package_modules = set(PACKAGE_MODULES[assignment["package_code"]])
+    overrides = assignment["module_overrides"]
+    effective = set(assignment["effective_modules"])
+    assignment.update({
+        "catalog": package_catalog(),
+        "modules": list(MODULES),
+        "module_access": [
+            {
+                "module": module,
+                "enabled": module in effective,
+                "source": (
+                    "override_enabled" if overrides.get(module) is True
+                    else "override_disabled" if overrides.get(module) is False
+                    else "package"
+                ),
+                "included_in_package": module in package_modules,
+            }
+            for module in MODULES
+        ],
+        "can_manage": can_manage,
+    })
+    if role is not None:
+        assignment.update({
+            "role": role,
+            "can_submit_sss": role in {"Superadmin", "Admin", "Analyst", "Researcher"},
+            "can_manage_sss": role in {"Superadmin", "Admin", "Analyst"},
+        })
+        if role == "Researcher":
+            assignment["effective_modules"] = []
+            for access in assignment["module_access"]:
+                access["enabled"] = False
+                access["source"] = "role_constraint"
+    return assignment
 
 
 def ensure_default_tenant_packages(db: Session, tenant_ids) -> int:

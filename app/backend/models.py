@@ -251,11 +251,26 @@ class GrcPolicyDocument(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class Tenant(Base):
+    __tablename__ = "tenants"
+    id = Column(String(50), primary_key=True)
+    display_name = Column(String(255), nullable=False)
+    tenant_type = Column(String(30), nullable=False, default="customer", index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
 class TenantPackage(Base):
     __tablename__ = "tenant_packages"
     tenant_id = Column(String(50), primary_key=True)
     package_code = Column(String(20), nullable=False, default="DOMINATE")
     module_overrides = Column(JSON, default={}, nullable=False)
+    version = Column(Integer, nullable=False, default=1, server_default="1")
     updated_by = Column(String(255), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

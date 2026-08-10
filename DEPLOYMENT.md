@@ -23,7 +23,18 @@ If it reports the expected Compose configuration and Tempris containers, release
 .\scripts\deploy-vps.ps1 -Deploy
 ```
 
-The script refuses tracked worktree changes, archives only committed Git content, verifies SHA-256 after upload, makes timestamped source and PostgreSQL backups, verifies the database backup with `pg_restore --list`, preserves `.env`, mounted runtime data, and Docker volumes, applies migration `006_add_sss_sub_class.py`, seeds only the idempotent v62 debrief pack, restarts the production Compose stack, and checks `/api/health`.
+The script refuses tracked worktree changes, archives only committed Git content, verifies SHA-256 after upload, makes timestamped source and PostgreSQL backups, verifies the database backup with `pg_restore --list`, preserves `.env`, mounted runtime data, and Docker volumes, applies migrations `006_add_sss_sub_class.py` and `007_create_tenant_registry.py`, seeds only the idempotent v62 debrief pack, restarts the production Compose stack, and checks `/api/health`.
+
+Migration 007 is additive and idempotent. It creates the authoritative `tenants` registry, backfills every distinct non-empty `tenant_id` already present in tenant-scoped tables, explicitly registers `tempris` and `bug-bounty`, and adds the `tenant_packages.version` concurrency field. It does not rename tenants, reassign tenant-owned records, or remove data.
+
+After a tenant-administration release, sign in as the Tempris platform Superadmin and verify:
+
+1. `GET /api/tenants?limit=100` lists the expected registered tenants.
+2. Opening `/packages` shows the searchable **Tenant & Module Administration** console.
+3. Selecting another tenant leaves the signed-in tenant and JWT context unchanged.
+4. Saving an entitlement update increments its configuration version and creates a `TENANT_ENTITLEMENTS_UPDATED` event in the Tempris audit chain.
+5. A user from the updated tenant is immediately blocked from a disabled module by the backend, not merely hidden in navigation.
+6. The `bug-bounty` tenant continues to disclose the Researcher role-isolation constraint.
 
 ## Rotate sandbox account passwords
 
@@ -39,7 +50,7 @@ The dedicated `researcher@tempris.com` account belongs to the isolated `bug-boun
 
 ## Failure and rollback
 
-If the post-restart health check fails, the script restores the previous source archive and restarts Compose. It does not automatically reverse database migrations: migration 006 is additive (a nullable column and index), and database restoration must use the backup made by the operator under the actual production database arrangement.
+If the post-restart health check fails, the script restores the previous source archive and restarts Compose. It does not automatically reverse database migrations: migrations 006 and 007 are additive, and database restoration must use the verified backup made by the operator under the actual production database arrangement. Restore that backup if a rollback must also remove the tenant registry or entitlement-version column; do not manually drop them while the application is running.
 
 For a manual rollback, select the timestamped archive under `<RemoteRoot>/backups/releases/`, restore it to `<RemoteRoot>/app` while preserving `.env` and runtime data, then run:
 

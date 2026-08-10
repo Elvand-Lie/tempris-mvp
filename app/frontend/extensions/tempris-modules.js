@@ -30,6 +30,7 @@
   let sssEventController = null;
   let packageConfig = null;
   let packageRequest = null;
+  let tenantAdminState = null;
   let vdpSubmissions = null;
   let vdpRequest = null;
   let rootObserver = null;
@@ -146,6 +147,7 @@
           const detail = typeof payload?.detail === 'string' ? payload.detail : null;
           const error = new Error(detail || `API error: ${response.status}`);
           error.status = response.status;
+          error.detail = payload?.detail;
           if ([429, 502, 503, 504].includes(response.status) && attempt + 1 < attempts) {
             await new Promise((resolve) => window.setTimeout(resolve, RETRY_DELAYS[attempt]));
             continue;
@@ -1433,16 +1435,215 @@
     });
   }
 
+  function tenantAdminForm(host) {
+    const packageSelect = host.querySelector('#tmx-tenant-package');
+    const selectedPackage = tenantAdminState.detail.catalog.find((item) => item.code === packageSelect.value);
+    const included = new Set(selectedPackage?.included_modules || []);
+    const overrides = {};
+    host.querySelectorAll('[data-tenant-module]').forEach((box) => {
+      if (box.checked !== included.has(box.dataset.tenantModule)) {
+        overrides[box.dataset.tenantModule] = box.checked;
+      }
+    });
+    return { package_code: packageSelect.value, module_overrides: overrides };
+  }
+
+  function setTenantAdminDirty(host, dirty = true) {
+    tenantAdminState.dirty = dirty;
+    host.querySelector('[data-tenant-save]').disabled = !dirty;
+    host.querySelector('[data-tenant-reset]').disabled = !dirty;
+    const marker = host.querySelector('[data-tenant-dirty]');
+    marker.textContent = dirty ? 'Unsaved changes' : `Version ${tenantAdminState.detail.version}`;
+    marker.classList.toggle('tmx-status-high', dirty);
+  }
+
+  function refreshTenantModuleStates(host) {
+    const selected = tenantAdminState.detail.catalog.find(
+      (item) => item.code === host.querySelector('#tmx-tenant-package').value,
+    );
+    const included = new Set(selected?.included_modules || []);
+    host.querySelector('[data-tenant-package-description]').textContent = selected?.description || '';
+    host.querySelectorAll('[data-tenant-module]').forEach((box) => {
+      const module = box.dataset.tenantModule;
+      const state = host.querySelector(`[data-tenant-module-state="${module}"]`);
+      const source = host.querySelector(`[data-tenant-module-source="${module}"]`);
+      state.textContent = box.checked ? 'Enabled' : 'Blocked';
+      state.classList.toggle('tmx-status-available', box.checked);
+      source.textContent = box.checked === included.has(module)
+        ? `${box.checked ? 'Included' : 'Excluded'} by ${selected?.code || 'package'}`
+        : box.checked ? 'Explicitly enabled' : 'Explicitly disabled';
+    });
+  }
+
+  async function selectTenantAdminTarget(host, tenantId) {
+    const message = host.querySelector('[data-tenant-message]');
+    if (message) message.textContent = 'Loading selected tenant...';
+    const detail = await api(`/api/tenants/${encodeURIComponent(tenantId)}`);
+    tenantAdminState.selectedId = tenantId;
+    tenantAdminState.detail = detail;
+    tenantAdminState.dirty = false;
+    if (window.location.pathname === '/packages') renderTenantAdministration(host);
+  }
+
+  async function saveTenantAdmin(host) {
+    const message = host.querySelector('[data-tenant-message]');
+    const save = host.querySelector('[data-tenant-save]');
+    const form = tenantAdminForm(host);
+    save.disabled = true;
+    message.textContent = 'Saving and enforcing the selected tenant policy...';
+    try {
+      const detail = await api(`/api/tenants/${encodeURIComponent(tenantAdminState.selectedId)}/entitlements`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...form, expected_version: tenantAdminState.detail.version }),
+      });
+      tenantAdminState.detail = detail;
+      tenantAdminState.dirty = false;
+      tenantAdminState.directory.items = tenantAdminState.directory.items.map((item) => (
+        item.tenant_id === detail.tenant_id
+          ? { ...item, package_code: detail.package_code, configured: detail.configured,
+            enabled_module_count: detail.effective_modules.length, updated_at: detail.updated_at,
+            version: detail.version }
+          : item
+      ));
+      if (packageConfig?.tenant_id === detail.tenant_id) await loadPackageConfig(true);
+      renderTenantAdministration(host);
+      host.querySelector('[data-tenant-message]').textContent = 'Tenant access policy saved, audit logged, and enforced.';
+      schedule();
+      return true;
+    } catch (error) {
+      save.disabled = false;
+      if (error.status === 409 && error.detail?.code === 'STALE_TENANT_CONFIGURATION') {
+        message.textContent = 'Another administrator changed this tenant. Your selections are preserved; reload the selected tenant before saving again.';
+        host.querySelector('[data-tenant-reload]').hidden = false;
+      } else {
+        message.textContent = error.message || 'Tenant policy update failed.';
+      }
+      return false;
+    }
+  }
+
+  function requestTenantAdminSwitch(host, tenantId) {
+    if (!tenantAdminState.dirty) {
+      selectTenantAdminTarget(host, tenantId).catch((error) => {
+        const message = host.querySelector('[data-tenant-message]');
+        if (message) message.textContent = error.message || 'Unable to load the selected tenant.';
+      });
+      return;
+    }
+    tenantAdminState.pendingId = tenantId;
+    host.querySelector('[data-tenant-switch-dialog]').showModal();
+  }
+
+  function renderTenantAdministration(host) {
+    const detail = tenantAdminState.detail;
+    const catalog = detail.catalog || [];
+    const searchValue = tenantAdminState.search.toLowerCase();
+    const visibleTenants = tenantAdminState.directory.items.filter((item) => (
+      !searchValue || item.tenant_id.toLowerCase().includes(searchValue)
+      || item.display_name.toLowerCase().includes(searchValue)
+    ));
+    const constraints = (detail.constraints || []).map((item) => `<li>${escapeHtml(item.message)}</li>`).join('');
+    host.dataset.temprisExtensionRoute = '/packages';
+    host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="packages">
+      <header class="tmx-heading"><div><h1>Tenant &amp; Module Administration</h1><p>Select a registered tenant and manage the modules its users may access. This console does not open or impersonate the tenant.</p></div><div class="tmx-form-actions"><button type="button" class="tmx-button tmx-button-secondary" data-tenant-reset disabled>Reset</button><button type="button" class="tmx-button" data-tenant-save disabled>Save access policy</button></div></header>
+      <div class="tmx-notice tmx-notice-success"><strong>Administrative target only:</strong><span>You remain signed in as ${escapeHtml(packageConfig?.tenant_id || 'tempris')}. Selecting a tenant never changes your JWT, operational data scope, or identity.</span></div>
+      <div class="tmx-tenant-admin-layout">
+        <aside class="tmx-panel tmx-tenant-directory" aria-label="Registered tenants">
+          <div class="tmx-panel-header"><div><h2>Registered tenants</h2><p>${tenantAdminState.directory.total} total</p></div></div>
+          <div class="tmx-tenant-search"><label for="tmx-tenant-search">Search tenants</label><input id="tmx-tenant-search" class="tmx-search" value="${escapeHtml(tenantAdminState.search)}" placeholder="Name or tenant ID" autocomplete="off"></div>
+          <div class="tmx-tenant-list">${visibleTenants.length ? visibleTenants.map((item) => `<button type="button" class="tmx-tenant-item ${item.tenant_id === detail.tenant_id ? 'is-selected' : ''}" data-tenant-id="${escapeHtml(item.tenant_id)}" aria-pressed="${item.tenant_id === detail.tenant_id}"><span><strong>${escapeHtml(item.display_name)}</strong><small>${escapeHtml(item.tenant_id)} · ${escapeHtml(item.tenant_type)}</small></span><span><b>${escapeHtml(item.package_code)}</b><small>${item.enabled_module_count} modules</small></span></button>`).join('') : '<p class="tmx-empty">No registered tenants match this search.</p>'}</div>
+        </aside>
+        <main class="tmx-tenant-editor" data-tenant-editor>
+          <section class="tmx-panel">
+            <div class="tmx-panel-header"><div><h2>${escapeHtml(detail.display_name)}</h2><p>${escapeHtml(detail.tenant_id)} · ${escapeHtml(detail.tenant_type)}</p></div><span class="tmx-status" data-tenant-dirty>Version ${detail.version}</span></div>
+            <div class="tmx-panel-body"><div class="tmx-tenant-facts"><div><strong>${detail.account_count}</strong><span>Configured accounts</span></div><div><strong>${detail.asset_count}</strong><span>Recorded assets</span></div><div><strong>${detail.finding_count}</strong><span>Recorded findings</span></div><div><strong>${formatDate(detail.updated_at)}</strong><span>Policy last updated</span></div></div><ul class="tmx-tenant-constraints">${constraints}</ul></div>
+          </section>
+          <section class="tmx-panel">
+            <div class="tmx-panel-header"><h2>Entitlement policy</h2><span class="tmx-status ${detail.configured ? 'tmx-status-available' : 'tmx-status-high'}">${detail.configured ? 'Configured' : 'DOMINATE fallback'}</span></div>
+            <div class="tmx-panel-body tmx-control-grid"><div class="tmx-field"><label for="tmx-tenant-package">Assigned package</label><select id="tmx-tenant-package">${catalog.map((item) => `<option value="${escapeHtml(item.code)}" ${item.code === detail.package_code ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('')}</select></div><div class="tmx-field"><label>Configuration version</label><input value="${detail.version}" disabled></div><div class="tmx-field tmx-field-wide"><label>Package purpose</label><div class="tmx-package-description" data-tenant-package-description>${escapeHtml(catalog.find((item) => item.code === detail.package_code)?.description || '')}</div></div></div>
+          </section>
+          <section class="tmx-panel">
+            <div class="tmx-panel-header"><h2>Effective module access</h2><span class="tmx-status tmx-status-available">Backend enforced</span></div>
+            <div class="tmx-table-wrap"><table class="tmx-table"><thead><tr><th>Module</th><th>Enabled</th><th>Authorization source</th><th>Access state</th></tr></thead><tbody>${detail.module_access.map((access) => `<tr><td><strong>${escapeHtml(access.module)}</strong><small class="tmx-module-purpose">${escapeHtml(MODULE_PURPOSES[access.module] || '')}</small></td><td><input class="tmx-check" data-tenant-module="${escapeHtml(access.module)}" type="checkbox" ${access.enabled ? 'checked' : ''} aria-label="${escapeHtml(access.module)} enabled"></td><td data-tenant-module-source="${escapeHtml(access.module)}">${escapeHtml(access.source === 'package' ? `${access.included_in_package ? 'Included' : 'Excluded'} by ${detail.package_code}` : titleCase(access.source))}</td><td><span class="tmx-status ${access.enabled ? 'tmx-status-available' : ''}" data-tenant-module-state="${escapeHtml(access.module)}">${access.enabled ? 'Enabled' : 'Blocked'}</span></td></tr>`).join('')}</tbody></table></div>
+          </section>
+          <div class="tmx-form-message" data-tenant-message aria-live="polite"></div><button type="button" class="tmx-button tmx-button-secondary" data-tenant-reload hidden>Reload selected tenant</button>
+        </main>
+      </div>
+      <dialog class="tmx-dialog" data-tenant-switch-dialog><form method="dialog"><h2>Unsaved entitlement changes</h2><p>Choose what to do before selecting another tenant.</p><div class="tmx-dialog-actions"><button value="continue" class="tmx-button tmx-button-secondary">Continue editing</button><button value="discard" class="tmx-button tmx-button-secondary">Discard and switch</button><button value="save" class="tmx-button">Save then switch</button></div></form></dialog>
+    </div>`;
+
+    host.querySelector('#tmx-tenant-search').addEventListener('input', (event) => {
+      if (tenantAdminState.dirty) {
+        event.target.value = tenantAdminState.search;
+        host.querySelector('[data-tenant-message]').textContent = 'Save or reset the entitlement changes before filtering the tenant list.';
+        return;
+      }
+      tenantAdminState.search = event.target.value;
+      renderTenantAdministration(host);
+      const search = host.querySelector('#tmx-tenant-search');
+      search.focus();
+      search.setSelectionRange(search.value.length, search.value.length);
+    });
+    host.querySelectorAll('[data-tenant-id]').forEach((button) => button.addEventListener('click', () => {
+      if (button.dataset.tenantId !== tenantAdminState.selectedId) requestTenantAdminSwitch(host, button.dataset.tenantId);
+    }));
+    host.querySelector('#tmx-tenant-package').addEventListener('change', () => {
+      const selected = catalog.find((item) => item.code === host.querySelector('#tmx-tenant-package').value);
+      const included = new Set(selected?.included_modules || []);
+      host.querySelectorAll('[data-tenant-module]').forEach((box) => { box.checked = included.has(box.dataset.tenantModule); });
+      refreshTenantModuleStates(host);
+      setTenantAdminDirty(host);
+    });
+    host.querySelectorAll('[data-tenant-module]').forEach((box) => box.addEventListener('change', () => {
+      refreshTenantModuleStates(host);
+      setTenantAdminDirty(host);
+    }));
+    host.querySelector('[data-tenant-save]').addEventListener('click', () => saveTenantAdmin(host));
+    host.querySelector('[data-tenant-reset]').addEventListener('click', () => {
+      tenantAdminState.dirty = false;
+      renderTenantAdministration(host);
+      host.querySelector('[data-tenant-message]').textContent = 'Unsaved changes were reset.';
+    });
+    host.querySelector('[data-tenant-reload]').addEventListener('click', () => {
+      selectTenantAdminTarget(host, tenantAdminState.selectedId).catch((error) => {
+        const message = host.querySelector('[data-tenant-message]');
+        if (message) message.textContent = error.message || 'Unable to reload the selected tenant.';
+      });
+    });
+    const dialog = host.querySelector('[data-tenant-switch-dialog]');
+    dialog.addEventListener('close', async () => {
+      const pending = tenantAdminState.pendingId;
+      tenantAdminState.pendingId = null;
+      if (!pending || dialog.returnValue === 'continue') return;
+      if (dialog.returnValue === 'save' && !(await saveTenantAdmin(host))) return;
+      try {
+        await selectTenantAdminTarget(host, pending);
+      } catch (error) {
+        const message = host.querySelector('[data-tenant-message]');
+        if (message) message.textContent = error.message || 'Unable to switch tenants.';
+      }
+    });
+  }
+
   async function renderPackagesRoute(host, force = false) {
     host.dataset.temprisExtensionRoute = '/packages';
-    host.innerHTML = '<div data-tempris-extension-root class="tmx-panel tmx-loading">Loading tenant access administration...</div>';
+    host.innerHTML = '<div data-tempris-extension-root class="tmx-panel tmx-loading">Loading tenant and module administration...</div>';
     try {
       const config = await loadPackageConfig(force);
-      if (!config.can_manage) throw Object.assign(new Error('Tenant access administration requires Superadmin access.'), { status: 403 });
-      if (window.location.pathname === '/packages') renderPackages(host, config);
+      if (!config.can_manage) throw Object.assign(new Error('Tenant administration requires a Tempris platform Superadmin.'), { status: 403 });
+      if (!tenantAdminState || force) {
+        const directory = await api('/api/tenants?limit=100');
+        const selectedId = directory.items.some((item) => item.tenant_id === config.tenant_id)
+          ? config.tenant_id : directory.items[0]?.tenant_id;
+        if (!selectedId) throw new Error('No registered tenants are available.');
+        const detail = await api(`/api/tenants/${encodeURIComponent(selectedId)}`);
+        tenantAdminState = { directory, selectedId, detail, dirty: false, pendingId: null, search: '' };
+      }
+      if (window.location.pathname === '/packages') renderTenantAdministration(host);
     } catch (error) {
       if (window.location.pathname !== '/packages') return;
-      host.innerHTML = `<div data-tempris-extension-root class="tmx-page"><div class="tmx-panel tmx-error">${escapeHtml(error.message || 'Tenant access administration is unavailable.')}<div style="margin-top:16px"><button type="button" class="tmx-button" data-package-retry>Retry</button></div></div></div>`;
+      host.innerHTML = `<div data-tempris-extension-root class="tmx-page"><div class="tmx-panel tmx-error">${escapeHtml(error.message || 'Tenant administration is unavailable.')}<div style="margin-top:16px"><button type="button" class="tmx-button" data-package-retry>Retry</button></div></div></div>`;
       host.querySelector('[data-package-retry]').addEventListener('click', () => renderPackagesRoute(host, true));
     }
   }
@@ -1751,6 +1952,7 @@
     sssFindings = null;
     packageConfig = null;
     packageRequest = null;
+    tenantAdminState = null;
     vdpSubmissions = null;
     vdpRequest = null;
     workflowOverview = null;
