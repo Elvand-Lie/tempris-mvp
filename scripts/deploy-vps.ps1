@@ -64,16 +64,15 @@ rollback() {
   status=`$?
   set +e
   echo "Release failed; restoring the verified database, report artifacts, source, and frontend." >&2
+  if [ -s "`$report_backup" ]; then
+    docker cp "`$report_backup" "tempris_backend:/tmp/`$release.reports.rollback.tar.gz"
+    docker exec -u 0 -e RELEASE="`$release" tempris_backend sh -lc 'rm -rf /app/data/reports && mkdir -p /app/data && tar -C /app/data -xzf /tmp/`$RELEASE.reports.rollback.tar.gz && rm -f /tmp/`$RELEASE.reports.rollback.tar.gz' || echo "ERROR: automatic report-artifact restoration failed; use `$(printf %q "`$report_backup") manually." >&2
+  fi
   if [ "`$db_changed" -eq 1 ] && [ -s "`$db_backup" ]; then
     docker stop tempris_backend >/dev/null 2>&1
     docker cp "`$db_backup" "`$pg_container:/tmp/`$release.rollback.dump"
     docker exec -e RELEASE="`$release" "`$pg_container" sh -lc 'pg_restore -U "`$POSTGRES_USER" -d "`$POSTGRES_DB" --clean --if-exists --no-owner --no-privileges /tmp/`$RELEASE.rollback.dump' || echo "ERROR: automatic database restoration failed; use `$(printf %q "`$db_backup") manually." >&2
     docker exec "`$pg_container" rm -f "/tmp/`$release.rollback.dump"
-  fi
-  if [ -s "`$report_backup" ]; then
-    rm -rf "`$root/app/backend/data/reports"
-    mkdir -p "`$root/app/backend/data"
-    tar -C "`$root/app/backend/data" -xzf "`$report_backup"
   fi
   if [ "`$source_changed" -eq 1 ] && [ -s "`$source_backup" ]; then
     restore_stage="`$(mktemp -d)"
@@ -93,8 +92,10 @@ mkdir -p "`$(dirname "`$source_backup")" "`$(dirname "`$db_backup")" "`$(dirname
 tar -C "`$root" -czf "`$source_backup" --exclude='app/deploy/.env' --exclude='app/freellmapi/.env' --exclude='app/backend/data' app
 tar -tzf "`$source_backup" >/dev/null
 tar -C "`$stage" -xzf "`$archive"
-mkdir -p "`$root/app/backend/data/reports"
-tar -C "`$root/app/backend/data" -czf "`$report_backup" reports
+docker exec -u 0 -e RELEASE="`$release" tempris_backend sh -lc 'mkdir -p /app/data/reports && tar -C /app/data -czf /tmp/`$RELEASE.reports.tar.gz reports && tar -tzf /tmp/`$RELEASE.reports.tar.gz >/dev/null'
+docker cp "tempris_backend:/tmp/`$release.reports.tar.gz" "`$report_backup"
+docker exec -u 0 -e RELEASE="`$release" tempris_backend sh -lc 'rm -f /tmp/`$RELEASE.reports.tar.gz'
+test -s "`$report_backup"
 tar -tzf "`$report_backup" >/dev/null
 
 # Product documentation is maintained at repository-root docs/product but the
