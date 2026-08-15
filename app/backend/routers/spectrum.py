@@ -13,6 +13,7 @@ from middleware.rate_limit import detect_probe_attempt
 from typing import Any
 
 from services.entitlements import require_module
+from services.customer_posture import build_customer_posture
 
 router = APIRouter(dependencies=[Depends(require_module("SPECTRUM"))])
 
@@ -82,6 +83,7 @@ def get_findings(
     priority: str | None = None,
     search: str | None = None,
     decision: str | None = None,
+    scope: str = "all",
     db: Session = Depends(get_db),
     user = Depends(get_current_user),
 ):
@@ -89,19 +91,63 @@ def get_findings(
     from routers.auth import get_auth_context
     auth_ctx = get_auth_context(user)
     edip_map = _load_edip_decisions(db, auth_ctx.tenant_id, auth_ctx.is_superadmin)
+    posture = build_customer_posture(db, auth_ctx.tenant_id)
+    confirmed_ids = set(posture["confirmed_finding_ids"])
+    legacy_ids = set(posture["legacy_unverified_finding_ids"])
+
+    allowed_scopes = {
+        "all", "confirmed_exposure", "unmapped_intake", "suggested_match",
+        "reference_intelligence", "not_applicable", "resolved", "catalogue_record",
+        "legacy_unverified",
+    }
+    if scope not in allowed_scopes:
+        raise HTTPException(status_code=422, detail="Unknown finding scope")
 
     # DB-level filtered + paginated query
+    fetch_page = 1 if scope != "all" else page
+    fetch_limit = 100000 if scope != "all" else limit
     page_findings, total = get_findings_paginated(
-        db, page=page, limit=limit,
+        db, page=fetch_page, limit=fetch_limit,
         priority=priority, search=search,
         decision_filter=decision,
         user_tenant_id=auth_ctx.tenant_id,
         is_superadmin=auth_ctx.is_superadmin,
     )
 
+    def record_scope(record: dict) -> str:
+        status = str(record.get("status") or "").lower()
+        record_id = record.get("id")
+        if record_id in confirmed_ids:
+            return "confirmed_exposure"
+        if status in {"resolved", "closed", "mitigated"}:
+            return "resolved"
+        if status in {"not_applicable", "not-applicable"}:
+            return "not_applicable"
+        if status in {"reference", "reference_only"}:
+            return "reference_intelligence"
+        if record_id in legacy_ids:
+            return "legacy_unverified"
+        queue = next((row for row in posture["mapping_queue"] if row["finding_id"] == record_id), None)
+        if queue and queue["mapping_reason"] == "suggested_match":
+            return "suggested_match"
+        if queue:
+            return "unmapped_intake"
+        if record.get("cisa") or record.get("cisa_kev") or str(record.get("source") or "").lower() in {"kev", "cisa", "nvd", "catalog"}:
+            return "catalogue_record"
+        return "unmapped_intake"
+
+    scoped = [(row, record_scope(row)) for row in page_findings]
+    if scope != "all":
+        scoped = [pair for pair in scoped if pair[1] == scope]
+        total = len(scoped)
+        start = max(0, (page - 1) * limit)
+        scoped = scoped[start:start + limit]
+
     result = []
-    for f in page_findings:
+    for f, scope_label in scoped:
         f_copy = f.copy()
+        f_copy["record_scope"] = scope_label
+        f_copy["record_scope_label"] = scope_label.replace("_", " ").title()
         f_copy["tes_score"] = _public_tes_score(f)
         f_copy["tes_decision"] = public_decision_for_finding(f, f_copy["tes_score"])
         f_copy["tes_priority"] = priority_from_tes(f_copy["tes_score"])
@@ -137,7 +183,7 @@ def get_findings(
 
     return {
         "data": result,
-        "meta": {"total": total, "page": page, "limit": limit}
+        "meta": {"total": total, "page": page, "limit": limit, "scope": scope}
     }
 
 @router.post("/findings/{finding_id}/edip")
@@ -329,6 +375,11 @@ async def record_edip_decision(
         # Sync finding status workflow state
         finding.status = cleaned_decision
 
+        event_type = (
+            "decision.overridden"
+            if existing and existing.decision != cleaned_decision
+            else "decision.updated" if existing else "decision.created"
+        )
         if existing:
             existing.decision = cleaned_decision
             existing.rationale = rationale
@@ -352,6 +403,17 @@ async def record_edip_decision(
             module="SPECTRUM",
             detail=f"Applied '{cleaned_decision}' to {finding_id} ({finding.cve or ''}). Rationale: {rationale or 'None provided'}"
         ), commit=False)
+        from services.operational_events import record_operational_event
+        record_operational_event(
+            db,
+            tenant_id=auth_ctx.tenant_id,
+            event_type=event_type,
+            resource_type="finding",
+            resource_id=finding_id,
+            source_module="SPECTRUM",
+            actor_id=user_email,
+            metadata={"decision": cleaned_decision},
+        )
 
         db.commit()
     except Exception as e:

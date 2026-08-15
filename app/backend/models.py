@@ -56,6 +56,7 @@ class StrikeAuthorization(Base):
 class StrikeSimulation(Base):
     __tablename__ = "strike_simulations"
     id = Column(String(50), primary_key=True)
+    tenant_id = Column(String(50), nullable=False, default="tempris", index=True)
     authorization_id = Column(String(50), ForeignKey("strike_authorizations.id"))
     adapter = Column(String(50))
     status = Column(String(20))
@@ -211,7 +212,100 @@ class ScanFinding(Base):
     status = Column(String(20), default="new")
     asset_id = Column(String(50))  # link to assets table
     edip_decision = Column(String(20))
+    template_id = Column(String(255), index=True)
+    cve_id = Column(String(50), index=True)
+    matched_at = Column(String(500))
+    raw_result_hash = Column(String(64))
+    normalized_finding_id = Column(String(50), index=True)
+    evidence_metadata = Column(JSON, default={})
+    first_seen_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at = Column(DateTime(timezone=True), server_default=func.now())
     discovered_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ScanJob(Base):
+    """One tenant-scoped scanner execution, including successful zero-result runs."""
+
+    __tablename__ = "scan_jobs"
+    id = Column(String(50), primary_key=True)
+    tenant_id = Column(String(50), nullable=False, index=True)
+    target = Column(String(500), nullable=False)
+    normalized_target = Column(String(255), nullable=False, index=True)
+    scan_type = Column(String(50), nullable=False)
+    engines = Column(JSON, default=[])
+    status = Column(String(30), nullable=False, default="started", index=True)
+    result_count = Column(Integer, nullable=False, default=0)
+    error = Column(Text)
+    authorization_context = Column(JSON, default={})
+    started_by = Column(String(255))
+    started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    completed_at = Column(DateTime(timezone=True))
+
+
+class PostureSnapshot(Base):
+    """Comparable tenant posture produced only by the canonical posture service."""
+
+    __tablename__ = "posture_snapshots"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(50), nullable=False, index=True)
+    captured_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    scope_version = Column(String(50), nullable=False, index=True)
+    active_asset_count = Column(Integer, nullable=False, default=0)
+    confirmed_open_exposure_count = Column(Integer, nullable=False, default=0)
+    confirmed_critical_count = Column(Integer, nullable=False, default=0)
+    confirmed_high_count = Column(Integer, nullable=False, default=0)
+    confirmed_ransomware_linked_count = Column(Integer, nullable=False, default=0)
+    needs_classification_count = Column(Integer, nullable=False, default=0)
+    reference_intelligence_count = Column(Integer, nullable=False, default=0)
+    evidence_backed_link_count = Column(Integer, nullable=False, default=0)
+    legacy_unverified_link_count = Column(Integer, nullable=False, default=0)
+    aggregate_tenant_tes = Column(Float)
+    scoreable_finding_count = Column(Integer, nullable=False, default=0)
+
+
+class Incident(Base):
+    """Tenant incident received from an authenticated integration or manual intake."""
+
+    __tablename__ = "incidents"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "source", "external_event_id", name="uq_incident_external_event"),
+    )
+
+    id = Column(String(50), primary_key=True)
+    tenant_id = Column(String(50), nullable=False, index=True)
+    external_event_id = Column(String(255), nullable=False)
+    source = Column(String(100), nullable=False)
+    discovered_at = Column(DateTime(timezone=True), nullable=False)
+    title = Column(String(500), nullable=False)
+    summary = Column(Text, nullable=False)
+    severity = Column(String(20), nullable=False)
+    status = Column(String(30), nullable=False, default="open")
+    affected_asset_ids = Column(JSON, default=[])
+    related_finding_ids = Column(JSON, default=[])
+    evidence_references = Column(JSON, default=[])
+    observed_impact = Column(Text)
+    response_actions = Column(JSON, default=[])
+    created_by = Column(String(255))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class OperationalEvent(Base):
+    """Structured, tenant-scoped operational event; no secrets or raw credentials."""
+
+    __tablename__ = "operational_events"
+    id = Column(String(50), primary_key=True)
+    tenant_id = Column(String(50), nullable=False, index=True)
+    event_type = Column(String(100), nullable=False, index=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    actor_type = Column(String(30), nullable=False, default="user")
+    actor_id = Column(String(255))
+    resource_type = Column(String(100), nullable=False)
+    resource_id = Column(String(100), nullable=False, index=True)
+    source_module = Column(String(50), nullable=False, index=True)
+    metadata_ = Column("metadata", JSON, default={})
+    correlation_id = Column(String(100), index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class GrcState(Base):
@@ -247,6 +341,11 @@ class GrcPolicyDocument(Base):
     review_cycle = Column(String(50), default="Annual")
     content = Column(Text, nullable=False)
     created_by = Column(String(255))
+    archived_at = Column(DateTime(timezone=True))
+    archived_by = Column(String(255))
+    supersedes_id = Column(String(80))
+    superseded_by_id = Column(String(80))
+    deleted_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -344,6 +443,7 @@ class AssetExposure(Base):
     match_method = Column(String(50), nullable=False, default="manual")
     confidence = Column(Float)
     evidence = Column(Text)
+    evidence_metadata = Column(JSON, default={})
     recorded_by = Column(String(255))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(

@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
-from models import Asset, AssetExposure, AuditLog, Finding, FindingStatusHistory
+from models import Asset, AuditLog, Finding, FindingStatusHistory
 from routers.audit import AuditEntry, append_to_audit_log_db
 from routers.auth import get_auth_context, require_role
 from services.database import get_db
@@ -21,6 +21,7 @@ from services.exposure_links import (
     is_catalog_finding,
     set_finding_assets,
 )
+from services.operational_events import record_operational_event
 
 
 router = APIRouter(dependencies=[Depends(require_module("SYNTHESIS"))])
@@ -91,6 +92,10 @@ class FindingExposureClassification(BaseModel):
         if len(normalized) < 10:
             raise ValueError("Rationale must contain at least 10 non-whitespace characters")
         return normalized
+
+
+class FindingLifecycleRequest(BaseModel):
+    rationale: str = Field(min_length=10, max_length=2000)
 
 
 
@@ -291,6 +296,16 @@ def classify_finding_exposure(
         changed_by=auth.user_id,
         notes=req.rationale,
     ))
+    record_operational_event(
+        db,
+        tenant_id=auth.tenant_id,
+        event_type=("finding.reference_only" if target_status == "reference_only" else "finding.not_applicable" if target_status == "not_applicable" else "finding.reopened"),
+        resource_type="finding",
+        resource_id=finding.id,
+        source_module="INTAKE_TRIAGE",
+        actor_id=auth.user_id,
+        metadata={"previous_status": old_status, "new_status": target_status},
+    )
     append_to_audit_log_db(db, AuditEntry(
         user=auth.user_id,
         action="FINDING_EXPOSURE_CLASSIFIED",
@@ -305,6 +320,7 @@ def classify_finding_exposure(
         },
     ), commit=False)
     db.commit()
+    _publish_finding_refresh(auth.tenant_id, finding.id, target_status)
     return {
         "status": "updated",
         "finding_id": finding.id,
@@ -447,6 +463,11 @@ def confirm_finding_asset_links(
     confirm_finding_assets(
         db, finding, ordered_assets, auth.user_id, req.evidence,
     )
+    record_operational_event(
+        db, tenant_id=auth.tenant_id, event_type="finding.asset_confirmed",
+        resource_type="finding", resource_id=finding.id, source_module="INTAKE_TRIAGE",
+        actor_id=auth.user_id, metadata={"asset_ids": req.asset_ids},
+    )
     append_to_audit_log_db(
         db,
         AuditEntry(
@@ -463,6 +484,7 @@ def confirm_finding_asset_links(
         commit=False,
     )
     db.commit()
+    _publish_finding_refresh(auth.tenant_id, finding.id, finding.status or "unmitigated")
     active_ids = sorted(
         confirmed_asset_ids_by_finding(db, auth.tenant_id).get(finding.id, set())
     )
@@ -562,7 +584,14 @@ def replace_finding_asset_links(
         ),
         commit=False,
     )
+    if added:
+        record_operational_event(
+            db, tenant_id=auth.tenant_id, event_type="finding.asset_confirmed",
+            resource_type="finding", resource_id=finding.id, source_module="INTAKE_TRIAGE",
+            actor_id=auth.user_id, metadata={"asset_ids": added},
+        )
     db.commit()
+    _publish_finding_refresh(auth.tenant_id, finding.id, finding.status or "unmitigated")
     return {
         "status": "updated",
         "finding_id": finding.id,
@@ -570,6 +599,90 @@ def replace_finding_asset_links(
         "added_asset_ids": added,
         "removed_asset_ids": removed,
     }
+
+
+def _publish_finding_refresh(tenant_id: str, finding_id: str, status: str) -> None:
+    try:
+        from routers.edip import _publish_sss_event
+        _publish_sss_event(tenant_id, {
+            "type": "finding.refresh",
+            "finding_id": finding_id,
+            "status": status,
+        })
+    except Exception:
+        pass
+
+
+@router.post("/findings/{finding_id}/resolve")
+def resolve_finding(
+    finding_id: str,
+    req: FindingLifecycleRequest,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("Superadmin")),
+):
+    auth = get_auth_context(user)
+    finding = db.query(Finding).filter(
+        Finding.id == finding_id,
+        Finding.tenant_id == auth.tenant_id,
+    ).first()
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    old_status = (finding.status or "unmitigated").strip().lower()
+    if old_status in RESOLVED_FINDING_STATUSES:
+        raise HTTPException(status_code=409, detail="Finding is already resolved")
+    finding.status = "resolved"
+    db.add(FindingStatusHistory(
+        finding_id=finding.id, old_status=old_status, new_status="resolved",
+        changed_by=auth.user_id, notes=req.rationale.strip(),
+    ))
+    record_operational_event(
+        db, tenant_id=auth.tenant_id, event_type="finding.resolved",
+        resource_type="finding", resource_id=finding.id, source_module="INTAKE_TRIAGE",
+        actor_id=auth.user_id, metadata={"previous_status": old_status},
+    )
+    append_to_audit_log_db(db, AuditEntry(
+        user=auth.user_id, action="FINDING_RESOLVED", module="SPECTRUM",
+        detail=f"Resolved finding {finding.id}", metadata={"finding_id": finding.id},
+    ), commit=False)
+    db.commit()
+    _publish_finding_refresh(auth.tenant_id, finding.id, "resolved")
+    return {"status": "resolved", "finding_id": finding.id}
+
+
+@router.post("/findings/{finding_id}/reopen")
+def reopen_finding(
+    finding_id: str,
+    req: FindingLifecycleRequest,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("Superadmin")),
+):
+    auth = get_auth_context(user)
+    finding = db.query(Finding).filter(
+        Finding.id == finding_id,
+        Finding.tenant_id == auth.tenant_id,
+    ).first()
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    old_status = (finding.status or "").strip().lower()
+    if old_status not in RESOLVED_FINDING_STATUSES:
+        raise HTTPException(status_code=409, detail="Only a resolved or closed finding can be reopened")
+    finding.status = "unmitigated"
+    db.add(FindingStatusHistory(
+        finding_id=finding.id, old_status=old_status, new_status="unmitigated",
+        changed_by=auth.user_id, notes=req.rationale.strip(),
+    ))
+    record_operational_event(
+        db, tenant_id=auth.tenant_id, event_type="finding.reopened",
+        resource_type="finding", resource_id=finding.id, source_module="INTAKE_TRIAGE",
+        actor_id=auth.user_id, metadata={"previous_status": old_status},
+    )
+    append_to_audit_log_db(db, AuditEntry(
+        user=auth.user_id, action="FINDING_REOPENED", module="SPECTRUM",
+        detail=f"Reopened finding {finding.id}", metadata={"finding_id": finding.id},
+    ), commit=False)
+    db.commit()
+    _publish_finding_refresh(auth.tenant_id, finding.id, "unmitigated")
+    return {"status": "reopened", "finding_id": finding.id}
 
 
 
@@ -611,14 +724,9 @@ def update_finding_workflow(
             ).first()
             if not asset:
                 raise HTTPException(status_code=422, detail="Asset is not an active asset in this tenant")
-            confirm_finding_assets(db, finding, [asset], auth.user_id)
+            set_finding_assets(db, finding, [asset], auth.user_id)
         else:
-            db.query(AssetExposure).filter(
-                AssetExposure.tenant_id == auth.tenant_id,
-                AssetExposure.finding_id == finding.id,
-            ).delete(synchronize_session=False)
-            finding.asset_id = None
-            finding.asset_data = None
+            set_finding_assets(db, finding, [], auth.user_id)
         changes["asset_id"] = req.asset_id
     if "sla_days" in supplied:
         finding.sla = req.sla_days
@@ -667,6 +775,8 @@ def update_finding_workflow(
         commit=False,
     )
     db.commit()
+    if "asset_id" in supplied:
+        _publish_finding_refresh(auth.tenant_id, finding.id, finding.status or "unmitigated")
     return {
         "status": "updated",
         "finding_id": finding.id,

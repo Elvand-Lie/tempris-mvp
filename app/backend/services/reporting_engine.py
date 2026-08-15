@@ -26,6 +26,8 @@ from models import (
     GeneratedReport,
 )
 from routers.audit import AuditEntry, append_to_audit_log_db
+from services.customer_posture import canonical_exposure_rows
+from services.operational_events import record_operational_event
 
 
 REPORT_TYPES = {'risk', 'gap', 'evidence', 'combined', 'json', 'poc'}
@@ -275,10 +277,13 @@ def _evidence_summary(finding, sources, evidence) -> dict:
 
 def _build_poc_payload(
     db, tenant_id, requested_by, report_id, findings, configuration,
-    excluded_unmapped_count=0,
+    excluded_unmapped_count=0, exposure_map=None,
 ):
     ids = [finding.id for finding in findings]
-    asset_ids = [finding.asset_id for finding in findings if finding.asset_id]
+    exposure_map = exposure_map or {}
+    asset_ids = sorted({
+        asset.id for pairs in exposure_map.values() for asset, _ in pairs
+    })
     assets = {
         row.id: row for row in db.query(Asset).filter(
             Asset.tenant_id == tenant_id, Asset.id.in_(asset_ids),
@@ -310,7 +315,9 @@ def _build_poc_payload(
         )
         decision = _normalise_decision(recorded_decision)
         action_label, action_colour = ACTION_LABELS[decision]
-        asset = assets.get(finding.asset_id)
+        linked_pairs = exposure_map.get(finding.id, [])
+        linked_assets = [asset for asset, _ in linked_pairs]
+        asset = linked_assets[0] if linked_assets else None
         controls = controls_by_id.get(finding.id, [])
         status = _safe_text(finding.status, 'not recorded').lower()
         sla_days = finding.sla if finding.sla and finding.sla > 0 else None
@@ -334,11 +341,23 @@ def _build_poc_payload(
             'action_label': action_label,
             'action_colour': action_colour,
             'asset': {
-                'id': finding.asset_id,
+                'id': asset.id if asset else None,
                 'name': asset.name if asset else _safe_text(asset_data.get('name'), 'Unlinked asset'),
                 'environment': asset.environment if asset else None,
                 'criticality': asset.criticality if asset else None,
             },
+            'assets': [
+                {
+                    'id': linked_asset.id,
+                    'name': linked_asset.name,
+                    'environment': linked_asset.environment,
+                    'criticality': linked_asset.criticality,
+                    'exposure_source': link.match_method,
+                    'evidence': link.evidence,
+                    'evidence_metadata': link.evidence_metadata or {},
+                }
+                for linked_asset, link in linked_pairs
+            ],
             'what_it_is': _safe_text(
                 finding.summary or finding.short_description or finding.description,
             ),
@@ -416,6 +435,8 @@ def _build_poc_payload(
             'version': POC_REPORT_VERSION,
             'generated_at': datetime.now(SINGAPORE_TZ).isoformat(),
             'generated_by': requested_by,
+            'snapshot_type': 'current_state',
+            'assessment_period_semantics': 'contextual_metadata_only',
             'classification': _safe_text(configuration.get('classification'), 'Client Confidential'),
             'retention': _safe_text(
                 configuration.get('retention'),
@@ -611,17 +632,16 @@ def generate_poc_report_pipeline(
         if source_ids else
         db.query(Finding).filter(Finding.tenant_id == tenant_id).all()
     )
-    active_asset_ids = {
-        row.id for row in db.query(Asset).filter(
-            Asset.tenant_id == tenant_id,
-            Asset.status != 'decommissioned',
-        ).all()
-    }
-    findings = [row for row in candidate_findings if row.asset_id in active_asset_ids]
+    canonical_rows = canonical_exposure_rows(db, tenant_id, open_only=True)
+    exposure_map = {}
+    for finding, asset, link in canonical_rows:
+        exposure_map.setdefault(finding.id, []).append((asset, link))
+    findings = [row for row in candidate_findings if row.id in exposure_map]
     report_id = f'REP-{uuid.uuid4().hex[:8].upper()}'
     payload = _build_poc_payload(
         db, tenant_id, requested_by, report_id, findings, configuration,
         excluded_unmapped_count=len(candidate_findings) - len(findings),
+        exposure_map=exposure_map,
     )
     json_content = json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False)
     html_content = _render_poc_html(payload)
@@ -660,6 +680,20 @@ def generate_poc_report_pipeline(
             artifact_location=str(paths['html']),
         )
         db.add(report)
+        record_operational_event(
+            db,
+            tenant_id=tenant_id,
+            event_type='report.version_created' if parent_report_id else 'report.generated',
+            resource_type='generated_report',
+            resource_id=report_id,
+            source_module='CLIENT_REPORTS',
+            actor_id=requested_by,
+            metadata={
+                'report_type': POC_REPORT_TYPE,
+                'finding_count': len(findings),
+                'snapshot_semantics': 'current_state',
+            },
+        )
         append_to_audit_log_db(db, AuditEntry(
             user=requested_by,
             action='POC_REPORT_GENERATED',
@@ -668,7 +702,8 @@ def generate_poc_report_pipeline(
                 f'Generated client report {report_id} with JSON hash {content_hash}.'
                 + (f' Regenerated from {parent_report_id}.' if parent_report_id else '')
             ),
-        ))
+        ), commit=False)
+        db.commit()
         db.refresh(report)
     except Exception:
         db.rollback()
@@ -725,7 +760,11 @@ def generate_report_pipeline(
     finding_ids = source_finding_ids or []
     evidence_ids = source_evidence_ids or []
     configuration = _clean_report_value(framework_configuration or {})
-    findings = _load_findings(db, tenant_id, finding_ids)
+    candidates = _load_findings(db, tenant_id, finding_ids)
+    canonical_ids = {
+        finding.id for finding, _, _ in canonical_exposure_rows(db, tenant_id, open_only=True)
+    }
+    findings = [finding for finding in candidates if finding.id in canonical_ids]
     evidences = _load_evidence(db, tenant_id, evidence_ids)
 
     report_data = {
@@ -824,12 +863,28 @@ def generate_report_pipeline(
             artifact_location=str(artifact_path),
         )
         db.add(report_record)
+        record_operational_event(
+            db,
+            tenant_id=tenant_id,
+            event_type='report.generated',
+            resource_type='generated_report',
+            resource_id=report_id,
+            source_module='CLIENT_REPORTS',
+            actor_id=requested_by,
+            metadata={
+                'report_type': report_type,
+                'finding_count': len(findings),
+                'excluded_unconfirmed_count': len(candidates) - len(findings),
+                'snapshot_semantics': 'current_state',
+            },
+        )
         append_to_audit_log_db(db, AuditEntry(
             user=requested_by,
             action='REPORT_GENERATED',
             module='SYNTHESIS',
             detail=f'Generated {report_type} report {report_id} with hash {content_hash}.',
-        ))
+        ), commit=False)
+        db.commit()
         db.refresh(report_record)
     except Exception:
         db.rollback()

@@ -136,7 +136,11 @@ def test_agentic_and_identity_posture_contracts(client_and_headers):
     assert finding["edip_decision"] == "PATCH"
 
 
-def test_aev_verdict_authentication_and_server_deadline_states(client_and_headers):
+def test_aev_verdict_authentication_and_server_deadline_states(client_and_headers, monkeypatch):
+    from routers import edip
+
+    events = []
+    monkeypatch.setattr(edip, "_publish_sss_event", lambda tenant_id, payload: events.append((tenant_id, payload)))
     client, headers = client_and_headers
     payload = {
         "path_id": "AEV-PATH-22",
@@ -147,6 +151,14 @@ def test_aev_verdict_authentication_and_server_deadline_states(client_and_header
     }
     rejected = client.post("/api/edip/connectors/aev/verdicts", headers=headers, json=payload)
     assert rejected.status_code == 401
+    assert client.post(
+        "/api/edip/connectors/aev/verdicts",
+        headers=headers,
+        json={**payload, "evidence_ref": "not a uri"},
+    ).status_code == 422
+    missing_token = dict(payload)
+    missing_token.pop("engagement_token")
+    assert client.post("/api/edip/connectors/aev/verdicts", headers=headers, json=missing_token).status_code == 422
 
     accepted = client.post(
         "/api/edip/connectors/aev/verdicts",
@@ -157,8 +169,65 @@ def test_aev_verdict_authentication_and_server_deadline_states(client_and_header
     assert accepted.json()["validated"] is True
     assert accepted.json()["verdict"] == "prevented"
     assert accepted.json()["revalidation_countdown_state"] in {"scheduled", "due_soon", "overdue"}
+    assert events[-1][0] == "tenant-v62"
+    assert events[-1][1]["type"] == "sss.finding"
+
+    updated = client.post(
+        "/api/edip/connectors/aev/verdicts",
+        headers=headers,
+        json={**payload, "verdict": "detected", "engagement_token": "v62-test-engagement-token"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["id"] == accepted.json()["id"]
+    assert updated.json()["verdict"] == "detected"
+    db = SessionLocal()
+    assert db.query(Finding).filter(Finding.cve == "SSS-AEV-AEV-PATH-22").count() == 1
+    db.close()
 
     today = date(2026, 7, 22)
     assert deadline_state("2026-08-01", today=today) == "scheduled"
     assert deadline_state("2026-07-28", today=today) == "due_soon"
     assert deadline_state("2026-07-21", today=today) == "overdue"
+
+
+def test_live_entra_sync_reuses_normalizer_and_prevents_duplicates(client_and_headers, monkeypatch):
+    from routers import edip
+
+    monkeypatch.setattr(edip, "acquire_entra_authentication_snapshot", lambda tenant_id: {
+        "users_discovered": 3,
+        "users": [
+            {
+                "id": "sync-phone",
+                "userPrincipalName": "sync.phone@example.test",
+                "authenticationMethods": [{
+                    "@odata.type": "#microsoft.graph.phoneAuthenticationMethod",
+                    "phoneType": "mobile",
+                }],
+            },
+            {
+                "id": "sync-passkey",
+                "userPrincipalName": "sync.passkey@example.test",
+                "authenticationMethods": [{"@odata.type": "#microsoft.graph.fido2AuthenticationMethod"}],
+            },
+        ],
+        "errors": [{"user": "unreadable", "error": "permission denied"}],
+    })
+    client, headers = client_and_headers
+
+    first = client.post("/api/edip/connectors/entra/sync", headers=headers, json={})
+    second = client.post("/api/edip/connectors/entra/sync", headers=headers, json={})
+
+    assert first.status_code == second.status_code == 200
+    assert first.json()["created"] == 1
+    assert second.json()["created"] == 0
+    assert second.json()["updated"] == 1
+    assert second.json()["partial"] is True
+    assert second.json()["users_discovered"] == 3
+    db = SessionLocal()
+    rows = db.query(Finding).filter(
+        Finding.tenant_id == "tenant-v62",
+        Finding.cve == "SSS-ENTRA-sync-phone",
+    ).all()
+    assert len(rows) == 1
+    assert rows[0].decision == "PATCH"
+    db.close()

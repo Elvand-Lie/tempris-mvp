@@ -23,9 +23,17 @@ If it reports the expected Compose configuration and Tempris containers, release
 .\scripts\deploy-vps.ps1 -Deploy
 ```
 
-The script refuses tracked worktree changes, archives only committed Git content, verifies SHA-256 after upload, makes timestamped source and PostgreSQL backups, verifies the database backup with `pg_restore --list`, preserves `.env`, mounted runtime data, and Docker volumes, applies migrations `006_add_sss_sub_class.py` and `007_create_tenant_registry.py`, seeds only the idempotent v62 debrief pack, restarts the production Compose stack, and checks `/api/health`.
+The script refuses tracked worktree changes, archives only committed Git content, verifies SHA-256 after upload, and creates verified timestamped backups of the application source, PostgreSQL database, and generated report artifacts. It preserves `.env`, mounted runtime data, and Docker volumes. Before replacing source, it applies migrations `006_add_sss_sub_class.py`, `007_create_tenant_registry.py`, and `008_canonical_posture_and_operations.py`. Migration 008 runs against the staged backend models and writes a JSON migration report under `/home/tempris/backups/migrations/`. The release then installs the staged source and product documentation, restarts the Compose stack, checks `/api/health`, runs migration 008 in read-only validation mode, and records the deployed Git commit in `/home/tempris/app/REVISION`.
 
 Migration 007 is additive and idempotent. It creates the authoritative `tenants` registry, backfills every distinct non-empty `tenant_id` already present in tenant-scoped tables, explicitly registers `tempris` and `bug-bounty`, and adds the `tenant_packages.version` concurrency field. It does not rename tenants, reassign tenant-owned records, or remove data.
+
+Migration 008 adds canonical exposure, posture-snapshot, scan-job, incident, operational-event, and policy-lifecycle storage. It preserves every legacy `Finding.asset_id` pointer and never converts one into a confirmed `AssetExposure`. On PostgreSQL it refuses to mutate unless a verified external backup is supplied. It also refuses to guess tenant ownership for orphan STRIKE simulations. A second execution validates the completed schema and exits without applying changes.
+
+## Migration 008 staging rehearsal
+
+Before a production release, rehearse migration 008 against a disposable database clone using [the migration runbook](docs/product/TEMPRIS_MIGRATION_008_RUNBOOK.md). For production PostgreSQL, the verified custom-format dump and report-artifact archive are created automatically by the guarded release script. Do not apply migration 008 directly to production without those backups.
+
+The repository does not define a separate remote staging host. Local/database-clone rehearsal proves schema and data preservation, but a remote sandbox deployment still requires the approved VPS connection and credential rotation described below.
 
 After a tenant-administration release, sign in as the Tempris platform Superadmin and verify:
 
@@ -50,13 +58,19 @@ The dedicated `researcher@tempris.com` account belongs to the isolated `bug-boun
 
 ## Failure and rollback
 
-If the post-restart health check fails, the script restores the previous source archive and restarts Compose. It does not automatically reverse database migrations: migrations 006 and 007 are additive, and database restoration must use the verified backup made by the operator under the actual production database arrangement. Restore that backup if a rollback must also remove the tenant registry or entitlement-version column; do not manually drop them while the application is running.
+If migration, restart, health, or post-deployment schema validation fails, the script's error trap stops the backend as necessary, restores PostgreSQL with `pg_restore --clean --if-exists`, restores the generated report-artifact archive, restores the previous application source/frontend, and restarts Compose. Rollback errors are printed and must be treated as an incident; they are not silently ignored.
 
 For a manual rollback, select the timestamped archive under `<RemoteRoot>/backups/releases/`, restore it to `<RemoteRoot>/app` while preserving `.env` and runtime data, then run:
 
 ```bash
 cd /home/tempris/app/deploy && docker compose -f docker-compose.prod.yml up -d --build
 ```
+
+Restore the matching database dump with `pg_restore --clean --if-exists` and restore the matching archive from `<RemoteRoot>/backups/reports/` before restarting. Use the same release identifier for all three artifacts. Verify `/api/health`, report downloads, authenticated routes, and the commit stored in `/home/tempris/app/REVISION` after restoration.
+
+## Credential safety gate
+
+`app/deploy/.env` is required operational configuration, is Git-ignored, and must remain outside release archives. Historical review found that earlier revisions contained non-placeholder deployment credentials. Rotate the affected secrets before the next production release, update the protected VPS `.env`, and revoke the old values. Never copy secret values into tickets, logs, migration reports, or documentation.
 
 ## Current VPS status
 

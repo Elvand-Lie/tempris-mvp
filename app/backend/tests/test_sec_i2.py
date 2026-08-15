@@ -3,7 +3,7 @@ import logging
 from unittest.mock import MagicMock
 from services.llm_client import sanitize_user_input, filter_llm_output, chat_completion
 from services.ai_context import sanitize_user_focus, build_full_context, build_service_ai_context
-from models import Finding, Asset, ControlStatus
+from models import Finding, Asset, AssetExposure, ControlStatus
 from services.database import SessionLocal
 
 def test_sanitize_user_input_injection():
@@ -94,8 +94,19 @@ def test_tenant_isolation_in_context_building():
             asset_id="ASSET-TEST-B",
             cisa_kev=True,
         )
-        db.add(f_a)
-        db.add(f_b)
+        asset_a = Asset(id="ASSET-TEST-A", tenant_id="tenantA", name="Tenant A asset", status="active")
+        asset_b = Asset(id="ASSET-TEST-B", tenant_id="tenantB", name="Tenant B asset", status="active")
+        db.add_all([asset_a, asset_b, f_a, f_b])
+        db.flush()
+        exposure_a = AssetExposure(
+            id="EXP-TEST-A", tenant_id="tenantA", finding_id=f_a.id, asset_id=asset_a.id,
+            status="confirmed", match_method="test", evidence="Tenant A fixture evidence",
+        )
+        exposure_b = AssetExposure(
+            id="EXP-TEST-B", tenant_id="tenantB", finding_id=f_b.id, asset_id=asset_b.id,
+            status="confirmed", match_method="test", evidence="Tenant B fixture evidence",
+        )
+        db.add_all([exposure_a, exposure_b])
         db.commit()
 
         # Build context for tenantA
@@ -109,8 +120,12 @@ def test_tenant_isolation_in_context_building():
         assert "Tenant A Finding" not in ctx_b["full_text"]
 
         # Clean up
+        db.delete(exposure_a)
+        db.delete(exposure_b)
         db.delete(f_a)
         db.delete(f_b)
+        db.delete(asset_a)
+        db.delete(asset_b)
         db.commit()
     finally:
         db.close()

@@ -21,8 +21,8 @@ class TechniqueResult:
     technique_id: str
     technique_name: str
     tactic: str
-    result: str  # "exploitable", "blocked", "not_applicable", "error"
-    confidence: float  # 0.0 - 1.0
+    result: str  # explicit observed outcome; never an inferred defensive block
+    confidence: float  # check confidence, not a protection percentage
     evidence: str
     duration_ms: int = 0
     details: list = field(default_factory=list)
@@ -43,7 +43,7 @@ async def t1190_exploit_public_app(target: str) -> TechniqueResult:
     if not NUCLEI_AVAILABLE:
         return TechniqueResult(
             technique_id="T1190", technique_name="Exploit Public-Facing Application",
-            tactic="Initial Access", result="error", confidence=0.0,
+            tactic="Initial Access", result="ERROR", confidence=0.0,
             evidence="Nuclei scanner not available in this environment."
         )
 
@@ -93,15 +93,15 @@ async def t1190_exploit_public_app(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
 
     if exploitable_count > 0:
-        result = "exploitable"
+        result = "EXPLOITABLE_OBSERVED"
         confidence = min(0.95, 0.7 + exploitable_count * 0.05)
         summary = f"Found {exploitable_count} exploitable vulnerabilities via Nuclei."
     elif evidence_lines:
-        result = "blocked"
+        result = "NO_EXPOSURE_OBSERVED"
         confidence = 0.6
         summary = f"Nuclei found {len(evidence_lines)} findings but none critical/high."
     else:
-        result = "blocked"
+        result = "NO_EXPOSURE_OBSERVED"
         confidence = 0.5
         summary = "No exploitable public-facing vulnerabilities detected."
 
@@ -190,14 +190,14 @@ async def t1078_valid_accounts(target: str) -> TechniqueResult:
     if exploitable:
         return TechniqueResult(
             technique_id="T1078", technique_name="Valid Accounts",
-            tactic="Initial Access", result="exploitable", confidence=0.85,
+            tactic="Initial Access", result="EXPLOITABLE_OBSERVED", confidence=0.85,
             evidence="Default or weak credentials found on exposed services.",
             duration_ms=elapsed, details=evidence_lines
         )
     else:
         return TechniqueResult(
             technique_id="T1078", technique_name="Valid Accounts",
-            tactic="Initial Access", result="blocked", confidence=0.6,
+            tactic="Initial Access", result="NO_EXPOSURE_OBSERVED", confidence=0.6,
             evidence="No default credentials exploitable. Authentication appears hardened.",
             duration_ms=elapsed, details=evidence_lines
         )
@@ -260,14 +260,14 @@ async def t1059_command_injection(target: str) -> TechniqueResult:
     if exploitable:
         return TechniqueResult(
             technique_id="T1059", technique_name="Command & Scripting Interpreter",
-            tactic="Execution", result="exploitable", confidence=0.9,
+            tactic="Execution", result="EXPLOITABLE_OBSERVED", confidence=0.9,
             evidence="Command injection or RCE vulnerability confirmed.",
             duration_ms=elapsed, details=evidence_lines
         )
     else:
         return TechniqueResult(
             technique_id="T1059", technique_name="Command & Scripting Interpreter",
-            tactic="Execution", result="blocked", confidence=0.55,
+            tactic="Execution", result="NO_EXPOSURE_OBSERVED", confidence=0.55,
             evidence="No command injection vectors found. Input validation appears effective.",
             duration_ms=elapsed, details=evidence_lines
         )
@@ -322,14 +322,14 @@ async def t1068_priv_escalation(target: str) -> TechniqueResult:
     if exploitable:
         return TechniqueResult(
             technique_id="T1068", technique_name="Exploitation for Privilege Escalation",
-            tactic="Privilege Escalation", result="exploitable", confidence=0.8,
+            tactic="Privilege Escalation", result="EXPLOITABLE_OBSERVED", confidence=0.8,
             evidence="Exposed admin/debug endpoints found that could enable privilege escalation.",
             duration_ms=elapsed, details=evidence_lines
         )
     else:
         return TechniqueResult(
             technique_id="T1068", technique_name="Exploitation for Privilege Escalation",
-            tactic="Privilege Escalation", result="blocked", confidence=0.55,
+            tactic="Privilege Escalation", result="NO_EXPOSURE_OBSERVED", confidence=0.55,
             evidence="No exposed admin panels or debug endpoints detected.",
             duration_ms=elapsed, details=evidence_lines
         )
@@ -423,21 +423,21 @@ async def t1562_impair_defenses(target: str) -> TechniqueResult:
     if weaknesses >= 4:
         return TechniqueResult(
             technique_id="T1562", technique_name="Impair Defenses",
-            tactic="Defense Evasion", result="exploitable", confidence=0.75,
+            tactic="Defense Evasion", result="EXPLOITABLE_OBSERVED", confidence=0.75,
             evidence=f"Defense posture weak: {weaknesses} security header/TLS issues found.",
             duration_ms=elapsed, details=evidence_lines
         )
     elif weaknesses >= 2:
         return TechniqueResult(
             technique_id="T1562", technique_name="Impair Defenses",
-            tactic="Defense Evasion", result="exploitable", confidence=0.5,
+            tactic="Defense Evasion", result="EXPLOITABLE_OBSERVED", confidence=0.5,
             evidence=f"Some defense gaps: {weaknesses} issues found.",
             duration_ms=elapsed, details=evidence_lines
         )
     else:
         return TechniqueResult(
             technique_id="T1562", technique_name="Impair Defenses",
-            tactic="Defense Evasion", result="blocked", confidence=0.7,
+            tactic="Defense Evasion", result="NO_EXPOSURE_OBSERVED", confidence=0.7,
             evidence="Defenses appear properly configured.",
             duration_ms=elapsed, details=evidence_lines
         )
@@ -515,14 +515,14 @@ async def t1046_network_scanning(target: str) -> TechniqueResult:
     if unexpected_ports:
         return TechniqueResult(
             technique_id="T1046", technique_name="Network Service Scanning",
-            tactic="Discovery", result="exploitable",
+            tactic="Discovery", result="EXPLOITABLE_OBSERVED",
             confidence=0.8,
             evidence=f"Discovered {open_ports} open ports on {host}. {len(unexpected_ports)} unexpected: {unexpected_ports}",
             duration_ms=elapsed, details=evidence_lines
         )
     return TechniqueResult(
         technique_id="T1046", technique_name="Network Service Scanning",
-        tactic="Discovery", result="blocked",
+        tactic="Discovery", result="NO_EXPOSURE_OBSERVED",
         confidence=0.7,
         evidence=f"Discovered {open_ports} open ports on {host}. All ports are standard web server ports (22/80/443).",
         duration_ms=elapsed, details=evidence_lines
@@ -577,14 +577,14 @@ async def t1595_recon(target: str) -> TechniqueResult:
     if info_leaked:
         return TechniqueResult(
             technique_id="T1595", technique_name="Active Scanning",
-            tactic="Reconnaissance", result="exploitable",
+            tactic="Reconnaissance", result="EXPLOITABLE_OBSERVED",
             confidence=0.7 if (server_disclosed and powered_disclosed) else 0.5,
             evidence=f"Reconnaissance on {host} disclosed server fingerprint information.",
             duration_ms=elapsed, details=evidence_lines
         )
     return TechniqueResult(
         technique_id="T1595", technique_name="Active Scanning",
-        tactic="Reconnaissance", result="blocked",
+        tactic="Reconnaissance", result="NO_EXPOSURE_OBSERVED",
         confidence=0.8,
         evidence=f"Server fingerprinting blocked — {host} does not disclose software identity.",
         duration_ms=elapsed, details=evidence_lines
@@ -623,10 +623,10 @@ async def t1133_external_remote_services(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if exposed > 0:
         return TechniqueResult("T1133", "External Remote Services", "Initial Access",
-            "exploitable", min(0.9, 0.6 + exposed * 0.1),
+            "EXPLOITABLE_OBSERVED", min(0.9, 0.6 + exposed * 0.1),
             f"{exposed} remote access service(s) exposed externally.", elapsed, evidence_lines)
     return TechniqueResult("T1133", "External Remote Services", "Initial Access",
-        "blocked", 0.7, "No remote access services exposed.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.7, "No remote access services exposed.", elapsed, evidence_lines)
 
 
 # ── T1566: Phishing (SPF/DKIM/DMARC check) ──────────────────────────────────
@@ -679,12 +679,12 @@ async def t1566_phishing(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if weaknesses >= 2:
         return TechniqueResult("T1566", "Phishing", "Initial Access",
-            "exploitable", 0.7, f"Email security weak: {weaknesses} missing records (SPF/DMARC).", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.7, f"Email security weak: {weaknesses} missing records (SPF/DMARC).", elapsed, evidence_lines)
     elif weaknesses == 1:
         return TechniqueResult("T1566", "Phishing", "Initial Access",
-            "exploitable", 0.5, f"Partial email security: {weaknesses} gap found.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.5, f"Partial email security: {weaknesses} gap found.", elapsed, evidence_lines)
     return TechniqueResult("T1566", "Phishing", "Initial Access",
-        "blocked", 0.7, "Email security records (SPF/DMARC) are configured.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.7, "Email security records (SPF/DMARC) are configured.", elapsed, evidence_lines)
 
 
 # ── T1195: Supply Chain Compromise (dependency/version exposure) ─────────────
@@ -722,10 +722,10 @@ async def t1195_supply_chain(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if exposed > 0:
         return TechniqueResult("T1195", "Supply Chain Compromise", "Initial Access",
-            "exploitable", min(0.85, 0.5 + exposed * 0.15),
+            "EXPLOITABLE_OBSERVED", min(0.85, 0.5 + exposed * 0.15),
             f"{exposed} dependency manifest(s) publicly accessible.", elapsed, evidence_lines)
     return TechniqueResult("T1195", "Supply Chain Compromise", "Initial Access",
-        "blocked", 0.6, "No dependency manifests exposed.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.6, "No dependency manifests exposed.", elapsed, evidence_lines)
 
 
 # ── T1189: Drive-by Compromise (outdated JS/framework detection) ─────────────
@@ -772,9 +772,9 @@ async def t1189_driveby(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if vulnerable > 0:
         return TechniqueResult("T1189", "Drive-by Compromise", "Initial Access",
-            "exploitable", 0.65, f"{vulnerable} outdated framework(s) detected.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.65, f"{vulnerable} outdated framework(s) detected.", elapsed, evidence_lines)
     return TechniqueResult("T1189", "Drive-by Compromise", "Initial Access",
-        "blocked", 0.6, "No outdated client-side frameworks detected.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.6, "No outdated client-side frameworks detected.", elapsed, evidence_lines)
 
 
 # ── T1203: Exploitation for Client Execution ─────────────────────────────────
@@ -817,9 +817,9 @@ async def t1203_client_execution(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if issues >= 2:
         return TechniqueResult("T1203", "Exploitation for Client Execution", "Execution",
-            "exploitable", 0.6, f"{issues} client-side security issues found.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.6, f"{issues} client-side security issues found.", elapsed, evidence_lines)
     return TechniqueResult("T1203", "Exploitation for Client Execution", "Execution",
-        "blocked", 0.6, "Client execution vectors appear mitigated.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.6, "Client execution vectors appear mitigated.", elapsed, evidence_lines)
 
 
 # ── T1047: Windows Management Instrumentation ────────────────────────────────
@@ -845,10 +845,10 @@ async def t1047_wmi(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if exposed > 0:
         return TechniqueResult("T1047", "Windows Management Instrumentation", "Execution",
-            "exploitable", min(0.85, 0.5 + exposed * 0.15),
+            "EXPLOITABLE_OBSERVED", min(0.85, 0.5 + exposed * 0.15),
             f"{exposed} WMI/management service(s) exposed.", elapsed, evidence_lines)
     return TechniqueResult("T1047", "Windows Management Instrumentation", "Execution",
-        "blocked", 0.7, "No WMI/WinRM/DCOM services exposed.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.7, "No WMI/WinRM/DCOM services exposed.", elapsed, evidence_lines)
 
 
 # ── T1053: Scheduled Task/Job ────────────────────────────────────────────────
@@ -882,9 +882,9 @@ async def t1053_scheduled_task(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if exposed > 0:
         return TechniqueResult("T1053", "Scheduled Task/Job", "Execution",
-            "exploitable", 0.7, f"{exposed} task scheduler interface(s) exposed.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.7, f"{exposed} task scheduler interface(s) exposed.", elapsed, evidence_lines)
     return TechniqueResult("T1053", "Scheduled Task/Job", "Execution",
-        "blocked", 0.6, "No task scheduler interfaces exposed.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.6, "No task scheduler interfaces exposed.", elapsed, evidence_lines)
 
 
 # ── T1204: User Execution ────────────────────────────────────────────────────
@@ -932,9 +932,9 @@ async def t1204_user_execution(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if issues > 0:
         return TechniqueResult("T1204", "User Execution", "Execution",
-            "exploitable", 0.5, f"{issues} executable download vector(s) found.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.5, f"{issues} executable download vector(s) found.", elapsed, evidence_lines)
     return TechniqueResult("T1204", "User Execution", "Execution",
-        "blocked", 0.6, "No executable download vectors detected.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.6, "No executable download vectors detected.", elapsed, evidence_lines)
 
 
 # ── T1569: System Services ───────────────────────────────────────────────────
@@ -977,9 +977,9 @@ async def t1569_system_services(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if exposed > 0:
         return TechniqueResult("T1569", "System Services", "Execution",
-            "exploitable", 0.7, f"{exposed} service management interface(s) exposed.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.7, f"{exposed} service management interface(s) exposed.", elapsed, evidence_lines)
     return TechniqueResult("T1569", "System Services", "Execution",
-        "blocked", 0.65, "No service management interfaces exposed.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.65, "No service management interfaces exposed.", elapsed, evidence_lines)
 
 
 # ── T1098: Account Manipulation ──────────────────────────────────────────────
@@ -1023,9 +1023,9 @@ async def t1098_account_manipulation(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if exposed > 0:
         return TechniqueResult("T1098", "Account Manipulation", "Persistence",
-            "exploitable", 0.75, f"{exposed} user management endpoint(s) accessible.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.75, f"{exposed} user management endpoint(s) accessible.", elapsed, evidence_lines)
     return TechniqueResult("T1098", "Account Manipulation", "Persistence",
-        "blocked", 0.6, "User management endpoints are properly protected.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.6, "User management endpoints are properly protected.", elapsed, evidence_lines)
 
 
 # ── T1136: Create Account ────────────────────────────────────────────────────
@@ -1063,9 +1063,9 @@ async def t1136_create_account(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if exposed > 0:
         return TechniqueResult("T1136", "Create Account", "Persistence",
-            "exploitable", 0.65, f"{exposed} open registration endpoint(s) found.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.65, f"{exposed} open registration endpoint(s) found.", elapsed, evidence_lines)
     return TechniqueResult("T1136", "Create Account", "Persistence",
-        "blocked", 0.6, "No open registration endpoints detected.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.6, "No open registration endpoints detected.", elapsed, evidence_lines)
 
 
 # ── T1543: Create or Modify System Process ───────────────────────────────────
@@ -1106,9 +1106,9 @@ async def t1543_system_process(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if exposed > 0:
         return TechniqueResult("T1543", "Create or Modify System Process", "Persistence",
-            "exploitable", 0.9, f"{exposed} container/process management API(s) exposed.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.9, f"{exposed} container/process management API(s) exposed.", elapsed, evidence_lines)
     return TechniqueResult("T1543", "Create or Modify System Process", "Persistence",
-        "blocked", 0.7, "No container management APIs exposed.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.7, "No container management APIs exposed.", elapsed, evidence_lines)
 
 
 # ── T1547: Boot or Logon Autostart Execution ─────────────────────────────────
@@ -1141,9 +1141,9 @@ async def t1547_autostart(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if exposed > 0:
         return TechniqueResult("T1547", "Boot or Logon Autostart Execution", "Persistence",
-            "exploitable", 0.6, f"{exposed} config management interface(s) exposed.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.6, f"{exposed} config management interface(s) exposed.", elapsed, evidence_lines)
     return TechniqueResult("T1547", "Boot or Logon Autostart Execution", "Persistence",
-        "blocked", 0.6, "No autostart configuration interfaces exposed.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.6, "No autostart configuration interfaces exposed.", elapsed, evidence_lines)
 
 
 # ── T1505: Server Software Component (web shells, API docs) ──────────────────
@@ -1182,9 +1182,9 @@ async def t1505_server_component(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if exposed > 0:
         return TechniqueResult("T1505", "Server Software Component", "Persistence",
-            "exploitable", 0.7, f"{exposed} server component(s) exposed (API docs, debug consoles).", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.7, f"{exposed} server component(s) exposed (API docs, debug consoles).", elapsed, evidence_lines)
     return TechniqueResult("T1505", "Server Software Component", "Persistence",
-        "blocked", 0.6, "No exposed server components detected.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.6, "No exposed server components detected.", elapsed, evidence_lines)
 
 
 # ── T1546: Event Triggered Execution ─────────────────────────────────────────
@@ -1224,9 +1224,9 @@ async def t1546_event_triggered(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if exposed > 0:
         return TechniqueResult("T1546", "Event Triggered Execution", "Persistence",
-            "exploitable", 0.6, f"{exposed} event/webhook endpoint(s) accessible.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.6, f"{exposed} event/webhook endpoint(s) accessible.", elapsed, evidence_lines)
     return TechniqueResult("T1546", "Event Triggered Execution", "Persistence",
-        "blocked", 0.6, "No exposed event/webhook endpoints.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.6, "No exposed event/webhook endpoints.", elapsed, evidence_lines)
 
 
 # ── T1548: Abuse Elevation Control Mechanism ─────────────────────────────────
@@ -1263,9 +1263,9 @@ async def t1548_elevation_abuse(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if exposed > 0:
         return TechniqueResult("T1548", "Abuse Elevation Control Mechanism", "Privilege Escalation",
-            "exploitable", 0.7, f"{exposed} elevation/role endpoint(s) accessible.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.7, f"{exposed} elevation/role endpoint(s) accessible.", elapsed, evidence_lines)
     return TechniqueResult("T1548", "Abuse Elevation Control Mechanism", "Privilege Escalation",
-        "blocked", 0.6, "Elevation control endpoints are properly secured.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.6, "Elevation control endpoints are properly secured.", elapsed, evidence_lines)
 
 
 # ── T1134: Access Token Manipulation ─────────────────────────────────────────
@@ -1318,10 +1318,10 @@ async def t1134_token_manipulation(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if issues > 0:
         return TechniqueResult("T1134", "Access Token Manipulation", "Privilege Escalation",
-            "exploitable", min(0.8, 0.4 + issues * 0.1),
+            "EXPLOITABLE_OBSERVED", min(0.8, 0.4 + issues * 0.1),
             f"{issues} token/cookie security issue(s) found.", elapsed, evidence_lines)
     return TechniqueResult("T1134", "Access Token Manipulation", "Privilege Escalation",
-        "blocked", 0.6, "Token handling appears secure.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.6, "Token handling appears secure.", elapsed, evidence_lines)
 
 
 # ── T1574: Hijack Execution Flow ─────────────────────────────────────────────
@@ -1387,9 +1387,9 @@ async def t1574_hijack_execution(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if issues > 0:
         return TechniqueResult("T1574", "Hijack Execution Flow", "Privilege Escalation",
-            "exploitable", 0.8, f"{issues} execution flow hijack vector(s) found.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.8, f"{issues} execution flow hijack vector(s) found.", elapsed, evidence_lines)
     return TechniqueResult("T1574", "Hijack Execution Flow", "Privilege Escalation",
-        "blocked", 0.6, "No open redirects or path traversal found.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.6, "No open redirects or path traversal found.", elapsed, evidence_lines)
 
 
 # ── T1055: Process Injection ─────────────────────────────────────────────────
@@ -1423,9 +1423,9 @@ async def t1055_process_injection(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if exposed > 0:
         return TechniqueResult("T1055", "Process Injection", "Privilege Escalation",
-            "exploitable", 0.8, f"{exposed} debug/eval endpoint(s) exposed — code injection possible.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.8, f"{exposed} debug/eval endpoint(s) exposed — code injection possible.", elapsed, evidence_lines)
     return TechniqueResult("T1055", "Process Injection", "Privilege Escalation",
-        "blocked", 0.65, "No debug or eval endpoints exposed.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.65, "No debug or eval endpoints exposed.", elapsed, evidence_lines)
 
 
 # ── T1070: Indicator Removal ─────────────────────────────────────────────────
@@ -1459,9 +1459,9 @@ async def t1070_indicator_removal(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if issues > 0:
         return TechniqueResult("T1070", "Indicator Removal", "Defense Evasion",
-            "exploitable", 0.7, f"{issues} log endpoint(s) accessible — attacker could study and clear traces.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.7, f"{issues} log endpoint(s) accessible — attacker could study and clear traces.", elapsed, evidence_lines)
     return TechniqueResult("T1070", "Indicator Removal", "Defense Evasion",
-        "blocked", 0.6, "Log endpoints are properly secured.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.6, "Log endpoints are properly secured.", elapsed, evidence_lines)
 
 
 # ── T1036: Masquerading ──────────────────────────────────────────────────────
@@ -1508,9 +1508,9 @@ async def t1036_masquerading(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if issues >= 2:
         return TechniqueResult("T1036", "Masquerading", "Defense Evasion",
-            "exploitable", 0.6, f"{issues} information disclosure issues aid masquerading attacks.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.6, f"{issues} information disclosure issues aid masquerading attacks.", elapsed, evidence_lines)
     return TechniqueResult("T1036", "Masquerading", "Defense Evasion",
-        "blocked", 0.6, "Server identification is properly restricted.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.6, "Server identification is properly restricted.", elapsed, evidence_lines)
 
 
 # ── T1027: Obfuscated Files or Information ───────────────────────────────────
@@ -1546,10 +1546,10 @@ async def t1027_obfuscated_files(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if exposed > 0:
         return TechniqueResult("T1027", "Obfuscated Files or Information", "Defense Evasion",
-            "exploitable", min(0.85, 0.5 + exposed * 0.15),
+            "EXPLOITABLE_OBSERVED", min(0.85, 0.5 + exposed * 0.15),
             f"{exposed} source/config file(s) exposed — aids reverse engineering.", elapsed, evidence_lines)
     return TechniqueResult("T1027", "Obfuscated Files or Information", "Defense Evasion",
-        "blocked", 0.65, "No source maps, git repos, or config files exposed.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.65, "No source maps, git repos, or config files exposed.", elapsed, evidence_lines)
 
 
 # ── T1112: Modify Registry (exposed config/state stores) ────────────────────
@@ -1590,9 +1590,9 @@ async def t1112_modify_registry(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if exposed > 0:
         return TechniqueResult("T1112", "Modify Registry", "Defense Evasion",
-            "exploitable", 0.85, f"{exposed} configuration store(s) exposed externally.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.85, f"{exposed} configuration store(s) exposed externally.", elapsed, evidence_lines)
     return TechniqueResult("T1112", "Modify Registry", "Defense Evasion",
-        "blocked", 0.7, "No configuration stores exposed.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.7, "No configuration stores exposed.", elapsed, evidence_lines)
 
 
 # ── T1218: System Binary Proxy Execution ─────────────────────────────────────
@@ -1649,9 +1649,9 @@ async def t1218_proxy_execution(target: str) -> TechniqueResult:
     elapsed = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
     if issues > 0:
         return TechniqueResult("T1218", "System Binary Proxy Execution", "Defense Evasion",
-            "exploitable", 0.8, f"{issues} SSRF/proxy vector(s) found.", elapsed, evidence_lines)
+            "EXPLOITABLE_OBSERVED", 0.8, f"{issues} SSRF/proxy vector(s) found.", elapsed, evidence_lines)
     return TechniqueResult("T1218", "System Binary Proxy Execution", "Defense Evasion",
-        "blocked", 0.6, "No open proxy or SSRF vectors detected.", elapsed, evidence_lines)
+        "NO_EXPOSURE_OBSERVED", 0.6, "No open proxy or SSRF vectors detected.", elapsed, evidence_lines)
 
 
 # ── Main Emulation Runner ────────────────────────────────────────────────────
@@ -1734,7 +1734,7 @@ async def run_adversary_emulation(
                     technique_id=tech_id,
                     technique_name=tech_id,
                     tactic="Unknown",
-                    result="error",
+                    result="ERROR",
                     confidence=0.0,
                     evidence=f"Execution error: {str(e)[:200]}",
                 )))
@@ -1743,7 +1743,7 @@ async def run_adversary_emulation(
                 technique_id=tech_id,
                 technique_name=tech_id,
                 tactic="Unknown",
-                result="not_applicable",
+                result="UNTESTED",
                 confidence=0.0,
                 evidence=f"No handler implemented for technique {tech_id}.",
             )))
@@ -1751,8 +1751,8 @@ async def run_adversary_emulation(
     end_time = datetime.now(timezone.utc)
     total_ms = int((end_time - start_time).total_seconds() * 1000)
 
-    exploitable = [r for r in results if r["result"] == "exploitable"]
-    blocked = [r for r in results if r["result"] == "blocked"]
+    exploitable = [r for r in results if r["result"] == "EXPLOITABLE_OBSERVED"]
+    no_exposure = [r for r in results if r["result"] == "NO_EXPOSURE_OBSERVED"]
 
     return {
         "target": target,
@@ -1761,8 +1761,10 @@ async def run_adversary_emulation(
         "duration_ms": total_ms,
         "rules_of_engagement": rules_of_engagement,
         "techniques_tested": len(results),
-        "exploitable": len(exploitable),
-        "blocked": len(blocked),
+        "exploitable_observed": len(exploitable),
+        "no_exposure_observed": len(no_exposure),
+        "defensive_block_verified": 0,
+        "untested": len([r for r in results if r["result"] == "UNTESTED"]),
+        "errors": len([r for r in results if r["result"] == "ERROR"]),
         "results": results,
     }
-

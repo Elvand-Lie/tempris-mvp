@@ -89,18 +89,20 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     stylesheet = client.get("/extensions/tempris-modules.css")
     logo = client.get("/brand/tempris-logo-light.png")
 
-    assert 'src="/assets/index-DUrFdX-d.js?v=20260810b"' in index.text
-    assert 'src="/extensions/tempris-bootstrap.js?v=20260810b"' in index.text
-    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260810b"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260810b"')
-    assert 'src="/extensions/tempris-modules.js?v=20260810c"' in index.text
-    assert 'href="/extensions/tempris-modules.css?v=20260810c"' in index.text
+    assert 'src="/assets/index-DUrFdX-d.js?v=20260815a"' in index.text
+    assert 'src="/extensions/tempris-bootstrap.js?v=20260815a"' in index.text
+    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260815a"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260815a"')
+    assert 'src="/extensions/tempris-sss-ui.js?v=20260815a"' in index.text
+    assert 'src="/extensions/tempris-modules.js?v=20260815a"' in index.text
+    assert 'href="/extensions/tempris-modules.css?v=20260815a"' in index.text
     assert script.status_code == 200
     assert script.headers["cache-control"] == "no-store, max-age=0"
     assert bootstrap.headers["cache-control"] == "no-store, max-age=0"
     assert stylesheet.headers["cache-control"] == "no-store, max-age=0"
     assert bootstrap.status_code == 200
-    assert "url.pathname !== '/api/grc/state'" in bootstrap.text
-    assert "normalizeToggleGroup(toggles.agm" in bootstrap.text
+    assert "Contextual scoring inputs remain server-side" in bootstrap.text
+    assert "normalizeToggleGroup" not in bootstrap.text
+    assert "toggles.agm" not in bootstrap.text
     assert "'/api/ciso/summary'" in script.text
     assert "'/packages'" in script.text
     assert "'/api/packages/current'" in script.text
@@ -109,6 +111,7 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     assert "Enabled Modules" in script.text
     assert "'/vdp-queue'" in script.text
     assert "VDP Security Queue" in script.text
+    assert "Remove selected" in script.text
     assert "Confirm resolution" in script.text
     assert "Client Report Service" in script.text
     assert "Most Exposed Assets" in script.text
@@ -137,6 +140,8 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     assert "rootObserver.observe(root" in script.text
     assert "observe(document.documentElement" not in script.text
     assert "Use your assigned Tempris credentials." in script.text
+    assert "Legacy asset pointer — review required" in script.text
+    assert "finding.asset_id ? [assets.find" not in script.text
     assert "Powered by Codingo Wave 1 Architecture" in script.text
     assert "Tempris Technology Pte. Ltd. · Secure Workspace" in script.text
     assert "button.style.display = 'none'" in script.text
@@ -144,3 +149,19 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     assert ".tmx-page" in stylesheet.text
     assert logo.status_code == 200
     assert logo.headers["content-type"] == "image/png"
+
+
+def test_every_retained_bundle_excludes_tes_internals():
+    asset_root = Path(__file__).resolve().parents[2] / "frontend" / "assets"
+    bundles = sorted(asset_root.glob("index-*.js"))
+    assert len(bundles) == 5
+    forbidden = (
+        "TES Modifier Impact",
+        "Auto-feeds TES modifiers",
+        "1.0 compliant · 1.5 non-compliant",
+        "tes_modifier:",
+        "AGM ↑ if gap",
+    )
+    for bundle in bundles:
+        source = bundle.read_text(encoding="utf-8")
+        assert all(value not in source for value in forbidden), bundle.name

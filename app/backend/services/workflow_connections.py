@@ -39,6 +39,7 @@ from services.exposure_links import (
 )
 from services.kev_loader import _finding_to_dict
 from services.tes_engine import calculate_finding_tes
+from services.customer_posture import build_customer_posture
 
 
 RESOLVED_STATUSES = {"resolved", "mitigated", "closed"}
@@ -77,147 +78,50 @@ def _date_state(value: str | None, today: date) -> str | None:
 
 def build_exposure_coverage(db: Session, tenant_id: str) -> dict:
     """Separate asset-linked records, analyst review, and reference intelligence."""
-    assets = active_asset_map(db, tenant_id)
-    tenant_findings = db.query(Finding).filter(Finding.tenant_id == tenant_id).all()
-    explicit_reference = [
-        row for row in tenant_findings
-        if (row.status or "").strip().lower() == "reference_only"
-    ]
-    not_applicable = [
-        row for row in tenant_findings
-        if (row.status or "").strip().lower() == "not_applicable"
-    ]
-    findings = [
-        row for row in tenant_findings
-        if _is_open(row)
-        and (row.status or "").strip().lower() not in {"reference_only", "not_applicable"}
-    ]
-    links = confirmed_asset_ids_by_finding(db, tenant_id, assets)
-    linked = [row for row in findings if links.get(row.id)]
-    invalid_links = [
-        row for row in findings
-        if row.asset_id and row.asset_id not in assets and not links.get(row.id)
-    ]
-
-    scored: list[tuple[Finding, float]] = []
-    unscored_ids: list[str] = []
-    for finding in linked:
-        try:
-            scored.append((finding, float(calculate_finding_tes(_finding_to_dict(finding)))))
-        except (KeyError, TypeError, ValueError):
-            unscored_ids.append(finding.id)
-
-    aggregate = round(sum(score for _, score in scored) / len(scored), 2) if scored else None
-    unlinked = [row for row in findings if not links.get(row.id)]
-    invalid_ids = {row.id for row in invalid_links}
-    candidate_cache: dict[str, list[dict]] = {}
-    actionable: list[Finding] = []
-    catalog_only: list[Finding] = []
-    for finding in unlinked:
-        candidates = candidate_assets(finding, assets)
-        candidate_cache[finding.id] = candidates
-        if finding.id in invalid_ids or candidates or not is_catalog_finding(finding):
-            actionable.append(finding)
-        else:
-            catalog_only.append(finding)
-
-    def queue_item(row: Finding) -> dict:
-        candidates = candidate_cache.get(row.id, [])
-        if row.id in invalid_ids:
-            reason = "invalid_asset_link"
-        elif candidates:
-            reason = "candidate_match"
-        else:
-            reason = "unclassified_intake"
-        return {
-            "finding_id": row.id,
-            "cve": row.cve or row.cve_id,
-            "title": row.title,
-            "vendor": row.vendor,
-            "product": row.product,
-            "source": row.source or "unknown",
-            "priority": row.priority,
-            "status": row.status,
-            "asset_id": row.asset_id,
-            "mapping_reason": reason,
-            "candidate_assets": candidates,
-        }
-
-    priority_order = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
-    reason_order = {"invalid_asset_link": 0, "candidate_match": 1, "unclassified_intake": 2}
-    mapping_queue_limit = 50
-    mapping_queue = sorted(
-        actionable,
-        key=lambda row: (
-            reason_order[queue_item(row)["mapping_reason"]],
-            priority_order.get((row.priority or "").upper(), 4),
-            row.id,
-        ),
-    )[:mapping_queue_limit]
-    queued_invalid_ids = {row.id for row in mapping_queue if row.id in invalid_ids}
-    queued_unlinked_ids = {row.id for row in mapping_queue if row.id not in invalid_ids}
-    linked_asset_ids = {asset_id for ids in links.values() for asset_id in ids}
-    confirmed_exposure_count = sum(len(ids) for ids in links.values())
-    recorded_link_pairs = {
-        (row.finding_id, row.asset_id)
-        for row in db.query(AssetExposure).filter(
-            AssetExposure.tenant_id == tenant_id,
-            AssetExposure.status.in_(CONFIRMED_STATUSES),
-        ).all()
-        if row.asset_id in assets
-    }
-    open_link_pairs = {
-        (row.id, asset_id)
-        for row in linked
-        for asset_id in links.get(row.id, set())
-    }
-    evidence_backed_pairs = open_link_pairs & recorded_link_pairs
-    evidence_backed_finding_ids = {finding_id for finding_id, _ in evidence_backed_pairs}
-    applicable = len(linked) + len(actionable)
-    kev_linked = [row for row in linked if bool(row.cisa_kev)]
-
+    posture = build_customer_posture(db, tenant_id)
+    aggregate = posture["aggregate_tenant_tes"]
+    confirmed = posture["confirmed_open_exposure_count"]
+    scoreable = posture["scoreable_finding_count"]
+    applicable = confirmed + posture["needs_classification_count"]
     return {
-        "status": "available" if scored else "unavailable",
+        "status": "available" if aggregate is not None else "unavailable",
+        "scope_version": posture["scope_version"],
+        "as_of": posture["as_of"],
         "aggregate_tes": aggregate,
-        "aggregate_scope": "open_asset_linked_scored_findings",
-        "open_finding_count": len(findings) + len(explicit_reference),
-        "asset_linked_count": len(linked),
-        "confirmed_exposure_count": confirmed_exposure_count,
-        "evidence_backed_link_count": len(evidence_backed_pairs),
-        "evidence_backed_finding_count": len(evidence_backed_finding_ids),
-        "legacy_link_count": len(open_link_pairs - recorded_link_pairs),
-        "confirmed_asset_count": len(linked_asset_ids),
+        "aggregate_scope": "confirmed_open_customer_exposure",
+        "open_finding_count": confirmed + posture["needs_classification_count"] + posture["reference_intelligence_count"],
+        "asset_linked_count": confirmed,
+        "confirmed_exposure_count": posture["confirmed_exposure_link_count"],
+        "evidence_backed_link_count": posture["evidence_backed_link_count"],
+        "evidence_backed_finding_count": confirmed,
+        "legacy_link_count": posture["legacy_unverified_link_count"],
+        "confirmed_asset_count": posture["confirmed_asset_count"],
         "exposure_applicable_count": applicable,
-        "asset_link_coverage_pct": round(len(linked) / applicable * 100, 1) if applicable else None,
-        "scored_asset_linked_count": len(scored),
-        "scoring_coverage_pct": round(len(scored) / len(linked) * 100, 1) if linked else None,
-        "unlinked_count": len(unlinked),
-        "mapping_required_count": len(actionable),
-        "candidate_match_count": sum(1 for row in actionable if candidate_cache.get(row.id)),
-        "unclassified_intake_count": sum(
-            1 for row in actionable
-            if row.id not in invalid_ids and not candidate_cache.get(row.id)
-        ),
-        "catalog_intelligence_count": len(catalog_only) + len(explicit_reference),
-        "derived_catalog_intelligence_count": len(catalog_only),
-        "analyst_reference_intelligence_count": len(explicit_reference),
-        "not_applicable_count": len(not_applicable),
+        "asset_link_coverage_pct": round(confirmed / applicable * 100, 1) if applicable else None,
+        "scored_asset_linked_count": scoreable,
+        "scoring_coverage_pct": round(scoreable / confirmed * 100, 1) if confirmed else None,
+        "unlinked_count": posture["needs_classification_count"] + posture["reference_intelligence_count"],
+        "mapping_required_count": posture["needs_classification_count"],
+        "candidate_match_count": posture["suggested_match_count"],
+        "unclassified_intake_count": posture["unclassified_intake_count"],
+        "catalog_intelligence_count": posture["reference_intelligence_count"],
+        "derived_catalog_intelligence_count": posture["derived_reference_count"],
+        "analyst_reference_intelligence_count": posture["analyst_reference_count"],
+        "not_applicable_count": posture["not_applicable_count"],
+        "resolved_count": posture["resolved_finding_count"],
         "catalog_scope": "reference_only_until_asset_evidence_matches",
-        "unlinked_findings": [
-            queue_item(row) for row in mapping_queue if row.id in queued_unlinked_ids
-        ],
-        "invalid_asset_link_count": len(invalid_links),
-        "invalid_asset_links": [
-            queue_item(row) for row in mapping_queue if row.id in queued_invalid_ids
-        ],
-        "mapping_queue": [queue_item(row) for row in mapping_queue],
-        "mapping_queue_limit": mapping_queue_limit,
-        "mapping_queue_returned_count": len(mapping_queue),
-        "unscored_finding_ids": unscored_ids,
-        "asset_linked_cisa_kev_count": len(kev_linked),
-        "asset_linked_cisa_kev_ids": [row.id for row in kev_linked],
-        "reason": None if scored else "No open tenant finding has both a valid tenant asset link and complete TES inputs",
+        "unlinked_findings": posture["mapping_queue"],
+        "invalid_asset_link_count": posture["legacy_unverified_link_count"],
+        "invalid_asset_links": [],
+        "mapping_queue": posture["mapping_queue"],
+        "mapping_queue_limit": 50,
+        "mapping_queue_returned_count": len(posture["mapping_queue"]),
+        "unscored_finding_ids": posture["unscoreable_finding_ids"],
+        "asset_linked_cisa_kev_count": posture["asset_linked_cisa_kev_count"],
+        "asset_linked_cisa_kev_ids": posture["asset_linked_cisa_kev_ids"],
+        "reason": None if aggregate is not None else "No confirmed open customer exposure has complete server-side TES inputs",
     }
+
 def build_deadline_summary(db: Session, tenant_id: str, now: datetime | None = None) -> dict:
     """Return separately named deadline types; never collapse them into 'overdue'."""
     current = now or datetime.now(timezone.utc)

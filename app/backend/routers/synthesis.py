@@ -2,12 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from services.kev_loader import get_finding_stats, get_top_critical_findings, get_ransomware_findings, get_all_findings
 from services.database import get_db, SessionLocal
-from models import TesSnapshot
+from models import PostureSnapshot, TesSnapshot
 from routers.auth import get_current_user
 from datetime import datetime, timedelta, timezone
 
 from services.entitlements import require_module
 from services.workflow_connections import build_exposure_coverage, build_module_health
+from services.customer_posture import SCOPE_VERSION, build_customer_posture
 
 router = APIRouter(dependencies=[Depends(require_module("SYNTHESIS"))])
 
@@ -80,13 +81,16 @@ def dashboard(db: Session = Depends(get_db), user = Depends(get_current_user)):
     # Compute TES trend from DB snapshots
     tes_trend = None
     thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
-    old_snapshot = db.query(TesSnapshot).filter(
-        TesSnapshot.tenant_id == tenant_id,
-        TesSnapshot.snapshot_at >= thirty_days_ago
-    ).order_by(TesSnapshot.snapshot_at.asc()).first()
+    comparable_snapshots = db.query(PostureSnapshot).filter(
+        PostureSnapshot.tenant_id == tenant_id,
+        PostureSnapshot.scope_version == SCOPE_VERSION,
+        PostureSnapshot.captured_at >= thirty_days_ago,
+        PostureSnapshot.aggregate_tenant_tes.isnot(None),
+    ).order_by(PostureSnapshot.captured_at.asc()).all()
 
-    if old_snapshot and data["aggregate_tes"] is not None:
-        delta = data["aggregate_tes"] - old_snapshot.aggregate_tes
+    if len(comparable_snapshots) >= 2 and data["aggregate_tes"] is not None:
+        old_snapshot = comparable_snapshots[0]
+        delta = data["aggregate_tes"] - (old_snapshot.aggregate_tenant_tes or 0)
         sign = "+" if delta >= 0 else ""
         tes_trend = f"{sign}{delta:.1f}"
 
@@ -105,17 +109,30 @@ def take_tes_snapshot(db: Session = Depends(get_db), user = Depends(get_current_
             status_code=409,
             detail="TES snapshot requires at least one open finding with a valid tenant asset link and complete TES inputs",
         )
-    stats = data.get("_stats", get_finding_stats(db, tenant_id=tenant_id))
-
-    snapshot = TesSnapshot(
+    posture = build_customer_posture(db, tenant_id)
+    snapshot = PostureSnapshot(
         tenant_id=tenant_id,
-        aggregate_tes=data["aggregate_tes"],
-        finding_count=stats["total_findings"],
-        critical_count=stats["critical_count"]
+        scope_version=posture["scope_version"],
+        active_asset_count=posture["active_asset_count"],
+        confirmed_open_exposure_count=posture["confirmed_open_exposure_count"],
+        confirmed_critical_count=posture["confirmed_critical_count"],
+        confirmed_high_count=posture["confirmed_high_count"],
+        confirmed_ransomware_linked_count=posture["confirmed_ransomware_linked_count"],
+        needs_classification_count=posture["needs_classification_count"],
+        reference_intelligence_count=posture["reference_intelligence_count"],
+        evidence_backed_link_count=posture["evidence_backed_link_count"],
+        legacy_unverified_link_count=posture["legacy_unverified_link_count"],
+        aggregate_tenant_tes=posture["aggregate_tenant_tes"],
+        scoreable_finding_count=posture["scoreable_finding_count"],
     )
     db.add(snapshot)
     db.commit()
-    return {"status": "snapshot_taken", "tes": data["aggregate_tes"], "findings": stats["total_findings"]}
+    return {
+        "status": "snapshot_taken",
+        "scope_version": posture["scope_version"],
+        "tes": posture["aggregate_tenant_tes"],
+        "confirmed_open_exposures": posture["confirmed_open_exposure_count"],
+    }
 
 
 

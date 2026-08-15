@@ -25,7 +25,7 @@ from models import (
     GeneratedReport,
     GrcPolicyDocument,
     IncidentReport,
-    TesSnapshot,
+    PostureSnapshot,
 )
 from routers.auth import USERS, create_test_session
 from services.database import get_db
@@ -139,6 +139,16 @@ def seed_executive_data():
             asset_id='ASSET-BETA',
             raw_inputs={'agm': 9.9},
         ),
+        AssetExposure(
+            id='AE-ALPHA',
+            tenant_id='tenant-alpha', finding_id='F-ALPHA', asset_id='ASSET-ALPHA',
+            status='confirmed', match_method='analyst', evidence='Confirmed by analyst',
+        ),
+        AssetExposure(
+            id='AE-BETA',
+            tenant_id='tenant-beta', finding_id='F-BETA', asset_id='ASSET-BETA',
+            status='confirmed', match_method='analyst', evidence='Confirmed by analyst',
+        ),
         ControlStatus(
             tenant_id='tenant-alpha',
             framework_id='ISO42001',
@@ -151,19 +161,21 @@ def seed_executive_data():
             control_id='A.2.2',
             status='compliant',
         ),
-        TesSnapshot(
+        PostureSnapshot(
             tenant_id='tenant-alpha',
-            aggregate_tes=8.0,
-            finding_count=1,
-            critical_count=1,
-            snapshot_at=now,
+            scope_version='canonical-customer-exposure-v1',
+            aggregate_tenant_tes=8.0,
+            confirmed_open_exposure_count=1,
+            confirmed_critical_count=1,
+            captured_at=now,
         ),
-        TesSnapshot(
+        PostureSnapshot(
             tenant_id='tenant-alpha',
-            aggregate_tes=9.0,
-            finding_count=2,
-            critical_count=2,
-            snapshot_at=now - timedelta(days=1),
+            scope_version='legacy-posture-v0',
+            aggregate_tenant_tes=9.0,
+            confirmed_open_exposure_count=2,
+            confirmed_critical_count=2,
+            captured_at=now - timedelta(days=1),
         ),
         IncidentReport(
             report_id='INC-ALPHA',
@@ -254,12 +266,14 @@ def test_ciso_summary_is_tenant_scoped_and_redacted():
         'recorded_total': 1,
         'confirmed_asset_linked': 1,
         'confirmed_exposure_occurrences': 1,
-        'unlinked_open': 0,
+        'needs_classification': 0,
+        'reference_intelligence': 0,
+        'legacy_unverified_links': 0,
     }
-    assert data['metric_scope'] == 'confirmed_asset_linked_findings'
-    assert data['risk_trend']['status'] == 'unavailable'
-    assert data['risk_trend']['legacy_snapshot_count'] == 2
-    assert 'not comparable' in data['risk_trend']['reason']
+    assert data['metric_scope'] == 'tenant_confirmed_customer_exposure'
+    assert data['risk_trend']['status'] == 'not_comparable'
+    assert data['risk_trend']['comparable_snapshot_count'] == 1
+    assert 'Two snapshots' in data['risk_trend']['reason']
     assert data['deadline_summary']['counts']['remediation_sla']['overdue'] == 1
     assert data['exposure_coverage']['asset_linked_count'] == 1
     assert data['exposure_coverage']['aggregate_tes'] == 8.0
@@ -293,7 +307,7 @@ def test_ciso_summary_has_safe_empty_states():
     assert response.status_code == 200
     data = response.json()
     assert data['overall_risk_posture'] == 'no_data'
-    assert data['risk_trend']['status'] == 'unavailable'
+    assert data['risk_trend']['status'] == 'not_comparable'
     assert data['highest_risk_assets']['status'] == 'unavailable'
     assert data['compliance_gaps']['status'] == 'unavailable'
 
@@ -415,19 +429,34 @@ def test_synthesis_uses_asset_linked_tes_tenant_snapshots_and_repository_health(
                 'threat_actor_activity': 4.0,
             },
         ),
-        TesSnapshot(
-            tenant_id='tenant-alpha',
-            aggregate_tes=2.0,
-            finding_count=0,
-            critical_count=0,
-            snapshot_at=now - timedelta(days=2),
+        AssetExposure(
+            id='AE-SYNTH',
+            tenant_id='tenant-alpha', finding_id='F-SYNTH', asset_id='ASSET-SYNTH',
+            status='confirmed', match_method='analyst', evidence='Confirmed test exposure',
         ),
-        TesSnapshot(
+        PostureSnapshot(
+            tenant_id='tenant-alpha',
+            scope_version='canonical-customer-exposure-v1',
+            aggregate_tenant_tes=2.0,
+            confirmed_open_exposure_count=0,
+            confirmed_critical_count=0,
+            captured_at=now - timedelta(days=2),
+        ),
+        PostureSnapshot(
+            tenant_id='tenant-alpha',
+            scope_version='canonical-customer-exposure-v1',
+            aggregate_tenant_tes=3.0,
+            confirmed_open_exposure_count=1,
+            confirmed_critical_count=1,
+            captured_at=now - timedelta(days=1),
+        ),
+        PostureSnapshot(
             tenant_id='tenant-beta',
-            aggregate_tes=99.0,
-            finding_count=999,
-            critical_count=999,
-            snapshot_at=now - timedelta(days=3),
+            scope_version='canonical-customer-exposure-v1',
+            aggregate_tenant_tes=99.0,
+            confirmed_open_exposure_count=999,
+            confirmed_critical_count=999,
+            captured_at=now - timedelta(days=3),
         ),
     ])
     db.commit()
@@ -450,10 +479,10 @@ def test_synthesis_uses_asset_linked_tes_tenant_snapshots_and_repository_health(
     created = client.post('/api/synthesis/tes-snapshot', headers=headers)
     assert created.status_code == 200
     db = TestingSessionLocal()
-    alpha_count = db.query(TesSnapshot).filter(TesSnapshot.tenant_id == 'tenant-alpha').count()
-    beta_count = db.query(TesSnapshot).filter(TesSnapshot.tenant_id == 'tenant-beta').count()
+    alpha_count = db.query(PostureSnapshot).filter(PostureSnapshot.tenant_id == 'tenant-alpha').count()
+    beta_count = db.query(PostureSnapshot).filter(PostureSnapshot.tenant_id == 'tenant-beta').count()
     db.close()
-    assert alpha_count == 2
+    assert alpha_count == 3
     assert beta_count == 1
 
 
@@ -705,7 +734,7 @@ def test_catalogue_record_becomes_actionable_only_after_asset_identity_match():
     assert exposure['candidate_match_count'] == 1
     assert exposure['catalog_intelligence_count'] == 0
     candidate = exposure['mapping_queue'][0]
-    assert candidate['mapping_reason'] == 'candidate_match'
+    assert candidate['mapping_reason'] == 'suggested_match'
     assert candidate['candidate_assets'][0]['asset_id'] == 'ASSET-CITRIX'
     assert candidate['candidate_assets'][0]['confidence'] >= 0.9
     assert exposure['asset_linked_count'] == 1  # Existing seeded finding only; no auto-confirmation.

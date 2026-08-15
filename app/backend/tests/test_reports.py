@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import csv
+import pytest
 from fastapi.testclient import TestClient
 from passlib.hash import bcrypt
 from sqlalchemy import create_engine
@@ -15,7 +16,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from services.database import Base, get_db
 import services.database
-from models import Asset, ControlStatus, EdipDecision, GeneratedReport, Finding, ControlEvidence, AuditLog, SpotlightReport
+from models import Asset, AssetExposure, ControlStatus, EdipDecision, GeneratedReport, Finding, ControlEvidence, AuditLog, SpotlightReport
 from index import app
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test_reports.db"
@@ -104,9 +105,19 @@ def test_reporting_pipeline_and_isolation():
         vendor='+formula', product='@formula', cvss=5.0, priority='P2',
         status='unmitigated', short_description='Fictional formula-shaped content'
     )
+    db.add_all([
+        Asset(id='ASSET-A-REPORT', tenant_id='tenantA', name='Tenant A report asset', status='active'),
+        Asset(id='ASSET-B-REPORT', tenant_id='tenantB', name='Tenant B report asset', status='active'),
+    ])
     db.add(f_a)
     db.add(f_b)
     db.add(f_formula)
+    db.flush()
+    db.add_all([
+        AssetExposure(id='EXP-A1', tenant_id='tenantA', finding_id='F-A1', asset_id='ASSET-A-REPORT', status='confirmed', match_method='analyst', evidence='Fixture confirmation'),
+        AssetExposure(id='EXP-B1', tenant_id='tenantB', finding_id='F-B1', asset_id='ASSET-B-REPORT', status='confirmed', match_method='analyst', evidence='Fixture confirmation'),
+        AssetExposure(id='EXP-FORMULA', tenant_id='tenantA', finding_id='F-FORMULA', asset_id='ASSET-A-REPORT', status='confirmed', match_method='analyst', evidence='Fixture confirmation'),
+    ])
     
     e_a = ControlEvidence(id=1, tenant_id="tenantA", framework_id="ISO42001", control_id="A.1", filename="ev_a.txt", file_path="/tmp/a.txt")
     e_b = ControlEvidence(id=2, tenant_id="tenantB", framework_id="ISO42001", control_id="A.1", filename="ev_b.txt", file_path="/tmp/b.txt")
@@ -286,6 +297,11 @@ def test_customer_report_artifacts_are_safe_deterministic_and_tenant_scoped():
         tenant_id='tenantA', finding_id='F-HIGH', cve='CVE-2026-12345',
         decision='PATCH', rationale='Production exposure requires prompt treatment.',
     ))
+    db.flush()
+    db.add_all([
+        AssetExposure(id='EXP-LOW', tenant_id='tenantA', finding_id='F-LOW', asset_id='ASSET-A', status='confirmed', match_method='analyst', evidence='Fixture confirmation'),
+        AssetExposure(id='EXP-HIGH', tenant_id='tenantA', finding_id='F-HIGH', asset_id='ASSET-A', status='confirmed', match_method='analyst', evidence='Fixture confirmation'),
+    ])
     db.commit()
     db.close()
 
@@ -426,6 +442,12 @@ def test_client_report_registry_version_archive_delete_and_artifact_status():
         id='F-REPORT-A', tenant_id='tenantA', title='Confirmed API exposure',
         priority='P1', status='unmitigated', asset_id='ASSET-REPORT-A',
         required_action='Apply the verified vendor fix',
+    ))
+    db.flush()
+    db.add(AssetExposure(
+        id='EXP-REPORT-A', tenant_id='tenantA', finding_id='F-REPORT-A',
+        asset_id='ASSET-REPORT-A', status='confirmed', match_method='analyst',
+        evidence='Fixture confirmation',
     ))
     db.commit()
     db.close()
@@ -596,6 +618,8 @@ def test_ai_context_uses_recorded_tenant_data_only():
 
     db = TestingSessionLocal()
     db.add_all([
+        Asset(id='ASSET-A', tenant_id='tenantA', name='Tenant A asset', status='active'),
+        Asset(id='ASSET-B', tenant_id='tenantB', name='Tenant B asset', status='active'),
         Finding(
             id='F-CTX-A', tenant_id='tenantA', title='Tenant A exposure',
             cve='CVE-2026-10001', cisa_kev=True, priority='P0', asset_id='ASSET-A',
@@ -621,6 +645,11 @@ def test_ai_context_uses_recorded_tenant_data_only():
             detail='Tenant B secret audit detail',
         ),
     ])
+    db.flush()
+    db.add_all([
+        AssetExposure(id='EXP-CTX-A', tenant_id='tenantA', finding_id='F-CTX-A', asset_id='ASSET-A', status='confirmed', match_method='analyst', evidence='Fixture confirmation'),
+        AssetExposure(id='EXP-CTX-B', tenant_id='tenantB', finding_id='F-CTX-B', asset_id='ASSET-B', status='confirmed', match_method='analyst', evidence='Fixture confirmation'),
+    ])
     db.commit()
 
     context = build_full_context(db, tenant_id='tenantA')
@@ -637,7 +666,8 @@ def test_ai_context_uses_recorded_tenant_data_only():
     assert structured['compliance_non_compliant'] == 0
     assert structured['tes_score'] is None
     assert structured['module_health'] == []
-    assert structured['grc_tes'] is None
+    assert 'grc_tes' not in structured
+    assert structured.get('grc_ai_system_risk') is None
 
 
 def test_shared_rag_sync_excludes_tenant_findings_and_audit_logs(monkeypatch):

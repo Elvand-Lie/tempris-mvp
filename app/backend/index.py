@@ -21,12 +21,12 @@ logger = logging.getLogger("tempris")
 # Add the api directory to the Python path for Vercel Serverless
 sys.path.append(os.path.dirname(__file__))
 
-from routers import auth, spectrum, audit, synthesis, scout, scanner, strike, standard, assets, grc, edip, surge, blflaw, partner, reports, aev, ocq, threats, ciso, packages, tenants, workflow
+from routers import auth, spectrum, audit, synthesis, scout, scanner, strike, standard, assets, grc, edip, surge, blflaw, partner, reports, aev, ocq, threats, ciso, packages, tenants, workflow, incidents
 from routers.audit import append_to_audit_log, AuditEntry
 from routers.auth import get_auth_context, get_current_user
 from services.kev_loader import ensure_findings_seeded, get_finding_stats
 from services.database import get_db, init_db, SessionLocal
-from models import SpotlightReport, ChatSession, ChatMessage, TesSnapshot
+from models import SpotlightReport, ChatSession, ChatMessage, PostureSnapshot
 
 # Fail-closed check for ENVIRONMENT and AUDIT_HMAC_KEY
 env = os.environ.get("ENVIRONMENT", "").strip().lower()
@@ -93,6 +93,7 @@ app.include_router(ciso.router, prefix="/api/ciso", tags=["ciso"])
 app.include_router(packages.router, prefix="/api/packages", tags=["packages"])
 app.include_router(tenants.router, prefix="/api/tenants", tags=["tenants"])
 app.include_router(workflow.router, prefix="/api/workflow", tags=["workflow"])
+app.include_router(incidents.router, prefix="/api/incidents", tags=["incidents"])
 
 # ─ Startup: Init DB, Seed data ──────────────────────────────────────────────────
 
@@ -126,26 +127,33 @@ def startup():
         seed_audit_log(db)
         from routers.strike import seed_strike_data
         seed_strike_data(db)
-        # 5. Take initial TES snapshot
+        # 5. Take the first canonical posture snapshot.  Legacy TesSnapshot rows
+        # remain readable but are deliberately not mixed with the canonical scope.
         try:
-            from routers.synthesis import get_dashboard_data
-            import inspect
-            sig = inspect.signature(get_dashboard_data)
-            if len(sig.parameters) > 0:
-                data = get_dashboard_data(db)
-            else:
-                data = get_dashboard_data()
-            existing = db.query(TesSnapshot).filter(TesSnapshot.tenant_id == 'tempris').count()
+            from services.customer_posture import SCOPE_VERSION, build_customer_posture
+            posture = build_customer_posture(db, "tempris")
+            existing = db.query(PostureSnapshot).filter(
+                PostureSnapshot.tenant_id == "tempris",
+                PostureSnapshot.scope_version == SCOPE_VERSION,
+            ).count()
             if existing == 0:
-                stats = get_finding_stats(db)
-                db.add(TesSnapshot(
-                    tenant_id='tempris',
-                    aggregate_tes=data["aggregate_tes"],
-                    finding_count=stats["total_findings"],
-                    critical_count=stats["critical_count"]
+                db.add(PostureSnapshot(
+                    tenant_id="tempris",
+                    scope_version=SCOPE_VERSION,
+                    active_asset_count=posture["active_asset_count"],
+                    confirmed_open_exposure_count=posture["confirmed_open_exposure_count"],
+                    confirmed_critical_count=posture["confirmed_critical_count"],
+                    confirmed_high_count=posture["confirmed_high_count"],
+                    confirmed_ransomware_linked_count=posture["confirmed_ransomware_linked_count"],
+                    needs_classification_count=posture["needs_classification_count"],
+                    reference_intelligence_count=posture["reference_intelligence_count"],
+                    evidence_backed_link_count=posture["evidence_backed_link_count"],
+                    legacy_unverified_link_count=posture["legacy_unverified_link_count"],
+                    aggregate_tenant_tes=posture["aggregate_tenant_tes"],
+                    scoreable_finding_count=posture["scoreable_finding_count"],
                 ))
                 db.commit()
-                logger.info("Initial TES snapshot recorded.")
+                logger.info("Initial canonical posture snapshot recorded.")
         except Exception as e:
             logger.warning(f"TES snapshot skipped: {e}")
     finally:
@@ -436,7 +444,7 @@ def speak_chat(
         kev_critical = structured.get("kev_critical", 0)
         kev_ransomware = structured.get("kev_ransomware", 0)
         asset_count = structured.get("asset_count", 0)
-        strike_exploitable = structured.get("strike_exploitable", 0)
+        strike_exploitable = structured.get("strike_exploitable_observed", 0)
         compliance_gaps = structured.get("compliance_gaps", [])
         
         if "asset" in query_lower or "inventory" in query_lower:
@@ -448,22 +456,22 @@ def speak_chat(
         elif "strike" in query_lower or "simulation" in query_lower or "red team" in query_lower:
             sim_id = structured.get("strike_sim_id")
             if sim_id:
-                blocked = structured.get("strike_blocked", 0)
+                no_exposure = structured.get("strike_no_exposure_observed", 0)
+                verified_blocks = structured.get("strike_defensive_block_verified", 0)
                 results = structured.get("strike_results", [])
                 technique_text = "\n".join([f"- **{r.get('technique_id')}** ({r.get('technique_name')}): {r.get('result')}" for r in results[:5]])
-                fallback = f"Latest STRIKE simulation **{sim_id}** against {structured.get('strike_target', 'target')}: **{strike_exploitable} exploitable**, {blocked} blocked.\n\n{technique_text}\n\nRecommendation: Address exploitable techniques immediately via the EDIP decision engine."
+                fallback = f"Latest STRIKE simulation **{sim_id}** against {structured.get('strike_target', 'target')}: **{strike_exploitable} exploitable observed**, **{no_exposure} no exposure observed**, and **{verified_blocks} defensive blocks verified**. No-exposure observations are not proof that a control blocked an attack.\n\n{technique_text}\n\nRecommendation: Address exploitable observations through the EDIP decision engine."
             else:
                 fallback = "No STRIKE adversary simulations have been run yet. Navigate to the STRIKE module to authorize and execute an adversary emulation campaign."
         elif "incident" in query_lower or "attacked" in query_lower or "attack" in query_lower or "mas trm" in query_lower:
             report = structured.get("latest_incident_report")
             if report:
                 summary = report.get("incident_summary", {})
-                threat = report.get("threat_landscape", {})
                 scanner = report.get("scanner_findings", [])
                 strike = report.get("red_team_assessment") or {}
                 hit_lines = "\n".join([f"- {f.get('target')}:{f.get('port')} {f.get('service')} ({f.get('risk')}): {f.get('detail')}" for f in scanner[:5]]) or "- No critical/high scanner findings are attached to the draft."
                 strike_line = f"STRIKE simulation {strike.get('simulation_id')} found {strike.get('exploitable')} exploitable technique(s)." if strike else "No STRIKE evidence is attached to the draft."
-                fallback = f"Latest MAS TRM incident draft **{report.get('report_id')}** is **{report.get('status')}**.\n\n**What happened:** {summary.get('description')}\n\n**What was hit:** {summary.get('affected_systems')}\n\n**Why it matters:** TES is **{threat.get('tempris_exposure_score')}** ({threat.get('risk_band')}), with **{threat.get('critical_cves_tracked')} critical CVEs** and **{threat.get('ransomware_linked_cves')} ransomware-linked CVEs** tracked.\n\n**Evidence:**\n{hit_lines}\n- {strike_line}\n\n**Report deadline:** {report.get('notification_deadline')}\n\nUse STANDARD for the draft report and Audit Log for the TACF generation record."
+                fallback = f"Latest MAS TRM incident draft **{report.get('report_id')}** is **{report.get('status')}**.\n\n**What happened:** {summary.get('description')}\n\n**What was hit:** {summary.get('affected_systems')}\n\nThe draft is based on the recorded Incident, its tenant assets, and related confirmed customer exposures; global catalogue totals are excluded.\n\n**Evidence:**\n{hit_lines}\n- {strike_line}\n\n**Report deadline:** {report.get('notification_deadline')}\n\nUse STANDARD for the draft and Audit Log for the generation record."
             else:
                 fallback = "No MAS TRM incident draft has been generated yet. Use STANDARD -> MAS TRM 1-Hour Incident Notice to create the draft report from current TES, SCOUT, STRIKE, and vulnerability data."
         elif "compliance" in query_lower or "framework" in query_lower or "regulation" in query_lower or "mas" in query_lower:
@@ -481,15 +489,16 @@ def speak_chat(
             else:
                 fallback = f"No tenant control assessments are recorded. Tempris has {total_controls} reference controls, but they are not evidence of compliance."
         elif "grc" in query_lower or "iso 42001" in query_lower or "ai governance" in query_lower:
-            grc = structured.get("grc_tes")
+            grc = structured.get("grc_ai_system_risk")
             if grc:
-                fallback = f"**ISO/IEC 42001:2023 AI Governance Status**:\n- Composite TES: **{grc.get('score', 'Not recorded')}** ({grc.get('band', 'Not recorded')})\n- AGM (AI Governance Modifier): {grc.get('agm', 'Not recorded')}\n- DRF (Data Readiness Factor): {grc.get('drf', 'Not recorded')}\n- TEF (Third-party Exposure Factor): {grc.get('tef', 'Not recorded')}\n\nNavigate to the GRC module for per-control sign-off status and SOP management."
+                drivers = "; ".join(grc.get("drivers") or []) or "No qualitative drivers recorded"
+                fallback = f"**ISO/IEC 42001:2023 AI Governance Status**:\n- AI-system risk score: **{grc.get('score', 'Not recorded')}** ({grc.get('band', 'Not recorded')})\n- Scope: {grc.get('scope', 'AI_SYSTEM')}\n- Qualitative drivers: {drivers}\n\nThis is an AI-system-specific governance risk score, not tenant TES. Navigate to GRC for control sign-off and SOP management."
             else:
                 fallback = "No tenant GRC state is recorded, so Tempris does not present a GRC composite TES or governance-factor status."
         elif "ransomware" in query_lower:
             top5 = structured.get("kev_top5", [])
             top_text = "\n".join([f"- **{f['cve']}**: {f['title']} (CVSS: {f.get('cvss',0)})" for f in top5[:3]])
-            fallback = f"Your tenant has **{kev_ransomware} recorded asset-linked ransomware findings** out of {kev_total} asset-linked KEV findings. Recorded critical items:\n\n{top_text or '- None recorded.'}"
+            fallback = f"Your tenant has **{kev_ransomware} confirmed ransomware-linked exposures** out of {kev_total} confirmed exposure finding(s). Recorded critical items:\n\n{top_text or '- None recorded.'}"
         elif "edip" in query_lower or "decision" in query_lower:
             edip = structured.get("edip_recent", [])
             if edip:
@@ -499,7 +508,7 @@ def speak_chat(
                 fallback = "No EDIP decisions have been recorded yet. Navigate to SPECTRUM to begin triaging findings through the Escalate/Defer/Investigate/Patch workflow."
         else:
             strike_summary = f"STRIKE records {strike_exploitable} exploitable technique(s)" if structured.get("strike_sim_id") else "no STRIKE simulation result is recorded"
-            fallback = f"I'm tracking **{kev_total:,} asset-linked KEV findings** ({kev_critical} critical, {kev_ransomware} ransomware-linked). Aggregate TES is **{tes_display}**. The tenant has **{asset_count} active assets**, **{len(compliance_gaps)} recorded compliance gaps**, and {strike_summary}. How can I help you assess your exposure?"
+            fallback = f"I'm tracking **{kev_total:,} confirmed customer exposures** ({kev_critical} critical, {kev_ransomware} ransomware-linked). Tenant TES is **{tes_display}**. The tenant has **{asset_count} active assets**, **{len(compliance_gaps)} recorded compliance gaps**, and {strike_summary}. How can I help you assess your exposure?"
 
         from services.edip_engine import _build_context_binding_footer
         fallback += _build_context_binding_footer(
@@ -594,9 +603,10 @@ def generate_spotlight_report(
         asset_count = structured.get("asset_count", 0)
         top5 = structured.get("kev_top5", [])
         compliance_gaps = structured.get("compliance_gaps", [])
-        strike_exploitable = structured.get("strike_exploitable", 0)
-        strike_blocked = structured.get("strike_blocked", 0)
-        grc = structured.get("grc_tes", {})
+        strike_exploitable = structured.get("strike_exploitable_observed", 0)
+        strike_no_exposure = structured.get("strike_no_exposure_observed", 0)
+        strike_verified_blocks = structured.get("strike_defensive_block_verified", 0)
+        grc = structured.get("grc_ai_system_risk", {})
         compliance_compliant = structured.get("compliance_compliant", 0)
         
         if top5:
@@ -617,16 +627,17 @@ def generate_spotlight_report(
 
         if structured.get("strike_sim_id"):
             strike_text = (
-                f"The latest recorded STRIKE simulation contains **{strike_exploitable} exploitable** "
-                f"and **{strike_blocked} blocked** technique result(s)."
+                f"The latest recorded STRIKE simulation contains **{strike_exploitable} exploitable observed**, "
+                f"**{strike_no_exposure} no exposure observed**, and **{strike_verified_blocks} defensively blocked with evidence** result(s). "
+                "A no-exposure observation is not proof of an active defensive block."
             )
         else:
             strike_text = "No STRIKE simulation result is recorded."
 
         compliance_assessed = structured.get("compliance_assessed_controls", 0)
         grc_text = (
-            f"ISO/IEC 42001:2023 AI Governance composite TES: **{grc.get('score')}** "
-            f"({grc.get('band')})."
+            f"ISO/IEC 42001:2023 AI-system risk score: **{grc.get('score')}** "
+            f"({grc.get('band')}); this is not tenant TES."
             if grc else
             "No tenant GRC state is recorded, so a GRC composite TES is not included."
         )
@@ -645,7 +656,7 @@ def generate_spotlight_report(
 
         action_items = []
         if kev_total:
-            action_items.append(f"Review the {kev_total} recorded asset-linked CISA KEV finding(s).")
+            action_items.append(f"Review the {kev_total} confirmed customer exposure finding(s).")
         if compliance_gaps:
             action_items.append("Assign owners and treatment dates to the recorded non-compliant controls.")
         if strike_exploitable:
@@ -658,7 +669,7 @@ def generate_spotlight_report(
 
 Aggregate TES is **not included** because validated asset-matched scoring coverage is not recorded for every tenant finding.
 
-Tempris records **{kev_total} asset-linked CISA KEV finding(s)** for this tenant; **{kev_ransomware}** are ransomware-linked and **{kev_critical}** are P0. The shared CISA catalog is reference intelligence and is not treated as proof of client exposure without an asset link.
+Tempris records **{kev_total} confirmed customer exposure finding(s)** for this tenant; **{kev_ransomware}** are ransomware-linked and **{kev_critical}** are critical. The shared CISA catalogue is reference intelligence and is excluded unless an analyst or deterministic scanner created a confirmed, evidence-backed relationship to an active same-tenant asset.
 
 The tenant asset inventory records **{asset_count} active asset(s)**.
 

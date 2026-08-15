@@ -60,6 +60,48 @@ def init_db():
                 )
                 sys.exit(1)
 
+        canonical_columns = {
+            "strike_simulations": {"tenant_id"},
+            "scan_findings": {
+                "template_id", "cve_id", "matched_at", "raw_result_hash",
+                "normalized_finding_id", "evidence_metadata", "first_seen_at", "last_seen_at",
+            },
+            "grc_policy_documents": {
+                "archived_at", "archived_by", "supersedes_id", "superseded_by_id", "deleted_at",
+            },
+            "asset_exposures": {"evidence_metadata"},
+        }
+        canonical_indexes = {
+            "strike_simulations": {"ix_strike_simulations_tenant_id"},
+            "scan_findings": {
+                "ix_scan_findings_template_id",
+                "ix_scan_findings_cve_id",
+                "ix_scan_findings_normalized_finding_id",
+            },
+        }
+        canonical_failures = []
+        for table, required_columns in canonical_columns.items():
+            if table not in tables:
+                continue
+            present_columns = {column["name"] for column in inspector.get_columns(table)}
+            missing_columns = sorted(required_columns - present_columns)
+            if missing_columns:
+                canonical_failures.append(f"{table} (missing columns: {', '.join(missing_columns)})")
+            required_indexes = canonical_indexes.get(table, set())
+            if required_indexes:
+                present_indexes = {index["name"] for index in inspector.get_indexes(table)}
+                missing_indexes = sorted(required_indexes - present_indexes)
+                if missing_indexes:
+                    canonical_failures.append(f"{table} (missing indexes: {', '.join(missing_indexes)})")
+        if canonical_failures:
+            print(
+                "FATAL: Canonical posture schema validation failed: "
+                + ", ".join(canonical_failures)
+                + ". Run scripts/migrations/008_canonical_posture_and_operations.py with a verified backup.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
         tenant_scoped_tables = (
             'grc_states',
             'grc_signoffs',
@@ -121,6 +163,5 @@ def init_db():
             logger.info("audit_logs append-only enforced.")
     except Exception as e:
         logger.debug(f"Could not enforce append-only (may already be set): {e}")
-
 
 

@@ -303,7 +303,6 @@ def sync_knowledge_base(db=None):
             grc_text += (
                 f"Control {c['id']} — {c['domain']}: {c['title']}\n"
                 f"  Singapore Reference: {c.get('sg_ref', 'N/A')}\n"
-                f"  TES Modifier: {c.get('tes_modifier', 'N/A')} ({c.get('tes_impact', 'N/A')})\n"
                 f"  Description: {c.get('description', 'N/A')}\n\n"
             )
         _delete_by_source("grc__controls")

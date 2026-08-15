@@ -12,6 +12,7 @@ from services.database import Base, SessionLocal, engine
 PASSWORD = "vdp-hardening-test-password"
 STAFF_EMAIL = "vdp.staff@tempris.test"
 OUTSIDER_EMAIL = "customer.admin@example.test"
+SUPERADMIN_EMAIL = "vdp.superadmin@tempris.test"
 
 
 @pytest.fixture(autouse=True)
@@ -31,18 +32,27 @@ def vdp_state(monkeypatch):
         "name": "Customer Admin",
         "tenant_id": "customer-tenant",
     }
+    auth.USERS[SUPERADMIN_EMAIL] = {
+        "password": bcrypt.hash(PASSWORD),
+        "role": "Superadmin",
+        "name": "VDP Superadmin",
+        "tenant_id": "tempris",
+    }
     db = SessionLocal()
     db.query(SurgeSubmission).delete()
     auth._login_attempts.pop(STAFF_EMAIL, None)
     auth._login_attempts.pop(OUTSIDER_EMAIL, None)
     db.query(SurgeResearcher).delete()
     db.query(Finding).filter(Finding.source == "surge").delete()
-    db.query(AuditLog).filter(AuditLog.action == "VDP_SUBMISSION_RECEIVED").delete()
+    db.query(AuditLog).filter(AuditLog.action.in_([
+        "VDP_SUBMISSION_RECEIVED", "SURGE_SUBMISSION_DELETED",
+    ])).delete(synchronize_session=False)
     db.commit()
     db.close()
     yield
     auth.USERS.pop(STAFF_EMAIL, None)
     auth.USERS.pop(OUTSIDER_EMAIL, None)
+    auth.USERS.pop(SUPERADMIN_EMAIL, None)
 
 
 def _headers(client: TestClient, email: str) -> dict:
@@ -136,6 +146,39 @@ def test_vdp_queue_is_restricted_to_tempris_staff_and_acceptance_creates_tenant_
         db.close()
 
 
+def test_vdp_superadmin_can_delete_unlinked_reports_but_not_accepted_evidence():
+    client = TestClient(app)
+    removable_id = client.post("/api/surge/public/submit", json=_valid_report()).json()["tracking_id"]
+    accepted_report = _valid_report()
+    accepted_report["email"] = "accepted-researcher@example.test"
+    accepted_id = client.post("/api/surge/public/submit", json=accepted_report).json()["tracking_id"]
+    analyst = _headers(client, STAFF_EMAIL)
+    superadmin = _headers(client, SUPERADMIN_EMAIL)
+
+    assert client.delete(f"/api/surge/submissions/{removable_id}", headers=analyst).status_code == 403
+    deleted = client.delete(f"/api/surge/submissions/{removable_id}", headers=superadmin)
+    assert deleted.status_code == 200
+    assert deleted.json() == {"status": "deleted", "submission_id": removable_id}
+
+    accepted = client.post(
+        f"/api/surge/submissions/{accepted_id}/triage",
+        headers=analyst,
+        json={"status": "accepted", "edip_decision": "mitigate"},
+    )
+    assert accepted.status_code == 200
+    blocked = client.delete(f"/api/surge/submissions/{accepted_id}", headers=superadmin)
+    assert blocked.status_code == 409
+
+    db = SessionLocal()
+    try:
+        assert db.query(SurgeSubmission).filter(SurgeSubmission.id == removable_id).first() is None
+        assert db.query(SurgeResearcher).filter(SurgeResearcher.email == "researcher@example.test").first() is None
+        assert db.query(SurgeSubmission).filter(SurgeSubmission.id == accepted_id).one().finding_id
+        assert db.query(AuditLog).filter(AuditLog.action == "SURGE_SUBMISSION_DELETED").count() == 1
+    finally:
+        db.close()
+
+
 def test_vdp_is_canonical_and_security_txt_is_rfc_9116_scoped():
     client = TestClient(app)
     redirect = client.get("/security", follow_redirects=False)
@@ -144,7 +187,7 @@ def test_vdp_is_canonical_and_security_txt_is_rfc_9116_scoped():
 
     policy = client.get("/vdp")
     assert policy.status_code == 200
-    assert "/extensions/tempris-modules.js?v=20260810c" in policy.text
+    assert "/extensions/tempris-modules.js?v=20260815a" in policy.text
 
     security_txt = client.get("/.well-known/security.txt")
     assert security_txt.status_code == 200

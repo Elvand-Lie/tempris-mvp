@@ -162,4 +162,4 @@ def test_v73_ordered_decisions_and_tenant_scoped_watch_push(client_and_headers):
     script = client.get("/extensions/tempris-modules.js").text
     assert "/api/edip/intake/sss/events" in script
     assert "Engine decision sequence" in script
-    assert "deadlineState(finding.kev_due)" in script
+    assert "sssUi.findingViewState(finding)" in script

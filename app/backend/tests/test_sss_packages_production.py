@@ -113,6 +113,7 @@ def test_packages_are_persisted_audited_and_enforced_by_backend():
 def test_sss_business_logic_intake_update_resolve_and_tenant_scope():
     client = TestClient(app)
     analyst = headers(client, "pkg.analyst@tempris.test")
+    superadmin = headers(client, "pkg.superadmin@tempris.test")
     viewer = headers(client, "pkg.viewer@tempris.test")
     other = headers(client, "other.analyst@tempris.test")
 
@@ -171,14 +172,14 @@ def test_sss_business_logic_intake_update_resolve_and_tenant_scope():
 
     resolved = client.post(
         f"/api/edip/intake/sss/{finding_id}/resolve",
-        headers=analyst,
+        headers=superadmin,
         json={"resolution_notes": "Verified with cross-account regression tests."},
     )
     assert resolved.status_code == 200
     assert resolved.json()["status"] == "resolved"
     duplicate = client.post(
         f"/api/edip/intake/sss/{finding_id}/resolve",
-        headers=analyst,
+        headers=superadmin,
         json={"resolution_notes": "Resolve again"},
     )
     assert duplicate.status_code == 409

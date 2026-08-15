@@ -3,9 +3,10 @@
 
   const TOKEN_KEY = 'tempris_token';
   const USER_KEY = 'tempris_user';
-  const EXTENSION_ROUTES = new Set(['/ciso', '/reports', '/packages', '/sss-intake', '/vdp-queue']);
+  const EXTENSION_ROUTES = new Set(['/ciso', '/reports', '/packages', '/sss-intake', '/vdp-queue', '/grc', '/spectrum', '/scout', '/strike', '/standard', '/spotlight']);
   const EXTENSION_HOST_ID = 'tempris-extension-host';
   const RETRY_DELAYS = [1000, 3000, 8000];
+  const sssUi = window.TemprisSssUi;
   const MODULE_PATHS = {
     SYNTHESIS: '/', SPECTRUM: '/spectrum', SCOUT: '/scout', STRIKE: '/strike',
     STANDARD: '/standard', GRC: '/grc', ASSETS: '/assets', SPOTLIGHT: '/spotlight', CISO: '/ciso',
@@ -344,13 +345,11 @@
         while ((boundary = buffer.indexOf('\n\n')) >= 0) {
           const block = buffer.slice(0, boundary);
           buffer = buffer.slice(boundary + 2);
-          const dataLine = block.split('\n').find((line) => line.startsWith('data:'));
-          if (!dataLine) continue;
-          const event = JSON.parse(dataLine.slice(5).trim());
-          if (event.type !== 'sss.watch') continue;
-          sssFindings = null;
-          const host = document.getElementById(EXTENSION_HOST_ID);
-          if (window.location.pathname === '/sss-intake' && host) await renderSssRoute(host, true);
+          await sssUi.handleServerEvent(block, async () => {
+            sssFindings = null;
+            const host = document.getElementById(EXTENSION_HOST_ID);
+            if (window.location.pathname === '/sss-intake' && host) await renderSssRoute(host, true);
+          });
         }
       }
     } catch (error) {
@@ -518,28 +517,28 @@
 
     host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="ciso">
       <header class="tmx-heading">
-        <div><h1>CISO Dashboard</h1><p>Executive view of open vulnerability records linked to active customer assets. Catalogue references and unclassified intake do not affect these risk metrics.</p></div>
+        <div><h1>CISO Dashboard</h1><p>Executive view of confirmed open customer exposure. A same-tenant confirmed relationship to an active asset is required; catalogue references, suggestions, legacy pointers, and unclassified intake do not affect these metrics.</p></div>
         <button type="button" class="tmx-button" data-ciso-refresh>Refresh</button>
       </header>
       <section class="tmx-metrics" aria-label="Executive metrics">
-        <div class="tmx-metric"><div class="tmx-metric-label">Asset-linked posture</div><div class="tmx-metric-value ${metricTone(posture)}">${escapeHtml(posture)}</div></div>
-        <div class="tmx-metric"><div class="tmx-metric-label">Asset-linked critical records</div><div class="tmx-metric-value tmx-tone-critical">${escapeHtml(findings.critical ?? 0)}</div></div>
-        <div class="tmx-metric"><div class="tmx-metric-label">Asset-linked high records</div><div class="tmx-metric-value tmx-tone-high">${escapeHtml(findings.high ?? 0)}</div></div>
-        <div class="tmx-metric"><div class="tmx-metric-label">Asset-linked open records</div><div class="tmx-metric-value tmx-tone-neutral">${escapeHtml(findings.unresolved ?? 0)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Confirmed customer posture</div><div class="tmx-metric-value ${metricTone(posture)}">${escapeHtml(posture)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Confirmed critical exposures</div><div class="tmx-metric-value tmx-tone-critical">${escapeHtml(findings.critical ?? 0)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Confirmed high exposures</div><div class="tmx-metric-value tmx-tone-high">${escapeHtml(findings.high ?? 0)}</div></div>
+        <div class="tmx-metric"><div class="tmx-metric-label">Confirmed open exposures</div><div class="tmx-metric-value tmx-tone-neutral">${escapeHtml(findings.unresolved ?? 0)}</div></div>
         <div class="tmx-metric"><div class="tmx-metric-label">Needs exposure classification</div><div class="tmx-metric-value ${coverage.mapping_required_count ? 'tmx-tone-high' : 'tmx-tone-success'}">${escapeHtml(coverage.mapping_required_count ?? 0)}</div></div>
         <div class="tmx-metric"><div class="tmx-metric-label">Reference intelligence</div><div class="tmx-metric-value tmx-tone-neutral">${escapeHtml(coverage.catalog_intelligence_count ?? 0)}</div></div>
       </section>
       <div class="tmx-grid">
         <section class="tmx-panel tmx-panel-wide">
-          <div class="tmx-panel-header"><div><h2>Customer Exposure Links</h2><p>An asset link says a vulnerability record has been associated with an active customer asset. Evidence-backed and imported legacy links are shown separately.</p></div></div>
-          <div class="tmx-panel-body tmx-coverage-flow"><div><strong>${escapeHtml(coverage.asset_linked_count ?? 0)}</strong><span>Asset-linked vulnerability records</span></div><b>·</b><div><strong>${escapeHtml(coverage.confirmed_exposure_count ?? 0)}</strong><span>Affected asset links</span></div><b>·</b><div><strong>${escapeHtml(coverage.scored_asset_linked_count ?? 0)}</strong><span>With complete TES inputs</span></div></div>
-          <div class="tmx-panel-body tmx-exposure-explainer">Evidence-backed links: ${escapeHtml(coverage.evidence_backed_link_count ?? 0)}. Imported legacy links without a dedicated evidence row: ${escapeHtml(coverage.legacy_link_count ?? 0)}. One vulnerability linked to three assets equals one vulnerability record and three affected-asset links.</div>
+          <div class="tmx-panel-header"><div><h2>Customer Exposure Evidence</h2><p>Only confirmed AssetExposure relationships count. Direct legacy asset pointers are retained for review but excluded.</p></div></div>
+          <div class="tmx-panel-body tmx-coverage-flow"><div><strong>${escapeHtml(coverage.asset_linked_count ?? 0)}</strong><span>Confirmed vulnerability records</span></div><b>·</b><div><strong>${escapeHtml(coverage.confirmed_exposure_count ?? 0)}</strong><span>Confirmed asset relationships</span></div><b>·</b><div><strong>${escapeHtml(coverage.scored_asset_linked_count ?? 0)}</strong><span>With server TES inputs</span></div></div>
+          <div class="tmx-panel-body tmx-exposure-explainer">Evidence-backed relationships: ${escapeHtml(coverage.evidence_backed_link_count ?? 0)}. Legacy direct asset pointers awaiting confirmation: ${escapeHtml(coverage.legacy_link_count ?? 0)}. Legacy pointers do not affect posture, reports, or tenant TES.</div>
           ${coverage.mapping_required_count ? `<div class="tmx-notice"><strong>Analyst action:</strong><span>${escapeHtml(coverage.mapping_required_count)} record(s) need exposure classification in Intake &amp; Triage: assign supported assets, keep as reference intelligence, or mark not applicable with a rationale. The ${escapeHtml(coverage.catalog_intelligence_count ?? 0)} reference-intelligence records are outside this action queue.</span></div>` : ''}
         </section>
         <section class="tmx-panel">
           <div class="tmx-panel-header"><h2>Risk Trend</h2><span class="tmx-status ${statusClass(trend)}">${escapeHtml(trend)}</span></div>
           <div class="tmx-panel-body">${data.risk_trend?.status === 'available'
-            ? `<div class="tmx-list-row"><div><div class="tmx-list-title">Confirmed vulnerabilities at latest snapshot</div><div class="tmx-list-detail">${escapeHtml(formatDate(data.risk_trend.current_snapshot_at))}; previous ${escapeHtml(formatDate(data.risk_trend.previous_snapshot_at))}: ${escapeHtml(data.risk_trend.previous_findings ?? 0)}</div></div><strong>${escapeHtml(data.risk_trend.current_findings ?? 0)}</strong></div><div class="tmx-list-row"><div><div class="tmx-list-title">Critical vulnerabilities at latest snapshot</div><div class="tmx-list-detail">Previous snapshot: ${escapeHtml(data.risk_trend.previous_critical ?? 0)}</div></div><strong>${escapeHtml(data.risk_trend.current_critical ?? 0)}</strong></div>`
+            ? `<div class="tmx-list-row"><div><div class="tmx-list-title">Confirmed open exposures</div><div class="tmx-list-detail">${escapeHtml(formatDate(data.risk_trend.previous_at))}: ${escapeHtml(data.risk_trend.from ?? 0)} → ${escapeHtml(formatDate(data.risk_trend.current_at))}: ${escapeHtml(data.risk_trend.to ?? 0)}</div></div><strong>${escapeHtml(data.risk_trend.delta > 0 ? `+${data.risk_trend.delta}` : data.risk_trend.delta)}</strong></div>`
             : `<div class="tmx-list-row"><div><div class="tmx-list-title">No comparable exposure trend yet</div><div class="tmx-list-detail">${escapeHtml(data.risk_trend?.reason || 'Two evidence-scoped snapshots are required for comparison.')}</div></div></div>`}</div>
         </section>
         <section class="tmx-panel">
@@ -848,14 +847,14 @@
     due_soon: '≤7 days',
     overdue: 'Overdue',
   }[state] || 'Date supplied');
-  const deadlineState = (value) => {
-    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (!match) return '';
-    const due = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-    const now = new Date();
-    const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-    const days = Math.round((due - today) / 86400000);
-    return days < 0 ? 'overdue' : days <= 7 ? 'due_soon' : 'scheduled';
+  const deadlineState = (value, serverState) => sssUi.deadlineState(value, serverState);
+
+  const postureDetails = (finding) => {
+    const present = sssUi.presentationDetails(finding);
+    if (!present.length) return '';
+    return `<dl class="tmx-posture-details">${present.map(({ label, value }) => {
+      return `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`;
+    }).join('')}</dl>`;
   };
 
   function renderSssIntake(host, findings, config, assets = [], overview = {}, exposureRecords = {}, exposureActivity = {}) {
@@ -866,31 +865,35 @@
     const assetField = !isResearcher ? `<div class="tmx-field tmx-field-wide"><label>Affected customer asset</label><select name="asset_id">${assetOptions(assets)}</select><small>Select the real inventory record when known. Leave unmapped only when triage is still required.</small></div>` : '';
     const cards = findings.length ? findings.map((finding) => {
       const decision = finding.edip_decision || finding.tes_decision || 'UNAVAILABLE';
-      const decisions = Array.isArray(finding.decision_sequence) && finding.decision_sequence.length
-        ? finding.decision_sequence : [decision];
+      const viewState = sssUi.findingViewState(finding);
+      const decisions = viewState.decisions;
       const decisionHistory = `<div class="tmx-decision-history"><strong>Engine decision sequence</strong><ol>${decisions.map((item, index) => `<li><span>${index + 1}</span><b class="tmx-decision ${decisionTone(item)}">${escapeHtml(item)}</b></li>`).join('')}</ol></div>`;
-      const kevState = deadlineState(finding.kev_due);
+      const kevState = viewState.kevState;
       const deadline = finding.kev_due
         ? `<span class="tmx-deadline tmx-deadline-${escapeHtml(kevState)}">KEV ${escapeHtml(deadlineLabel(kevState))} · ${escapeHtml(finding.kev_due)}</span>`
         : '';
       const revalidation = finding.revalidate_by
-        ? `<span class="tmx-deadline tmx-deadline-${escapeHtml(finding.revalidation_countdown_state)}">Revalidate ${escapeHtml(deadlineLabel(finding.revalidation_countdown_state))} · ${escapeHtml(finding.revalidate_by)}</span>`
+        ? `<span class="tmx-deadline tmx-deadline-${escapeHtml(viewState.revalidationState)}">Revalidate ${escapeHtml(deadlineLabel(viewState.revalidationState))} · ${escapeHtml(finding.revalidate_by)}</span>`
+        : '';
+      const escalationData = sssUi.serverEscalation(finding);
+      const escalation = escalationData
+        ? `<span class="tmx-deadline">Server escalation ${escapeHtml(escalationData.date)}${escalationData.severity ? ` · ${escapeHtml(escalationData.severity)}` : ''}</span>`
         : '';
       const resolved = finding.status === 'resolved';
-      const linkedAssets = Array.isArray(finding.assets) && finding.assets.length
-        ? finding.assets
-        : (finding.asset_id ? [assets.find((asset) => asset.id === finding.asset_id) || finding.asset].filter(Boolean) : []);
+      const linkedAssets = Array.isArray(finding.assets) ? finding.assets : [];
       const linkedLabels = linkedAssets.map((asset) => assetLabel(asset)).filter(Boolean);
       const exposureState = linkedAssets.length
         ? `<div class="tmx-control-callout"><strong>Confirmed on ${linkedAssets.length} customer asset${linkedAssets.length === 1 ? '' : 's'}</strong><span>${escapeHtml(linkedLabels.join(' | ') || 'Linked tenant inventory')}</span></div>`
-        : '<div class="tmx-notice"><strong>Needs mapping:</strong><span>This record is triage data and does not count as confirmed customer exposure.</span></div>';
+        : finding.asset_id
+          ? '<div class="tmx-notice"><strong>Legacy asset pointer — review required:</strong><span>The historical pointer is retained, but it is not a confirmed customer exposure until an analyst records an AssetExposure relationship.</span></div>'
+          : '<div class="tmx-notice"><strong>Needs mapping:</strong><span>This record is triage data and does not count as confirmed customer exposure.</span></div>';
       return `<article class="tmx-finding-card" data-finding-id="${escapeHtml(finding.id)}" data-search="${escapeHtml([finding.title, finding.cve, finding.class, finding.subtype, finding.status].join(' ').toLowerCase())}">
         <div class="tmx-finding-topline">
           <div class="tmx-chip-row">
             <span class="tmx-status">${escapeHtml(finding.class || finding.finding_type)}</span>
             ${finding.subtype ? `<span class="tmx-subclass">${escapeHtml(finding.subtype)}</span>` : ''}
             ${finding.sub_class ? `<span class="tmx-subclass">${escapeHtml(finding.sub_class)}</span>` : ''}
-            ${finding.validated ? '<span class="tmx-validated">VALIDATED</span>' : ''}
+            ${viewState.validated ? '<span class="tmx-validated">VALIDATED</span>' : ''}
             <span class="tmx-status ${resolved ? 'tmx-status-available' : ''}">${escapeHtml(finding.status || 'open')}</span>
           </div>
           <span class="tmx-decision ${decisionTone(decision)}">${escapeHtml(decision)}</span>
@@ -899,8 +902,9 @@
         ${finding.description ? `<p class="tmx-finding-description">${escapeHtml(finding.description)}</p>` : ''}
         ${exposureState}
         ${decisionHistory}
+        ${postureDetails(finding)}
         <div class="tmx-finding-meta"><span>${escapeHtml(finding.cve)}</span><span>SSS ${escapeHtml(finding.sss)}</span><span>TES ${escapeHtml(finding.tes)}</span><span>${escapeHtml(finding.source_tool || 'Connector')}</span></div>
-        <div class="tmx-chip-row">${deadline}${revalidation}</div>
+        <div class="tmx-chip-row">${deadline}${revalidation}${escalation}</div>
         ${finding.required_control ? `<div class="tmx-control-callout"><strong>Required control</strong><span>${escapeHtml(finding.required_control)}</span></div>` : ''}
         ${canManage && !resolved ? `<div class="tmx-card-actions"><button type="button" class="tmx-button tmx-button-secondary" data-sss-patch="${escapeHtml(finding.id)}" data-patch-state="${Boolean(finding.patch_available)}">${finding.patch_available ? 'Mark patch unavailable' : 'Mark patch available'}</button><button type="button" class="tmx-button" data-sss-resolve>Resolve</button></div><div class="tmx-resolution-form" data-sss-resolution-form hidden><label>Resolution notes<textarea rows="3" maxlength="2000" required aria-label="Resolution notes for ${escapeHtml(finding.title)}"></textarea></label><div class="tmx-card-actions"><button type="button" class="tmx-button tmx-button-secondary" data-sss-resolve-cancel>Cancel</button><button type="button" class="tmx-button" data-sss-resolve-confirm="${escapeHtml(finding.id)}">Confirm resolution</button></div></div>` : ''}
       </article>`;
@@ -925,20 +929,29 @@
     </section>` : '';
 
     const postureIntake = canSubmit ? `<section class="tmx-panel">
-      <div class="tmx-panel-header"><h2>Identity and Agentic Posture Intake</h2><span class="tmx-status tmx-status-available">v73 descriptive fields</span></div>
+      <div class="tmx-panel-header"><h2>Identity and Agentic Posture Intake</h2><span class="tmx-status tmx-status-available">Server-authoritative posture</span></div>
       <form class="tmx-panel-body tmx-intake-form" data-posture-form>
         <div class="tmx-field"><label for="tmx-posture-class">Finding class</label><select id="tmx-posture-class" name="class" data-posture-class><option value="IDENTITY_POSTURE">Identity posture</option><option value="AGENTIC_EXPOSURE">Agentic exposure</option></select></div>
-        <div class="tmx-field"><label for="tmx-posture-subclass">Sub-class</label><select id="tmx-posture-subclass" name="sub_class" data-posture-subclass><option value="AUTH_FLOW_ABUSE" data-class="IDENTITY_POSTURE">Authentication flow abuse</option><option value="ADVERSARY_AI" data-class="AGENTIC_EXPOSURE">Adversary AI</option><option value="AUTONOMOUS_PRINCIPAL" data-class="AGENTIC_EXPOSURE">Autonomous principal</option></select></div>
+        <div class="tmx-field"><label for="tmx-posture-subclass">Sub-class</label><select id="tmx-posture-subclass" name="sub_class" data-posture-subclass><option value="MFA_ENROLMENT" data-class="IDENTITY_POSTURE">MFA enrolment</option><option value="SESSION_TOKEN" data-class="IDENTITY_POSTURE">Session token</option><option value="MACHINE_KEY" data-class="IDENTITY_POSTURE">Machine key</option><option value="CONDITIONAL_ACCESS" data-class="IDENTITY_POSTURE">Conditional access</option><option value="AUTH_FLOW_ABUSE" data-class="IDENTITY_POSTURE">Authentication flow abuse</option><option value="INJECTION_PATH" data-class="AGENTIC_EXPOSURE">Injection path</option><option value="MEMORY_RAG" data-class="AGENTIC_EXPOSURE">Memory / RAG</option><option value="TOOL_MCP" data-class="AGENTIC_EXPOSURE">Tool / MCP</option><option value="TRAINING_SUPPLY" data-class="AGENTIC_EXPOSURE">Training supply</option><option value="ADVERSARY_AI" data-class="AGENTIC_EXPOSURE">Adversary AI</option><option value="AUTONOMOUS_PRINCIPAL" data-class="AGENTIC_EXPOSURE">Autonomous principal</option></select></div>
         <div class="tmx-field tmx-field-wide"><label for="tmx-posture-title">Title</label><input id="tmx-posture-title" name="title" maxlength="255" required></div>
         <div class="tmx-field"><label for="tmx-posture-ecosystem">Affected ecosystem</label><input id="tmx-posture-ecosystem" name="affected_ecosystem" maxlength="255" value="Identity and AI posture" required></div>
         <div class="tmx-field"><label for="tmx-posture-source">Evidence source</label><select id="tmx-posture-source" name="source_tool"><option>Manual Questionnaire</option><option>Connector</option><option>External SIEM</option><option>Independent Monitor</option></select></div>
         ${assetField}
         <div class="tmx-field tmx-field-wide"><label for="tmx-posture-description">Description and evidence context</label><textarea id="tmx-posture-description" name="description" maxlength="2000" rows="4" required></textarea></div>
-        <label class="tmx-check-label" data-posture-for="IDENTITY_POSTURE"><input type="checkbox" name="device_code_flow_enabled"> Device-code flow enabled</label>
-        <div class="tmx-field" data-posture-for="IDENTITY_POSTURE"><label>OAuth grant inventory</label><select name="oauth_grant_inventory"><option value="none">None</option><option value="partial">Partial</option><option value="complete">Complete</option></select></div>
-        <div class="tmx-field" data-posture-for="IDENTITY_POSTURE"><label>Application consent policy</label><select name="app_consent_policy"><option value="open">Open</option><option value="restricted">Restricted</option><option value="admin_only">Admin only</option></select></div>
-        <div class="tmx-field" data-posture-for="IDENTITY_POSTURE"><label>Refresh-token lifetime (days)</label><input name="refresh_token_lifetime_days" type="number" min="0" value="30"></div>
-        <label class="tmx-check-label" data-posture-for="IDENTITY_POSTURE"><input type="checkbox" name="auth_transfer_blocked"> Authentication transfer blocked</label>
+        <div class="tmx-field" data-posture-for="IDENTITY_POSTURE"><label>Token lifetime (minutes, optional)</label><input name="token_lifetime_minutes" type="number" min="0"></div>
+        <div class="tmx-field" data-posture-for="IDENTITY_POSTURE"><label>Continuous access evaluation</label><select name="cae_enabled"><option value="">Not recorded</option><option value="true">Enabled</option><option value="false">Disabled</option></select></div>
+        <div class="tmx-field" data-posture-for="IDENTITY_POSTURE"><label>Conditional-access coverage</label><select name="conditional_access_coverage"><option value="">Not recorded</option><option value="none">None</option><option value="partial">Partial</option><option value="enforced">Enforced</option></select></div>
+        <div class="tmx-field" data-posture-for="IDENTITY_POSTURE"><label>Behavioural detection</label><select name="behavioural_detection"><option value="">Not recorded</option><option value="true">Enabled</option><option value="false">Disabled</option></select></div>
+        <div class="tmx-field" data-posture-for="IDENTITY_POSTURE"><label>ITDR source (optional)</label><input name="itdr_source" maxlength="255"></div>
+        <label class="tmx-check-label" data-posture-for="AUTH_FLOW_ABUSE"><input type="checkbox" name="device_code_flow_enabled"> Device-code flow enabled</label>
+        <div class="tmx-field" data-posture-for="AUTH_FLOW_ABUSE"><label>OAuth grant inventory</label><select name="oauth_grant_inventory"><option value="none">None</option><option value="partial">Partial</option><option value="complete">Complete</option></select></div>
+        <div class="tmx-field" data-posture-for="AUTH_FLOW_ABUSE"><label>Application consent policy</label><select name="app_consent_policy"><option value="open">Open</option><option value="restricted">Restricted</option><option value="admin_only">Admin only</option></select></div>
+        <div class="tmx-field" data-posture-for="AUTH_FLOW_ABUSE"><label>Refresh-token lifetime (days)</label><input name="refresh_token_lifetime_days" type="number" min="0" value="30"></div>
+        <label class="tmx-check-label" data-posture-for="AUTH_FLOW_ABUSE"><input type="checkbox" name="auth_transfer_blocked"> Authentication transfer blocked</label>
+        <div class="tmx-field" data-posture-for="AGENTIC_EXPOSURE"><label>Agent ID (required for legacy sub-classes)</label><input name="agent_id" maxlength="255"></div>
+        <div class="tmx-field" data-posture-for="AGENTIC_EXPOSURE"><label>Credential scope</label><input name="credential_scope" maxlength="255"></div>
+        <div class="tmx-field tmx-field-wide" data-posture-for="AGENTIC_EXPOSURE"><label>Ingestion paths (comma or line separated)</label><textarea name="ingestion_paths" rows="3"></textarea></div>
+        <div class="tmx-field" data-posture-for="AGENTIC_EXPOSURE"><label>Egress controlled</label><select name="egress_controlled"><option value="">Not recorded</option><option value="true">Yes</option><option value="false">No</option></select></div>
         <div class="tmx-field" data-posture-for="AUTONOMOUS_PRINCIPAL"><label>AI workload inventory</label><select name="ai_workload_inventory"><option value="none">None</option><option value="partial">Partial</option><option value="complete">Complete</option></select></div>
         <div class="tmx-field" data-posture-for="AUTONOMOUS_PRINCIPAL"><label>Workload credential scope</label><select name="workload_credential_scope"><option value="none">None</option><option value="read">Read</option><option value="write">Write</option><option value="admin">Admin</option></select></div>
         <label class="tmx-check-label tmx-field-wide" data-posture-for="AUTONOMOUS_PRINCIPAL"><input type="checkbox" name="egress_monitored_independently"> Egress is verified by monitoring outside the assessed isolation boundary</label>
@@ -1048,11 +1061,24 @@
           source_tool: data.get('source_tool'), asset_id: data.get('asset_id') || null,
         };
         if (findingClass === 'IDENTITY_POSTURE') Object.assign(payload, {
+          token_lifetime_minutes: data.get('token_lifetime_minutes') === '' ? null : Number(data.get('token_lifetime_minutes')),
+          cae_enabled: data.get('cae_enabled') === '' ? null : data.get('cae_enabled') === 'true',
+          conditional_access_coverage: data.get('conditional_access_coverage') || null,
+          behavioural_detection: data.get('behavioural_detection') === '' ? null : data.get('behavioural_detection') === 'true',
+          itdr_source: data.get('itdr_source') || null,
+        });
+        if (subClass === 'AUTH_FLOW_ABUSE') Object.assign(payload, {
           device_code_flow_enabled: data.has('device_code_flow_enabled'),
           oauth_grant_inventory: data.get('oauth_grant_inventory'),
           app_consent_policy: data.get('app_consent_policy'),
           refresh_token_lifetime_days: Number(data.get('refresh_token_lifetime_days')),
           auth_transfer_blocked: data.has('auth_transfer_blocked'),
+        });
+        if (findingClass === 'AGENTIC_EXPOSURE') Object.assign(payload, {
+          agent_id: data.get('agent_id') || null,
+          credential_scope: data.get('credential_scope') || null,
+          ingestion_paths: String(data.get('ingestion_paths') || '').split(/[\n,]/).map((item) => item.trim()).filter(Boolean),
+          egress_controlled: data.get('egress_controlled') === '' ? null : data.get('egress_controlled') === 'true',
         });
         if (subClass === 'AUTONOMOUS_PRINCIPAL') Object.assign(payload, {
           ai_workload_inventory: data.get('ai_workload_inventory'),
@@ -1557,7 +1583,7 @@
         <main class="tmx-tenant-editor" data-tenant-editor>
           <section class="tmx-panel">
             <div class="tmx-panel-header"><div><h2>${escapeHtml(detail.display_name)}</h2><p>${escapeHtml(detail.tenant_id)} · ${escapeHtml(detail.tenant_type)}</p></div><span class="tmx-status" data-tenant-dirty>Version ${detail.version}</span></div>
-            <div class="tmx-panel-body"><div class="tmx-tenant-facts"><div><strong>${detail.account_count}</strong><span>Configured accounts</span></div><div><strong>${detail.asset_count}</strong><span>Recorded assets</span></div><div><strong>${detail.finding_count}</strong><span>Recorded findings</span></div><div><strong>${formatDate(detail.updated_at)}</strong><span>Policy last updated</span></div></div><ul class="tmx-tenant-constraints">${constraints}</ul></div>
+            <div class="tmx-panel-body"><div class="tmx-tenant-facts"><div><strong>${detail.account_count}</strong><span>Configured accounts</span></div><div><strong>${detail.asset_breakdown?.recorded ?? detail.asset_count}</strong><span>Recorded assets</span></div><div><strong>${detail.asset_breakdown?.active ?? '—'}</strong><span>Active assets</span></div><div><strong>${detail.finding_breakdown?.stored_records ?? detail.finding_count}</strong><span>Stored finding records</span></div><div><strong>${detail.finding_breakdown?.confirmed_customer_exposures ?? '—'}</strong><span>Confirmed open exposures</span></div><div><strong>${detail.finding_breakdown?.needs_classification ?? '—'}</strong><span>Needs classification</span></div><div><strong>${detail.finding_breakdown?.reference_intelligence ?? '—'}</strong><span>Reference intelligence</span></div><div><strong>${formatDate(detail.updated_at)}</strong><span>Policy last updated</span></div></div><ul class="tmx-tenant-constraints">${constraints}</ul></div>
           </section>
           <section class="tmx-panel">
             <div class="tmx-panel-header"><h2>Entitlement policy</h2><span class="tmx-status ${detail.configured ? 'tmx-status-available' : 'tmx-status-high'}">${detail.configured ? 'Configured' : 'DOMINATE fallback'}</span></div>
@@ -1654,7 +1680,7 @@
     } catch { return ''; }
   }
 
-  function renderVdpQueue(host, submissions) {
+  function renderVdpQueue(host, submissions, canDelete) {
     host.dataset.temprisExtensionRoute = '/vdp-queue';
     const open = submissions.filter((item) => ['submitted', 'triaged'].includes(item.status));
     const accepted = submissions.filter((item) => ['accepted', 'paid'].includes(item.status));
@@ -1662,8 +1688,10 @@
       const affectedUrl = safeHttpUrl(item.poc_url);
       const researcher = item.researcher || {};
       const actionable = ['submitted', 'triaged'].includes(item.status);
-      return `<article class="tmx-vdp-card">
-        <div class="tmx-finding-topline"><div class="tmx-chip-row"><span class="tmx-status ${statusClass(item.severity)}">${escapeHtml(item.severity)}</span><span class="tmx-status ${item.status === 'accepted' ? 'tmx-status-available' : ''}">${escapeHtml(item.status)}</span></div><span class="tmx-list-detail">${escapeHtml(formatDate(item.created_at))}</span></div>
+      const removable = canDelete && !item.finding_id && !['accepted', 'paid'].includes(item.status);
+      const searchable = [item.id, item.title, item.description, item.severity, item.status, item.poc_url, researcher.handle, researcher.email].join(' ').toLowerCase();
+      return `<article class="tmx-vdp-card" data-vdp-card data-vdp-status="${escapeHtml(item.status)}" data-vdp-search="${escapeHtml(searchable)}">
+        <div class="tmx-finding-topline"><div class="tmx-chip-row">${removable ? `<label class="tmx-vdp-select"><input type="checkbox" data-vdp-select value="${escapeHtml(item.id)}"><span class="tmx-sr-only">Select ${escapeHtml(item.id)}</span></label>` : ''}<span class="tmx-status ${statusClass(item.severity)}">${escapeHtml(item.severity)}</span><span class="tmx-status ${item.status === 'accepted' ? 'tmx-status-available' : ''}">${escapeHtml(item.status)}</span></div><span class="tmx-list-detail">${escapeHtml(formatDate(item.created_at))}</span></div>
         <h2>${escapeHtml(item.title)}</h2>
         <div class="tmx-vdp-reference"><strong>${escapeHtml(item.id)}</strong><span>${escapeHtml(researcher.handle || 'Anonymous researcher')}</span>${researcher.email ? `<a href="mailto:${encodeURIComponent(researcher.email)}">${escapeHtml(researcher.email)}</a>` : ''}</div>
         <p>${escapeHtml(item.description)}</p>
@@ -1671,15 +1699,68 @@
         ${item.finding_id ? `<div class="tmx-control-callout"><strong>Accepted finding</strong><span>${escapeHtml(item.finding_id)}</span></div>` : ''}
         ${actionable ? `<div class="tmx-card-actions"><button type="button" class="tmx-button" data-vdp-triage="accepted" data-vdp-id="${escapeHtml(item.id)}">Accept into SPECTRUM</button><button type="button" class="tmx-button tmx-button-secondary" data-vdp-triage="duplicate" data-vdp-id="${escapeHtml(item.id)}">Duplicate</button><button type="button" class="tmx-button tmx-button-secondary" data-vdp-triage="rejected" data-vdp-id="${escapeHtml(item.id)}">Reject</button></div>` : ''}
       </article>`;
-    }).join('') : '<div class="tmx-empty">No confidential VDP submissions are waiting for triage.</div>';
+    }).join('') : '<div class="tmx-empty">No VDP reports have been submitted yet. Reports sent through the public intake form will appear here.</div>';
 
     host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="vdp-queue">
-      <header class="tmx-heading"><div><h1>VDP Security Queue</h1><p>Restricted SURGE workspace for confidential researcher reports and validated-finding intake.</p></div><button type="button" class="tmx-button tmx-button-secondary" data-vdp-refresh>Refresh</button></header>
+      <header class="tmx-heading"><div><h1>VDP Security Queue</h1><p>Restricted SURGE workspace for confidential researcher reports and validated-finding intake.</p></div><div class="tmx-card-actions"><a class="tmx-button tmx-button-secondary" href="/vdp#submit">Open public intake</a><button type="button" class="tmx-button tmx-button-secondary" data-vdp-refresh>Refresh</button></div></header>
       <section class="tmx-metrics" aria-label="VDP queue metrics"><div class="tmx-metric"><div class="tmx-metric-label">Total reports</div><div class="tmx-metric-value">${submissions.length}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Awaiting triage</div><div class="tmx-metric-value ${open.length ? 'tmx-tone-high' : 'tmx-tone-success'}">${open.length}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Accepted</div><div class="tmx-metric-value tmx-tone-success">${accepted.length}</div></div></section>
       <div class="tmx-notice"><strong>Confidential:</strong><span>Researcher contact details and reproduction evidence are restricted to authorised Tempris security staff. Accepted reports create tenant-scoped findings.</span></div>
+      ${submissions.length ? `<section class="tmx-vdp-tools" aria-label="VDP queue controls"><label><span>Search reports</span><input class="tmx-search" type="search" data-vdp-search placeholder="ID, title, researcher, email, URL, or description"></label><label><span>Status</span><select data-vdp-status-filter><option value="all">All statuses</option>${[...new Set(submissions.map((item) => item.status))].sort().map((status) => `<option value="${escapeHtml(status)}">${escapeHtml(titleCase(status))}</option>`).join('')}</select></label><span data-vdp-visible-count>${submissions.length} reports</span>${canDelete ? `<label class="tmx-vdp-select-visible"><input type="checkbox" data-vdp-select-visible> Select visible removable reports</label><button type="button" class="tmx-button tmx-button-danger" data-vdp-remove disabled>Remove selected <span data-vdp-selected-count>(0)</span></button>` : ''}</section>` : ''}
       <section class="tmx-vdp-queue" aria-live="polite">${cards}</section>
+      <div class="tmx-empty" data-vdp-filter-empty hidden>No VDP reports match the current search and status filter.</div>
     </div>`;
     host.querySelector('[data-vdp-refresh]').addEventListener('click', () => renderVdpQueueRoute(host, true));
+    const search = host.querySelector('[data-vdp-search]');
+    const statusFilter = host.querySelector('[data-vdp-status-filter]');
+    const reportCards = [...host.querySelectorAll('[data-vdp-card]')];
+    const selection = [...host.querySelectorAll('[data-vdp-select]')];
+    const selectVisible = host.querySelector('[data-vdp-select-visible]');
+    const removeButton = host.querySelector('[data-vdp-remove]');
+    const syncSelection = () => {
+      const selected = selection.filter((input) => input.checked);
+      if (removeButton) removeButton.disabled = selected.length === 0;
+      const count = host.querySelector('[data-vdp-selected-count]');
+      if (count) count.textContent = `(${selected.length})`;
+      if (selectVisible) {
+        const visible = selection.filter((input) => !input.closest('[data-vdp-card]').hidden);
+        selectVisible.checked = visible.length > 0 && visible.every((input) => input.checked);
+        selectVisible.indeterminate = visible.some((input) => input.checked) && !selectVisible.checked;
+      }
+    };
+    const applyFilters = () => {
+      const query = (search?.value || '').trim().toLowerCase();
+      const status = statusFilter?.value || 'all';
+      let visible = 0;
+      reportCards.forEach((card) => {
+        card.hidden = Boolean(query && !card.dataset.vdpSearch.includes(query)) || (status !== 'all' && card.dataset.vdpStatus !== status);
+        if (!card.hidden) visible += 1;
+      });
+      const count = host.querySelector('[data-vdp-visible-count]');
+      if (count) count.textContent = `${visible} of ${submissions.length} reports`;
+      const empty = host.querySelector('[data-vdp-filter-empty]');
+      if (empty) empty.hidden = visible !== 0;
+      syncSelection();
+    };
+    search?.addEventListener('input', applyFilters);
+    statusFilter?.addEventListener('change', applyFilters);
+    selection.forEach((input) => input.addEventListener('change', syncSelection));
+    selectVisible?.addEventListener('change', () => {
+      selection.filter((input) => !input.closest('[data-vdp-card]').hidden).forEach((input) => { input.checked = selectVisible.checked; });
+      syncSelection();
+    });
+    removeButton?.addEventListener('click', async () => {
+      const ids = selection.filter((input) => input.checked).map((input) => input.value);
+      if (!ids.length || !window.confirm(`Permanently remove ${ids.length} unlinked VDP report(s)? This cannot be undone.`)) return;
+      removeButton.disabled = true;
+      const failed = [];
+      for (const id of ids) {
+        try { await api(`/api/surge/submissions/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
+        catch (error) { failed.push(`${id}: ${error.message || 'Delete failed'}`); }
+      }
+      vdpSubmissions = null;
+      await renderVdpQueueRoute(host, true);
+      if (failed.length) window.alert(`Some reports could not be removed:\n${failed.join('\n')}`);
+    });
     host.querySelectorAll('[data-vdp-triage]').forEach((button) => button.addEventListener('click', async () => {
       const action = button.dataset.vdpTriage;
       const prompt = action === 'accepted'
@@ -1708,7 +1789,7 @@
       const [submissions, config] = await Promise.all([loadVdpSubmissions(force), loadPackageConfig(force)]);
       const permitted = config.tenant_id === 'tempris' && ['Superadmin', 'Admin', 'Analyst'].includes(config.role);
       if (!permitted) throw Object.assign(new Error('VDP queue access requires Tempris security staff.'), { status: 403 });
-      if (window.location.pathname === '/vdp-queue') renderVdpQueue(host, submissions);
+      if (window.location.pathname === '/vdp-queue') renderVdpQueue(host, submissions, config.role === 'Superadmin');
     } catch (error) {
       if (window.location.pathname !== '/vdp-queue') return;
       host.innerHTML = `<div data-tempris-extension-root class="tmx-page"><div class="tmx-panel tmx-error">${escapeHtml(error.message || 'VDP queue is unavailable.')}<div style="margin-top:16px"><button type="button" class="tmx-button" data-vdp-queue-retry>Retry</button></div></div></div>`;
@@ -1892,6 +1973,224 @@
       }
     });
   }
+  async function renderGrcRoute(host) {
+    host.dataset.temprisExtensionRoute = '/grc';
+    host.innerHTML = '<div class="tmx-loading">Loading server-authoritative governance data…</div>';
+    try {
+      const [risk, policyResponse, controls] = await Promise.all([
+        api('/api/grc/tes-score'),
+        api('/api/grc/policies'),
+        api('/api/grc/controls'),
+      ]);
+      if (window.location.pathname !== '/grc') return;
+      const policies = policyResponse.policies || [];
+      const canManage = ['Superadmin', 'Admin'].includes(currentUserRole());
+      const isSuperadmin = currentUserRole() === 'Superadmin';
+      const drivers = (risk.drivers || []).map((driver) => `<li>${escapeHtml(driver)}</li>`).join('');
+      const policyRows = policies.map((policy) => {
+        const custom = policy.source === 'custom';
+        const archiveLabel = policy.archived ? 'Restore' : 'Archive';
+        return `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(policy.title)}</div><div class="tmx-list-detail">${escapeHtml(policy.source === 'bundled' ? 'Bundled / immutable' : 'Custom database policy')} · v${escapeHtml(policy.version)} · ${escapeHtml(policy.status)}</div></div><div class="tmx-form-actions">${custom && canManage ? `<button type="button" class="tmx-button tmx-button-secondary" data-policy-archive="${escapeHtml(policy.id)}" data-policy-archived="${policy.archived ? 'true' : 'false'}">${archiveLabel}</button><button type="button" class="tmx-button tmx-button-secondary" data-policy-supersede="${escapeHtml(policy.id)}">Supersede</button>` : ''}${custom && isSuperadmin ? `<button type="button" class="tmx-button tmx-button-danger" data-policy-delete="${escapeHtml(policy.id)}">Delete</button>` : ''}</div></div>`;
+      }).join('');
+      const controlRows = (controls || []).map((control) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(control.id)} · ${escapeHtml(control.title)}</div><div class="tmx-list-detail">${escapeHtml(control.domain)} · ${escapeHtml(control.sg_ref)}</div></div></div>`).join('');
+      host.innerHTML = `
+        <header class="tmx-heading"><div><h1>GRC · AI Governance</h1><p>AI-governance policy, SOP, evidence, and sign-off workflow. This is separate from STANDARD regulatory control assessment and from tenant TES.</p></div></header>
+        <section class="tmx-metrics">
+          <div class="tmx-metric"><div class="tmx-metric-label">AI-system risk score</div><div class="tmx-metric-value ${metricTone(risk.band)}">${escapeHtml(risk.score ?? 'Unavailable')}</div></div>
+          <div class="tmx-metric"><div class="tmx-metric-label">Score band</div><div class="tmx-metric-value ${metricTone(risk.band)}">${escapeHtml(risk.band || 'Unavailable')}</div></div>
+          <div class="tmx-metric"><div class="tmx-metric-label">Score scope</div><div class="tmx-metric-value tmx-tone-neutral">${escapeHtml(risk.scope || 'AI_SYSTEM')}</div></div>
+        </section>
+        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Qualitative risk drivers</h2><span class="tmx-status">Server-generated</span></div><div class="tmx-panel-body"><ul>${drivers || '<li>No driver is recorded.</li>'}</ul><p class="tmx-list-detail">Exact scoring factors, weights, ranges, and formulas are deliberately not sent to the browser.</p></div></section>
+        ${canManage ? `<section class="tmx-panel"><div class="tmx-panel-header"><h2>Create custom policy</h2></div><form class="tmx-panel-body tmx-form-grid" data-policy-create><label>Title<input required name="title" maxlength="255"></label><label>Version<input required name="version" value="1.0" maxlength="20"></label><label class="tmx-field-wide">Content<textarea required name="content" rows="6" maxlength="204800"></textarea></label><div class="tmx-form-actions tmx-field-wide"><button class="tmx-button" type="submit">Create policy</button><span data-policy-message></span></div></form></section>` : ''}
+        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Policy library</h2><span class="tmx-status">${escapeHtml(policies.length)} documents</span></div><div class="tmx-panel-body">${policyRows || '<div class="tmx-empty">No policies are available.</div>'}</div></section>
+        <section class="tmx-panel"><div class="tmx-panel-header"><h2>ISO/IEC 42001 governance controls</h2><span class="tmx-status">${escapeHtml((controls || []).length)} controls</span></div><div class="tmx-panel-body">${controlRows}</div></section>
+        <dialog class="tmx-dialog" data-policy-supersede-dialog><form class="tmx-form-grid" data-policy-supersede-form><h2 class="tmx-field-wide">Supersede custom policy</h2><p class="tmx-field-wide">Create an immutable successor version. The current policy remains in history.</p><label>New version<input required name="version" maxlength="20" placeholder="2.0"></label><label class="tmx-field-wide">New policy content<textarea required name="content" rows="10" maxlength="204800"></textarea></label><div class="tmx-form-message tmx-field-wide" data-policy-supersede-message></div><div class="tmx-dialog-actions tmx-field-wide"><button type="button" class="tmx-button tmx-button-secondary" data-policy-supersede-cancel>Cancel</button><button type="submit" class="tmx-button">Create successor</button></div></form></dialog>`;
+
+      const refresh = () => renderGrcRoute(host);
+      host.querySelector('[data-policy-create]')?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        const message = host.querySelector('[data-policy-message]');
+        try {
+          await api('/api/grc/policies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: data.get('title'), version: data.get('version'), content: data.get('content') }) });
+          await refresh();
+        } catch (error) { message.textContent = error.message; }
+      });
+      host.querySelectorAll('[data-policy-archive]').forEach((button) => button.addEventListener('click', async () => {
+        await api(`/api/grc/policies/${encodeURIComponent(button.dataset.policyArchive)}/archive`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ archived: button.dataset.policyArchived !== 'true' }) });
+        await refresh();
+      }));
+      host.querySelectorAll('[data-policy-delete]').forEach((button) => button.addEventListener('click', async () => {
+        if (!window.confirm(`Delete custom policy ${button.dataset.policyDelete}? Referenced policies will be archived instead.`)) return;
+        await api(`/api/grc/policies/${encodeURIComponent(button.dataset.policyDelete)}`, { method: 'DELETE' });
+        await refresh();
+      }));
+      const supersedeDialog = host.querySelector('[data-policy-supersede-dialog]');
+      const supersedeForm = host.querySelector('[data-policy-supersede-form]');
+      host.querySelectorAll('[data-policy-supersede]').forEach((button) => button.addEventListener('click', () => {
+        supersedeForm.reset();
+        supersedeForm.dataset.policyId = button.dataset.policySupersede;
+        host.querySelector('[data-policy-supersede-message]').textContent = '';
+        supersedeDialog.showModal();
+      }));
+      host.querySelector('[data-policy-supersede-cancel]')?.addEventListener('click', () => supersedeDialog.close());
+      supersedeForm?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const data = new FormData(supersedeForm);
+        const message = host.querySelector('[data-policy-supersede-message]');
+        try {
+          await api(`/api/grc/policies/${encodeURIComponent(supersedeForm.dataset.policyId)}/supersede`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: data.get('version'), content: data.get('content') }) });
+          supersedeDialog.close();
+          await refresh();
+        } catch (error) { message.textContent = error.message; }
+      });
+    } catch (error) {
+      host.innerHTML = `<div class="tmx-error"><h2>GRC could not be loaded</h2><p>${escapeHtml(error.message)}</p></div>`;
+    }
+  }
+
+  async function renderSpectrumRoute(host, options = {}) {
+    host.dataset.temprisExtensionRoute = '/spectrum';
+    const scope = options.scope || host.dataset.scope || 'all';
+    const search = options.search ?? host.dataset.search ?? '';
+    host.dataset.scope = scope;
+    host.dataset.search = search;
+    host.innerHTML = '<div class="tmx-loading">Loading the tenant finding registry&hellip;</div>';
+    try {
+      const params = new URLSearchParams({ page: '1', limit: '50', scope });
+      if (search) params.set('search', search);
+      const response = await api(`/api/spectrum/findings?${params}`);
+      if (window.location.pathname !== '/spectrum') return;
+      const scopes = [
+        ['all', 'All records'], ['confirmed_exposure', 'Confirmed customer exposure'],
+        ['unmapped_intake', 'Unmapped intake'], ['suggested_match', 'Suggested match'],
+        ['reference_intelligence', 'Reference intelligence'], ['catalogue_record', 'Catalogue record'],
+        ['legacy_unverified', 'Legacy unverified'], ['not_applicable', 'Not applicable'], ['resolved', 'Resolved'],
+      ];
+      const rows = (response.data || []).map((finding) => `
+        <article class="tmx-list-row tmx-registry-row">
+          <div><div class="tmx-list-title">${escapeHtml(finding.cve || finding.id)} &middot; ${escapeHtml(finding.title)}</div>
+          <div class="tmx-list-detail">${escapeHtml(finding.record_scope_label)} &middot; ${escapeHtml(finding.priority || 'No priority')} &middot; Finding TES ${escapeHtml(finding.tes_score ?? 'Unavailable')} &middot; ${escapeHtml(finding.edip_decision || finding.edip_state || 'No EDIP decision')}</div></div>
+          <span class="tmx-status ${statusClass(finding.record_scope)}">${escapeHtml(finding.record_scope_label)}</span>
+        </article>`).join('');
+      host.innerHTML = `
+        <header class="tmx-heading"><div><h1>SPECTRUM &middot; Finding Registry</h1><p>All tenant finding records remain visible. Only the records labelled Confirmed customer exposure affect canonical customer posture.</p></div></header>
+        <section class="tmx-panel"><div class="tmx-exposure-tools"><label>Search findings<input data-spectrum-search value="${escapeHtml(search)}" placeholder="CVE, title, vendor, or finding ID"></label><label>Record scope<select data-spectrum-scope>${scopes.map(([value, label]) => `<option value="${value}" ${scope === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label><div data-exposure-count>${escapeHtml(response.meta?.total ?? 0)} record(s)</div></div><div class="tmx-panel-body">${rows || '<div class="tmx-empty">No records match this scope.</div>'}</div></section>`;
+      const refresh = () => renderSpectrumRoute(host, { scope: host.querySelector('[data-spectrum-scope]').value, search: host.querySelector('[data-spectrum-search]').value.trim() });
+      host.querySelector('[data-spectrum-scope]')?.addEventListener('change', refresh);
+      host.querySelector('[data-spectrum-search]')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') refresh(); });
+    } catch (error) {
+      host.innerHTML = `<div class="tmx-error"><h2>SPECTRUM could not be loaded</h2><p>${escapeHtml(error.message)}</p></div>`;
+    }
+  }
+
+  async function renderScoutRoute(host) {
+    host.dataset.temprisExtensionRoute = '/scout';
+    host.innerHTML = '<div class="tmx-loading">Loading catalogue and scanner activity&hellip;</div>';
+    try {
+      const [stats, catalogue, observations, history] = await Promise.all([
+        api('/api/scout/stats'), api('/api/scout/findings?page=1&limit=25'),
+        api('/api/scanner/findings'), api('/api/scanner/history'),
+      ]);
+      if (window.location.pathname !== '/scout') return;
+      const ref = stats.reference_catalogue || {};
+      const scan = stats.customer_scan_activity || {};
+      const catalogueRows = (catalogue.data || []).map((row) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(row.cve || row.id)} &middot; ${escapeHtml(row.title)}</div><div class="tmx-list-detail">Reference/registry record &middot; ${escapeHtml(row.priority || 'No priority')} &middot; ${escapeHtml(row.edip_state || row.edip_decision || 'No EDIP decision')}</div></div></div>`).join('');
+      const observationRows = (observations || []).slice(0, 30).map((row) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(row.target)}${row.port ? `:${escapeHtml(row.port)}` : ''} &middot; ${escapeHtml(row.service || row.risk || 'Observation')}</div><div class="tmx-list-detail">${escapeHtml(titleCase(row.observation_type))}${row.normalized_finding_id ? ` &middot; Finding ${escapeHtml(row.normalized_finding_id)}` : ' &middot; SCOUT-only observation'}${row.asset_id ? ` &middot; Asset ${escapeHtml(row.asset_id)}` : ''}</div></div></div>`).join('');
+      const historyRows = (history || []).map((row) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(row.scan_id)} &middot; ${escapeHtml(row.target)}</div><div class="tmx-list-detail">${escapeHtml(titleCase(row.status))} &middot; ${escapeHtml(row.findings_count)} observation(s) &middot; ${escapeHtml((row.engines || []).join(', '))} &middot; ${escapeHtml(formatDate(row.completed_at || row.started_at))}</div></div></div>`).join('');
+      host.innerHTML = `
+        <header class="tmx-heading"><div><h1>SCOUT &middot; Discovery</h1><p>Reference intelligence and customer scan activity are separate. Catalogue rows do not prove customer exposure.</p></div></header>
+        <section class="tmx-metrics"><div class="tmx-metric"><div class="tmx-metric-label">Reference records</div><div class="tmx-metric-value">${escapeHtml(ref.total_records ?? 0)}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Scan runs</div><div class="tmx-metric-value">${escapeHtml(scan.scan_runs ?? 0)}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Scan observations</div><div class="tmx-metric-value">${escapeHtml(scan.scan_observations ?? 0)}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Normalized candidate findings</div><div class="tmx-metric-value">${escapeHtml(scan.normalized_candidate_findings ?? 0)}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Confirmed customer exposures</div><div class="tmx-metric-value">${escapeHtml(scan.confirmed_customer_exposures ?? 0)}</div></div></section>
+        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Run an authorised scan</h2><span class="tmx-status">Targets are policy-validated server-side</span></div><form class="tmx-panel-body tmx-form-grid" data-scout-scan><label>Authorised target<input name="target" required placeholder="Approved hostname or IP"></label><label>Scan type<select name="scan_type"><option value="quick">Quick</option><option value="ports">Ports</option><option value="full">Full</option></select></label><label class="tmx-field-wide tmx-vdp-check"><input name="authorized" type="checkbox" required><span>I confirm this target is explicitly authorised for testing.</span></label><div class="tmx-form-actions tmx-field-wide"><button class="tmx-button" type="submit">Run SCOUT Scan</button><span data-scout-message></span></div></form></section>
+        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Customer scan observations</h2><span class="tmx-status">Not automatically vulnerabilities</span></div><div class="tmx-panel-body">${observationRows || '<div class="tmx-empty">No scan observations recorded.</div>'}</div></section>
+        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Scanner run history</h2></div><div class="tmx-panel-body">${historyRows || '<div class="tmx-empty">No scanner runs recorded, including zero-result runs.</div>'}</div></section>
+        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Reference and finding registry</h2><span class="tmx-status">Not proof of exposure</span></div><div class="tmx-panel-body">${catalogueRows || '<div class="tmx-empty">No registry records available.</div>'}</div></section>`;
+      host.querySelector('[data-scout-scan]')?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        const message = host.querySelector('[data-scout-message]');
+        message.textContent = 'Running the authorised scan&hellip;';
+        try {
+          const result = await api('/api/scanner/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target: data.get('target'), scan_type: data.get('scan_type') }) });
+          message.textContent = `${result.scan_id}: ${result.findings_count} observation(s), ${result.confirmed_exposures} confirmed exposure link(s).`;
+          window.setTimeout(() => renderScoutRoute(host), 700);
+        } catch (error) { message.textContent = error.message; }
+      });
+    } catch (error) { host.innerHTML = `<div class="tmx-error"><h2>SCOUT could not be loaded</h2><p>${escapeHtml(error.message)}</p></div>`; }
+  }
+
+  async function renderStrikeRoute(host) {
+    host.dataset.temprisExtensionRoute = '/strike';
+    host.innerHTML = '<div class="tmx-loading">Loading authorised validation results&hellip;</div>';
+    try {
+      const [authorizations, simulations] = await Promise.all([api('/api/strike/authorizations'), api('/api/strike/simulations')]);
+      if (window.location.pathname !== '/strike') return;
+      const latestResults = (simulations || []).flatMap((simulation) => (simulation.results || []).map((result) => ({ ...result, simulation_id: simulation.id })));
+      const count = (outcome) => latestResults.filter((row) => row.result === outcome).length;
+      const resultRows = latestResults.slice(0, 40).map((row) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(row.technique_id || 'Unknown technique')} &middot; ${escapeHtml(row.technique_name || '')}</div><div class="tmx-list-detail">${escapeHtml(titleCase(row.result))} &middot; Check confidence ${escapeHtml(Math.round(Number(row.confidence || 0) * 100))}% &middot; ${escapeHtml(row.evidence || 'No evidence detail recorded')}</div></div><span class="tmx-status ${statusClass(row.result)}">${escapeHtml(titleCase(row.result))}</span></div>`).join('');
+      const authRows = (authorizations || []).map((row) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(row.target_name)} &middot; ${escapeHtml(row.id)}</div><div class="tmx-list-detail">${escapeHtml(titleCase(row.status))} &middot; ${escapeHtml(row.rules_of_engagement)} &middot; ${(row.techniques || []).length} technique(s)</div></div>${row.status === 'signed' && ['Superadmin', 'Admin'].includes(currentUserRole()) ? `<button class="tmx-button" type="button" data-strike-run="${escapeHtml(row.id)}">Generate STRIKE Simulation</button>` : ''}</div>`).join('');
+      host.innerHTML = `<header class="tmx-heading"><div><h1>STRIKE &middot; Authorised Security Validation</h1><p>No exposure observed means the check did not observe the exposed condition. It is not a verified defensive block.</p></div></header>
+        <section class="tmx-metrics"><div class="tmx-metric"><div class="tmx-metric-label">Exploitable observed</div><div class="tmx-metric-value tmx-tone-critical">${count('EXPLOITABLE_OBSERVED')}</div></div><div class="tmx-metric"><div class="tmx-metric-label">No exposure observed</div><div class="tmx-metric-value">${count('NO_EXPOSURE_OBSERVED')}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Defensive block verified</div><div class="tmx-metric-value tmx-tone-success">${count('DEFENSIVE_BLOCK_VERIFIED')}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Untested / error</div><div class="tmx-metric-value">${count('UNTESTED') + count('ERROR')}</div></div></section>
+        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Authorisations</h2><span data-strike-message></span></div><div class="tmx-panel-body">${authRows || '<div class="tmx-empty">No authorisations recorded.</div>'}</div></section>
+        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Technique check results</h2><span class="tmx-status">Confidence is check confidence</span></div><div class="tmx-panel-body">${resultRows || '<div class="tmx-empty">No simulation results recorded.</div>'}</div></section>`;
+      host.querySelectorAll('[data-strike-run]').forEach((button) => button.addEventListener('click', async () => {
+        const message = host.querySelector('[data-strike-message]');
+        message.textContent = 'Running authorised validation&hellip;';
+        try { await api('/api/strike/simulations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ authorization_id: button.dataset.strikeRun }) }); await renderStrikeRoute(host); }
+        catch (error) { message.textContent = error.message; }
+      }));
+    } catch (error) { host.innerHTML = `<div class="tmx-error"><h2>STRIKE could not be loaded</h2><p>${escapeHtml(error.message)}</p></div>`; }
+  }
+
+  async function renderStandardRoute(host) {
+    host.dataset.temprisExtensionRoute = '/standard';
+    host.innerHTML = '<div class="tmx-loading">Loading regulatory control assessments&hellip;</div>';
+    try {
+      const frameworks = await api('/api/standard/frameworks');
+      if (window.location.pathname !== '/standard') return;
+      const cards = (frameworks || []).map((framework) => `<article class="tmx-panel" data-standard-framework="${escapeHtml(framework.id)}"><div class="tmx-panel-header"><div><h2>${escapeHtml(framework.name)}</h2><p>${escapeHtml(framework.assessed_controls)} of ${escapeHtml(framework.total_controls)} controls assessed</p></div><button type="button" class="tmx-button tmx-button-secondary" data-standard-open="${escapeHtml(framework.id)}">Open controls</button></div><div class="tmx-metrics"><div class="tmx-metric"><div class="tmx-metric-label">Assessment coverage</div><div class="tmx-metric-value">${escapeHtml(framework.assessment_coverage_label)} (${escapeHtml(framework.assessment_coverage_pct)}%)</div></div><div class="tmx-metric"><div class="tmx-metric-label">Compliance among assessed</div><div class="tmx-metric-value">${escapeHtml(framework.compliance_among_assessed_label)}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Not assessed</div><div class="tmx-metric-value">${escapeHtml(framework.not_assessed)}</div></div></div><div class="tmx-panel-body" data-standard-controls hidden></div></article>`).join('');
+      host.innerHTML = `<header class="tmx-heading"><div><h1>STANDARD &middot; Regulatory Control Assessment</h1><p>Assessment coverage and compliance among assessed controls are separate. No assessment is shown as N/A, not 0% compliant.</p></div></header>${cards}`;
+      host.querySelectorAll('[data-standard-open]').forEach((button) => button.addEventListener('click', async () => {
+        const panel = button.closest('[data-standard-framework]');
+        const body = panel.querySelector('[data-standard-controls]');
+        if (!body.hidden) { body.hidden = true; button.textContent = 'Open controls'; return; }
+        body.hidden = false; body.innerHTML = '<div class="tmx-loading">Loading controls&hellip;</div>';
+        try {
+          const response = await api(`/api/standard/frameworks/${encodeURIComponent(button.dataset.standardOpen)}/controls`);
+          body.innerHTML = (response.controls || []).map((control) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(control.id)} &middot; ${escapeHtml(control.title)}</div><div class="tmx-list-detail">${escapeHtml(control.description)} &middot; ${escapeHtml(control.evidence_count)} evidence record(s)</div></div><div class="tmx-form-actions"><select data-control-status="${escapeHtml(control.id)}"><option value="not_assessed" ${control.status === 'not_assessed' ? 'selected' : ''}>Not assessed</option><option value="compliant" ${control.status === 'compliant' ? 'selected' : ''}>Compliant</option><option value="partial" ${control.status === 'partial' ? 'selected' : ''}>Partial</option><option value="non_compliant" ${control.status === 'non_compliant' ? 'selected' : ''}>Non-compliant</option></select><button type="button" class="tmx-button tmx-button-secondary" data-control-evidence="${escapeHtml(control.id)}">Attach evidence marker</button></div></div>`).join('');
+          body.querySelectorAll('[data-control-status]').forEach((select) => select.addEventListener('change', async () => { await api(`/api/standard/frameworks/${encodeURIComponent(button.dataset.standardOpen)}/controls/${encodeURIComponent(select.dataset.controlStatus)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: select.value }) }); await renderStandardRoute(host); }));
+          body.querySelectorAll('[data-control-evidence]').forEach((evidence) => evidence.addEventListener('click', async () => { await api(`/api/standard/frameworks/${encodeURIComponent(button.dataset.standardOpen)}/controls/${encodeURIComponent(evidence.dataset.controlEvidence)}/evidence`, { method: 'POST' }); await renderStandardRoute(host); }));
+          button.textContent = 'Close controls';
+        } catch (error) { body.innerHTML = `<div class="tmx-error">${escapeHtml(error.message)}</div>`; }
+      }));
+    } catch (error) { host.innerHTML = `<div class="tmx-error"><h2>STANDARD could not be loaded</h2><p>${escapeHtml(error.message)}</p></div>`; }
+  }
+
+  async function renderSpotlightRoute(host) {
+    host.dataset.temprisExtensionRoute = '/spotlight';
+    host.innerHTML = '<div class="tmx-loading">Loading current posture and historical briefs&hellip;</div>';
+    try {
+      const [current, history] = await Promise.all([api('/api/synthesis/dashboard'), api('/api/spotlight/history')]);
+      if (window.location.pathname !== '/spotlight') return;
+      const exposure = current.exposure_coverage || {};
+      const historyRows = (history || []).map((report) => `<article class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(titleCase(report.report_type))} brief &middot; ${escapeHtml(formatDate(report.generated_at))}</div><div class="tmx-list-detail">Historical report snapshot${report.tes_score == null ? ' &middot; Tenant TES was not included' : ` &middot; Stored Tenant TES ${escapeHtml(report.tes_score)}`} &middot; Generated by ${escapeHtml(report.generated_by || 'Unknown')}</div><p>${escapeHtml(report.narrative || '')}</p></div></article>`).join('');
+      host.innerHTML = `<header class="tmx-heading"><div><h1>SPOTLIGHT &middot; Executive Narrative</h1><p>Current facts come from the canonical tenant posture. Previous briefs are historical snapshots and are never presented as live values.</p></div></header>
+        <section class="tmx-metrics"><div class="tmx-metric"><div class="tmx-metric-label">Current Tenant TES</div><div class="tmx-metric-value">${escapeHtml(current.aggregate_tes ?? 'Unavailable')}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Confirmed open exposures</div><div class="tmx-metric-value">${escapeHtml(exposure.asset_linked_count ?? 0)}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Needs classification</div><div class="tmx-metric-value">${escapeHtml(exposure.mapping_required_count ?? 0)}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Reference intelligence</div><div class="tmx-metric-value">${escapeHtml(exposure.catalog_intelligence_count ?? 0)}</div></div></section>
+        <section class="tmx-panel"><div class="tmx-panel-header"><div><h2>Generate a current executive brief</h2><p>The generated narrative records its generation time and current tenant-scoped source facts.</p></div></div><form class="tmx-panel-body tmx-form-grid" data-spotlight-generate><label>Brief type<select name="report_type"><option value="executive">Executive</option><option value="ciso">CISO</option><option value="compliance">Compliance</option><option value="insurance">Insurance context</option></select></label><label class="tmx-field-wide">Optional focus<input name="custom_focus" maxlength="500" placeholder="A customer-safe topic to emphasize"></label><div class="tmx-form-actions tmx-field-wide"><button class="tmx-button" type="submit">Generate SPOTLIGHT Brief</button><span data-spotlight-message></span></div></form></section>
+        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Historical briefs</h2><span class="tmx-status">Generated snapshots</span></div><div class="tmx-panel-body">${historyRows || '<div class="tmx-empty">No historical briefs recorded.</div>'}</div></section>`;
+      host.querySelector('[data-spotlight-generate]')?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const values = new FormData(event.currentTarget);
+        const message = host.querySelector('[data-spotlight-message]');
+        message.textContent = 'Generating from current canonical posture&hellip;';
+        try {
+          await api('/api/spotlight/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report_type: values.get('report_type'), custom_focus: values.get('custom_focus') }) });
+          await renderSpotlightRoute(host);
+        } catch (error) { message.textContent = error.message; }
+      });
+    } catch (error) { host.innerHTML = `<div class="tmx-error"><h2>SPOTLIGHT could not be loaded</h2><p>${escapeHtml(error.message)}</p></div>`; }
+  }
+
   function renderCurrentRoute() {
     const path = window.location.pathname;
     if (!EXTENSION_ROUTES.has(path)) {
@@ -1914,6 +2213,12 @@
     if (path === '/sss-intake') renderSssRoute(host);
     if (path === '/packages') renderPackagesRoute(host);
     if (path === '/vdp-queue') renderVdpQueueRoute(host);
+    if (path === '/grc') renderGrcRoute(host);
+    if (path === '/spectrum') renderSpectrumRoute(host);
+    if (path === '/scout') renderScoutRoute(host);
+    if (path === '/strike') renderStrikeRoute(host);
+    if (path === '/standard') renderStandardRoute(host);
+    if (path === '/spotlight') renderSpotlightRoute(host);
 
   }
 

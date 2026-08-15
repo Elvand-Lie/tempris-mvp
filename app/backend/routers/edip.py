@@ -7,18 +7,20 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AnyUrl, BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 from sqlalchemy.orm import Session
 
-from models import Asset, Finding
+from models import Asset, Finding, FindingStatusHistory
 from routers.audit import AuditEntry, append_to_audit_log_db
 from routers.auth import get_auth_context, require_role
 from services.database import get_db
 from services.exposure_links import active_asset_map, confirmed_asset_ids_by_finding
+from services.microsoft_graph import MicrosoftGraphError, acquire_entra_authentication_snapshot
 from services.tes_engine import calculate_sss_tes, priority_from_tes, public_decision_for_finding, public_severity
 from services.cvss_remap import v2_to_v31_remap
 from services.scout_connectors import aev_verdict_finding, entra_authentication_method_findings
 from services.sss_contract import FindingClass, FindingSubclass, deadline_state, public_sss_output, validate_subclass
+from services.operational_events import record_operational_event
 
 router = APIRouter()
 
@@ -203,6 +205,10 @@ class EntraAuthenticationSnapshot(BaseModel):
     escalation_date: str = "2027-02-01"
 
 
+class EntraSyncRequest(BaseModel):
+    escalation_date: str = "2027-02-01"
+
+
 class AevVerdictIntake(BaseModel):
     finding_id: str | None = None
     path_id: str = Field(..., max_length=255)
@@ -218,6 +224,12 @@ class AevVerdictIntake(BaseModel):
     base_severity: float = Field(default=7.0, ge=0, le=10)
     patch_available: bool = True
     recommended_action: str = "INVESTIGATE"
+
+    @field_validator("evidence_ref")
+    @classmethod
+    def validate_evidence_ref(cls, value):
+        TypeAdapter(AnyUrl).validate_python(value)
+        return value
 
 
 def _new_id(prefix: str) -> str:
@@ -350,7 +362,90 @@ def _create_finding(
     )
     db.add(finding)
     db.flush()
+    record_operational_event(
+        db,
+        tenant_id=tenant_id,
+        event_type="finding.created",
+        resource_type="finding",
+        resource_id=finding.id,
+        source_module="INTAKE_TRIAGE",
+        actor_type="integration" if connector_data else "user",
+        metadata={"intake_kind": kind, "finding_class": category},
+    )
     return finding
+
+
+def _upsert_connector_finding(
+    db: Session,
+    req: SssIntake,
+    kind: str,
+    tenant_id: str,
+    *,
+    connector_data: dict | None = None,
+) -> tuple[Finding, bool]:
+    """Reuse one tenant finding per connector record while keeping EDIP server-authoritative."""
+    existing = db.query(Finding).filter(
+        Finding.cve == req.finding_id,
+        Finding.tenant_id == tenant_id,
+        Finding.source == "sss",
+    ).first()
+    if not existing:
+        return _create_finding(db, req, kind, tenant_id, connector_data=connector_data), True
+
+    category = (req.finding_class or req.finding_type or kind).upper()
+    scoring = {"base_severity": req.base_severity, "AGM": req.agm, "DRF": req.drf, "TEF": req.tef}
+    score = calculate_sss_tes(scoring)
+    decision = public_decision_for_finding(
+        {"sss_data": {"patch_available": req.patch_available}, "source": "sss"}, score
+    )
+    previous = dict(existing.sss_data or {})
+    sequence = list(previous.get("decision_sequence") or [])
+    if not sequence and (previous.get("engine_decision") or existing.decision):
+        sequence.append(previous.get("engine_decision") or existing.decision)
+    if not sequence or sequence[-1] != decision:
+        sequence.append(decision)
+    public_fields = {
+        name: getattr(req, name)
+        for name in (
+            "agent_id", "credential_scope", "ingestion_paths", "egress_controlled",
+            "token_lifetime_minutes", "cae_enabled", "conditional_access_coverage",
+            "behavioural_detection", "itdr_source", "escalation_date", "escalated_severity",
+            "kev_due", "validated", "path_id", "verdict", "evidence_ref", "revalidate_by",
+            "device_code_flow_enabled", "oauth_grant_inventory", "app_consent_policy",
+            "refresh_token_lifetime_days", "auth_transfer_blocked", "ai_workload_inventory",
+            "workload_credential_scope", "egress_monitored_independently", "containment_tested",
+            "abort_criteria_owner",
+        )
+        if getattr(req, name) not in (None, "", [])
+    }
+    existing.finding_type = category
+    existing.sub_class = validate_subclass(category, req.sub_class)
+    existing.decision = decision
+    existing.patch_available = req.patch_available
+    existing.title = req.title
+    existing.vendor = req.affected_ecosystem
+    existing.product = ", ".join(req.attack_vectors)
+    existing.cvss = req.base_severity
+    existing.priority = priority_from_tes(score)
+    existing.status = "unmitigated"
+    existing.short_description = req.description
+    existing.required_action = req.recommended_action
+    existing.sss_data = {
+        **previous,
+        "type": category,
+        "source": kind,
+        "sub_class": existing.sub_class,
+        "source_tool": req.source_tool,
+        "scoring": scoring,
+        "patch_available": req.patch_available,
+        "attack_vectors": req.attack_vectors,
+        "engine_decision": decision,
+        "decision_sequence": sequence,
+        **public_fields,
+        **(connector_data or {}),
+    }
+    db.flush()
+    return existing, False
 
 
 def _public(f: Finding) -> dict:
@@ -550,7 +645,7 @@ def resolve_sss(
     req: SssResolve,
     request: Request,
     db: Session = Depends(get_db),
-    user=Depends(require_role("Superadmin", "Admin", "Analyst")),
+    user=Depends(require_role("Superadmin")),
 ):
     finding = _tenant_sss_finding(db, finding_id, _tenant_id(user))
     if finding.status == "resolved":
@@ -562,10 +657,25 @@ def resolve_sss(
         "resolved_by": get_auth_context(user).user_id,
     })
     finding.sss_data = sss
+    old_status = finding.status or "unmitigated"
     finding.status = "resolved"
+    actor = get_auth_context(user).user_id
+    db.add(FindingStatusHistory(
+        finding_id=finding.id,
+        old_status=old_status,
+        new_status="resolved",
+        changed_by=actor,
+        notes=req.resolution_notes,
+    ))
+    record_operational_event(
+        db, tenant_id=_tenant_id(user), event_type="finding.resolved",
+        resource_type="finding", resource_id=finding.id, source_module="INTAKE_TRIAGE",
+        actor_id=actor,
+    )
     _audit_connector(db, request, user, "SSS_INTAKE_RESOLVED", f"SSS intake resolved {finding.cve}")
     db.commit()
     db.refresh(finding)
+    _publish_sss_event(_tenant_id(user), {"type": "finding.refresh", "finding_id": finding.id, "status": "resolved"})
     return _public(finding)
 
 
@@ -626,36 +736,66 @@ def ingest_entra_authentication_methods(
     db: Session = Depends(get_db),
     user=Depends(require_role("Superadmin", "Admin", "Analyst")),
 ):
-    normalized = entra_authentication_method_findings(
-        req.users,
-        escalation_date=req.escalation_date,
-    )
-    created = []
+    tenant_id = _tenant_id(user)
+    normalized = entra_authentication_method_findings(req.users, escalation_date=req.escalation_date)
+    findings = []
+    created_count = 0
     try:
         for record in normalized:
-            engine_decision = record.pop("engine_decision")
             connector_data = {
                 "identity_subject": record.pop("identity_subject"),
                 "deprecated_methods": record.pop("deprecated_methods"),
             }
             intake = SssIntake.model_validate(record)
-            finding = _create_finding(
-                db,
-                intake,
-                "SCOUT_ENTRA",
-                _tenant_id(user),
-                engine_decision=engine_decision,
-                connector_data=connector_data,
+            finding, was_created = _upsert_connector_finding(
+                db, intake, "SCOUT_ENTRA", tenant_id, connector_data=connector_data
             )
-            created.append(finding)
-        _audit_connector(db, request, user, "ENTRA_POSTURE_INTAKE", f"Created {len(created)} identity posture findings")
+            findings.append(finding)
+            created_count += int(was_created)
+        _audit_connector(
+            db, request, user, "ENTRA_POSTURE_INTAKE",
+            f"Synchronized {len(findings)} identity posture findings",
+        )
         db.commit()
-        for finding in created:
+        for finding in findings:
             db.refresh(finding)
     except HTTPException:
         db.rollback()
         raise
-    return {"data": [_public(finding) for finding in created], "flagged_users": len(created)}
+    return {
+        "data": [_public(finding) for finding in findings],
+        "flagged_users": len(findings),
+        "created": created_count,
+        "updated": len(findings) - created_count,
+    }
+
+
+@router.post("/connectors/entra/sync")
+def sync_entra_authentication_methods(
+    req: EntraSyncRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("Superadmin", "Admin", "Analyst")),
+):
+    tenant_id = _tenant_id(user)
+    try:
+        snapshot = acquire_entra_authentication_snapshot(tenant_id)
+    except MicrosoftGraphError as exc:
+        status = 403 if exc.status_code == 403 else 503
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    result = ingest_entra_authentication_methods(
+        EntraAuthenticationSnapshot(users=snapshot["users"], escalation_date=req.escalation_date),
+        request,
+        db,
+        user,
+    )
+    result.update({
+        "users_discovered": snapshot["users_discovered"],
+        "users_processed": len(snapshot["users"]),
+        "partial": bool(snapshot["errors"]),
+        "errors": snapshot["errors"],
+    })
+    return result
 
 
 @router.post("/connectors/aev/verdicts")
@@ -673,23 +813,26 @@ def ingest_aev_verdict(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    engine_decision = normalized.pop("engine_decision")
     intake = SssIntake.model_validate(normalized)
+    tenant_id = _tenant_id(user)
     try:
-        finding = _create_finding(
-            db,
-            intake,
-            "SCOUT_AEV",
-            _tenant_id(user),
-            engine_decision=engine_decision,
-        )
-        _audit_connector(db, request, user, "AEV_VERDICT_INTAKE", f"AEV verdict created {finding.cve}")
+        finding, created = _upsert_connector_finding(db, intake, "SCOUT_AEV", tenant_id)
+        verb = "created" if created else "updated"
+        _audit_connector(db, request, user, "AEV_VERDICT_INTAKE", f"AEV verdict {verb} {finding.cve}")
         db.commit()
         db.refresh(finding)
     except HTTPException:
         db.rollback()
         raise
-    return _public(finding)
+    response = _public(finding)
+    _publish_sss_event(tenant_id, {
+        "type": "sss.finding",
+        "finding_id": finding.id,
+        "reason": "validation_evidence",
+        "validated": response.get("validated"),
+        "revalidate_by": response.get("revalidate_by"),
+    })
+    return response
 
 
 @router.post("/intake/blflaw")

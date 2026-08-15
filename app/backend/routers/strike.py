@@ -7,11 +7,12 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone
 import asyncio
+from uuid import uuid4
 from sqlalchemy.orm import Session
 from services.database import get_db
 from models import StrikeAuthorization, StrikeSimulation
 from routers.audit import append_to_audit_log, AuditEntry
-from routers.auth import get_current_user, require_role
+from routers.auth import get_auth_context, get_current_user, require_role
 from services.adversary_engine import run_adversary_emulation, TECHNIQUE_HANDLERS
 import ipaddress
 import socket
@@ -19,6 +20,30 @@ import socket
 from services.entitlements import require_module
 
 router = APIRouter(dependencies=[Depends(require_module("STRIKE"))])
+
+OUTCOME_ALIASES = {
+    "exploitable": "EXPLOITABLE_OBSERVED",
+    "blocked": "NO_EXPOSURE_OBSERVED",
+    "not_applicable": "UNTESTED",
+    "error": "ERROR",
+}
+
+
+def _outcome(value: str | None) -> str:
+    raw = str(value or "UNTESTED")
+    return OUTCOME_ALIASES.get(raw.lower(), raw.upper())
+
+
+def _normalise_results(results: list | None) -> list[dict]:
+    output = []
+    for row in results or []:
+        outcome = _outcome(row.get("result"))
+        if outcome == "DEFENSIVE_BLOCK_VERIFIED" and not (
+            row.get("defensive_control_id") and row.get("evidence")
+        ):
+            outcome = "ERROR"
+        output.append({**row, "result": outcome, "confidence_label": "Check confidence"})
+    return output
 
 # ── SSRF Protection ──────────────────────────────────────────────────────────
 
@@ -119,13 +144,14 @@ BASE_MITRE_TECHNIQUES = {
     ],
 }
 
-def _build_matrix_with_results(db: Session) -> dict:
+def _build_matrix_with_results(db: Session, tenant_id: str) -> dict:
     """Build the MITRE matrix overlaid with actual simulation results."""
     import copy
     matrix = copy.deepcopy(BASE_MITRE_TECHNIQUES)
 
     # Get all completed simulations
     sims = db.query(StrikeSimulation).filter(
+        StrikeSimulation.tenant_id == tenant_id,
         StrikeSimulation.status == "completed"
     ).order_by(StrikeSimulation.completed_at.desc()).all()
 
@@ -144,7 +170,7 @@ def _build_matrix_with_results(db: Session) -> dict:
             if tech["id"] in technique_results:
                 result_data = technique_results[tech["id"]]
                 tech["tested"] = True
-                tech["result"] = result_data.get("result", "tested")
+                tech["result"] = _outcome(result_data.get("result"))
                 tech["evidence"] = result_data.get("evidence", "")
                 tech["confidence"] = result_data.get("confidence", 0.0)
                 tech["details"] = result_data.get("details", [])
@@ -158,16 +184,16 @@ def seed_strike_data(db: Session):
         return
 
     auth = StrikeAuthorization(
-        id="AUTH-001", target_name="scanme.nmap.org", target_ip="45.33.32.156",
+        id="AUTH-001", target_name="localhost", target_ip="127.0.0.1",
         techniques=["T1190", "T1078", "T1059", "T1068", "T1562"],
         rules_of_engagement="non-destructive",
-        authorized_by="sherie@tempris.com",
-        scope_notes="Public Nmap test target — authorized for scanning",
+        authorized_by="system:fixture",
+        scope_notes="Local fixture target; no external system is authorized by this seed record",
         status="signed", created_at=datetime.fromisoformat("2026-05-28T10:30:00")
     )
     db.add(auth)
     db.commit()
-    print("STRIKE: Seeded demo authorization for scanme.nmap.org.")
+    print("STRIKE: Seeded local fixture authorization.")
 
 
 # ── API Endpoints ────────────────────────────────────────────────────────────
@@ -175,7 +201,7 @@ def seed_strike_data(db: Session):
 @router.get("/matrix")
 def get_mitre_matrix(db: Session = Depends(get_db), user=Depends(get_current_user)):
     """Return the MITRE ATT&CK matrix overlaid with real simulation results."""
-    return _build_matrix_with_results(db)
+    return _build_matrix_with_results(db, get_auth_context(user).tenant_id)
 
 
 @router.get("/techniques")
@@ -197,7 +223,10 @@ def get_available_techniques(user=Depends(get_current_user)):
 
 @router.get("/authorizations")
 def get_authorizations(db: Session = Depends(get_db), user=Depends(get_current_user)):
-    auths = db.query(StrikeAuthorization).order_by(StrikeAuthorization.created_at.desc()).all()
+    tenant_id = get_auth_context(user).tenant_id
+    auths = db.query(StrikeAuthorization).filter(
+        StrikeAuthorization.tenant_id == tenant_id,
+    ).order_by(StrikeAuthorization.created_at.desc()).all()
     return [{
         "id": a.id, "target_name": a.target_name, "target_ip": a.target_ip,
         "techniques": a.techniques, "rules_of_engagement": a.rules_of_engagement,
@@ -212,10 +241,10 @@ def create_authorization(
     db: Session = Depends(get_db),
     user=Depends(require_role("Superadmin", "Admin", "Analyst"))
 ):
-    count = db.query(StrikeAuthorization).count()
-    auth_id = f"AUTH-{1000 + count}"
+    tenant_id = get_auth_context(user).tenant_id
+    auth_id = f"AUTH-{uuid4().hex[:16].upper()}"
     auth = StrikeAuthorization(
-        id=auth_id, target_name=req.target_name, target_ip=req.target_ip,
+        id=auth_id, tenant_id=tenant_id, target_name=req.target_name, target_ip=req.target_ip,
         techniques=req.techniques, rules_of_engagement=req.rules_of_engagement,
         authorized_by=req.authorized_by, scope_notes=req.scope_notes, status="pending"
     )
@@ -235,7 +264,11 @@ def sign_authorization(
     db: Session = Depends(get_db),
     user=Depends(require_role("Superadmin", "Admin"))
 ):
-    auth = db.query(StrikeAuthorization).filter(StrikeAuthorization.id == auth_id).first()
+    tenant_id = get_auth_context(user).tenant_id
+    auth = db.query(StrikeAuthorization).filter(
+        StrikeAuthorization.id == auth_id,
+        StrikeAuthorization.tenant_id == tenant_id,
+    ).first()
     if not auth:
         raise HTTPException(status_code=404, detail="Authorization not found")
     if auth.status != "pending":
@@ -253,11 +286,14 @@ def sign_authorization(
 
 @router.get("/simulations")
 def get_simulations(db: Session = Depends(get_db), user=Depends(get_current_user)):
-    sims = db.query(StrikeSimulation).order_by(StrikeSimulation.started_at.desc()).all()
+    tenant_id = get_auth_context(user).tenant_id
+    sims = db.query(StrikeSimulation).filter(
+        StrikeSimulation.tenant_id == tenant_id,
+    ).order_by(StrikeSimulation.started_at.desc()).all()
     return [{
         "id": s.id, "authorization_id": s.authorization_id, "adapter": s.adapter,
         "status": s.status, "techniques_tested": s.techniques_tested,
-        "results": s.results,
+        "results": _normalise_results(s.results),
         "started_at": s.started_at.isoformat() if s.started_at else "",
         "completed_at": s.completed_at.isoformat() if s.completed_at else ""
     } for s in sims]
@@ -271,8 +307,10 @@ async def run_simulation(
     user=Depends(require_role("Superadmin", "Admin"))
 ):
     """Execute a real adversary emulation campaign against the authorized target."""
+    tenant_id = get_auth_context(user).tenant_id
     auth = db.query(StrikeAuthorization).filter(
-        StrikeAuthorization.id == req.authorization_id
+        StrikeAuthorization.id == req.authorization_id,
+        StrikeAuthorization.tenant_id == tenant_id,
     ).first()
     if not auth:
         raise HTTPException(status_code=404, detail="Authorization not found")
@@ -292,12 +330,11 @@ async def run_simulation(
         )
 
     user_email = user.get("sub", "unknown")
-    count = db.query(StrikeSimulation).count()
-    sim_id = f"SIM-{1000 + count}"
+    sim_id = f"SIM-{uuid4().hex[:16].upper()}"
 
     # Create simulation record as "running"
     sim = StrikeSimulation(
-        id=sim_id, authorization_id=req.authorization_id,
+        id=sim_id, tenant_id=tenant_id, authorization_id=req.authorization_id,
         adapter="adversary_engine",
         status="running", techniques_tested=auth.techniques,
         results=[], started_at=datetime.now(timezone.utc)
@@ -320,7 +357,8 @@ async def run_simulation(
 
         sim.status = "completed"
         sim.completed_at = datetime.now(timezone.utc)
-        sim.results = emulation_result["results"]
+        normalised_results = _normalise_results(emulation_result["results"])
+        sim.results = normalised_results
         sim.techniques_tested = [r["technique_id"] for r in emulation_result["results"]]
         db.commit()
 
@@ -330,8 +368,8 @@ async def run_simulation(
             user=user_email, action="STRIKE_SIMULATION_COMPLETED", module="STRIKE",
             detail=(
                 f"Simulation {sim_id} completed against {auth.target_name}: "
-                f"{emulation_result['exploitable']} exploitable, "
-                f"{emulation_result['blocked']} blocked, "
+                f"{emulation_result['exploitable_observed']} exploitable conditions observed, "
+                f"{emulation_result['no_exposure_observed']} checks with no exposure observed, "
                 f"{emulation_result['techniques_tested']} techniques tested "
                 f"({emulation_result['duration_ms']}ms)"
             ),
@@ -344,12 +382,13 @@ async def run_simulation(
             "target": auth.target_name,
             "duration_ms": emulation_result["duration_ms"],
             "techniques_tested": emulation_result["techniques_tested"],
-            "exploitable": emulation_result["exploitable"],
-            "blocked": emulation_result["blocked"],
-            "results": emulation_result["results"],
+            "exploitable_observed": emulation_result["exploitable_observed"],
+            "no_exposure_observed": emulation_result["no_exposure_observed"],
+            "defensive_block_verified": emulation_result["defensive_block_verified"],
+            "results": normalised_results,
             "message": (
-                f"Adversary emulation completed: {emulation_result['exploitable']} exploitable, "
-                f"{emulation_result['blocked']} blocked out of "
+                f"Adversary emulation completed: {emulation_result['exploitable_observed']} exploitable conditions observed; "
+                f"{emulation_result['no_exposure_observed']} checks found no exposed condition out of "
                 f"{emulation_result['techniques_tested']} techniques."
             )
         }
@@ -365,42 +404,64 @@ async def run_simulation(
 @router.get("/simulations/{sim_id}")
 def get_simulation_status(sim_id: str, db: Session = Depends(get_db), user=Depends(get_current_user)):
     """Poll a specific simulation's status and results."""
-    sim = db.query(StrikeSimulation).filter(StrikeSimulation.id == sim_id).first()
+    tenant_id = get_auth_context(user).tenant_id
+    sim = db.query(StrikeSimulation).filter(
+        StrikeSimulation.id == sim_id,
+        StrikeSimulation.tenant_id == tenant_id,
+    ).first()
     if not sim:
         raise HTTPException(status_code=404, detail="Simulation not found")
-    auth = db.query(StrikeAuthorization).filter(StrikeAuthorization.id == sim.authorization_id).first()
-    exploitable = len([r for r in (sim.results or []) if r.get("result") == "exploitable"])
-    blocked = len([r for r in (sim.results or []) if r.get("result") == "blocked"])
+    auth = db.query(StrikeAuthorization).filter(
+        StrikeAuthorization.id == sim.authorization_id,
+        StrikeAuthorization.tenant_id == tenant_id,
+    ).first()
+    results = _normalise_results(sim.results)
+    exploitable = len([r for r in results if r.get("result") == "EXPLOITABLE_OBSERVED"])
+    no_exposure = len([r for r in results if r.get("result") == "NO_EXPOSURE_OBSERVED"])
+    defensive = len([r for r in results if r.get("result") == "DEFENSIVE_BLOCK_VERIFIED"])
     return {
         "id": sim.id,
         "status": sim.status,
         "target": auth.target_name if auth else "unknown",
-        "results": sim.results or [],
-        "exploitable": exploitable,
-        "blocked": blocked,
+        "results": results,
+        "exploitable_observed": exploitable,
+        "no_exposure_observed": no_exposure,
+        "defensive_block_verified": defensive,
         "duration_ms": int((sim.completed_at - sim.started_at).total_seconds() * 1000) if sim.completed_at and sim.started_at else 0,
         "started_at": sim.started_at.isoformat() if sim.started_at else "",
         "completed_at": sim.completed_at.isoformat() if sim.completed_at else "",
     }
 
 
-async def _run_scan_background(sim_id: str, target_url: str, techniques: list, roe: str):
+async def _run_scan_background(
+    sim_id: str,
+    tenant_id: str,
+    target_url: str,
+    techniques: list,
+    roe: str,
+):
     """Run the adversary emulation in the background and update the DB when done."""
     from services.database import SessionLocal
     try:
         result = await run_adversary_emulation(target=target_url, techniques=techniques, rules_of_engagement=roe)
         db = SessionLocal()
-        sim = db.query(StrikeSimulation).filter(StrikeSimulation.id == sim_id).first()
+        sim = db.query(StrikeSimulation).filter(
+            StrikeSimulation.id == sim_id,
+            StrikeSimulation.tenant_id == tenant_id,
+        ).first()
         if sim:
             sim.status = "completed"
             sim.completed_at = datetime.now(timezone.utc)
-            sim.results = result["results"]
+            sim.results = _normalise_results(result["results"])
             sim.techniques_tested = [r["technique_id"] for r in result["results"]]
             db.commit()
         db.close()
     except Exception as e:
         db = SessionLocal()
-        sim = db.query(StrikeSimulation).filter(StrikeSimulation.id == sim_id).first()
+        sim = db.query(StrikeSimulation).filter(
+            StrikeSimulation.id == sim_id,
+            StrikeSimulation.tenant_id == tenant_id,
+        ).first()
         if sim:
             sim.status = "failed"
             sim.completed_at = datetime.now(timezone.utc)
@@ -429,10 +490,10 @@ async def quick_scan(
     user_email = user.get("sub", "unknown")
 
     # Auto-create authorization
-    auth_count = db.query(StrikeAuthorization).count()
-    auth_id = f"AUTH-{1000 + auth_count}"
+    tenant_id = get_auth_context(user).tenant_id
+    auth_id = f"AUTH-{uuid4().hex[:16].upper()}"
     auth = StrikeAuthorization(
-        id=auth_id, target_name=target, target_ip=host_clean,
+        id=auth_id, tenant_id=tenant_id, target_name=target, target_ip=host_clean,
         techniques=list(TECHNIQUE_HANDLERS.keys()),
         rules_of_engagement=req.rules_of_engagement,
         authorized_by=user_email,
@@ -444,10 +505,9 @@ async def quick_scan(
     db.commit()
 
     # Create simulation record
-    sim_count = db.query(StrikeSimulation).count()
-    sim_id = f"SIM-{1000 + sim_count}"
+    sim_id = f"SIM-{uuid4().hex[:16].upper()}"
     sim = StrikeSimulation(
-        id=sim_id, authorization_id=auth_id,
+        id=sim_id, tenant_id=tenant_id, authorization_id=auth_id,
         adapter="adversary_engine", status="running",
         techniques_tested=list(TECHNIQUE_HANDLERS.keys()),
         results=[], started_at=datetime.now(timezone.utc)
@@ -459,7 +519,13 @@ async def quick_scan(
     target_url = target if target.startswith("http") else f"http://{target}"
 
     # Launch in background
-    asyncio.create_task(_run_scan_background(sim_id, target_url, list(TECHNIQUE_HANDLERS.keys()), req.rules_of_engagement))
+    asyncio.create_task(_run_scan_background(
+        sim_id,
+        tenant_id,
+        target_url,
+        list(TECHNIQUE_HANDLERS.keys()),
+        req.rules_of_engagement,
+    ))
 
     append_to_audit_log(AuditEntry(
         user=user_email, action="STRIKE_QUICK_SCAN", module="STRIKE",

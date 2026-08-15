@@ -21,6 +21,7 @@ from services.entitlements import (
     normalize_overrides,
     normalize_package_code,
 )
+from services.customer_posture import build_customer_posture
 
 
 router = APIRouter()
@@ -68,13 +69,29 @@ def _constraints(tenant_id: str) -> list[dict]:
 
 def _detail(db: Session, tenant: Tenant) -> dict:
     payload = entitlement_response(db, tenant.id, can_manage=True)
+    posture = build_customer_posture(db, tenant.id)
+    recorded_assets = db.query(Asset).filter(Asset.tenant_id == tenant.id).all()
     payload.update({
         "display_name": tenant.display_name,
         "tenant_type": tenant.tenant_type,
         "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
         "tenant_updated_at": tenant.updated_at.isoformat() if tenant.updated_at else None,
-        "asset_count": db.query(Asset).filter(Asset.tenant_id == tenant.id).count(),
-        "finding_count": db.query(Finding).filter(Finding.tenant_id == tenant.id).count(),
+        "asset_count": len(recorded_assets),
+        "finding_count": posture["total_stored_finding_count"],
+        "asset_breakdown": {
+            "recorded": len(recorded_assets),
+            "active": posture["active_asset_count"],
+            "decommissioned": sum((row.status or "").lower() == "decommissioned" for row in recorded_assets),
+        },
+        "finding_breakdown": {
+            "stored_records": posture["total_stored_finding_count"],
+            "confirmed_customer_exposures": posture["confirmed_open_exposure_count"],
+            "needs_classification": posture["needs_classification_count"],
+            "reference_intelligence": posture["reference_intelligence_count"],
+            "resolved": posture["resolved_finding_count"],
+            "not_applicable": posture["not_applicable_count"],
+            "legacy_unverified_links": posture["legacy_unverified_link_count"],
+        },
         "account_count": _account_count(tenant.id),
         "constraints": _constraints(tenant.id),
         "selection_changes_session": False,
@@ -116,6 +133,7 @@ def list_tenants(
         assignment = packages.get(tenant.id)
         package_code = assignment.package_code if assignment else DEFAULT_PACKAGE
         overrides = dict(assignment.module_overrides or {}) if assignment else {}
+        posture = build_customer_posture(db, tenant.id)
         items.append({
             "tenant_id": tenant.id,
             "display_name": tenant.display_name,
@@ -125,6 +143,9 @@ def list_tenants(
             "enabled_module_count": len(effective_modules(package_code, overrides)),
             "asset_count": int(asset_counts.get(tenant.id, 0)),
             "finding_count": int(finding_counts.get(tenant.id, 0)),
+            "confirmed_exposure_count": posture["confirmed_open_exposure_count"],
+            "needs_classification_count": posture["needs_classification_count"],
+            "reference_intelligence_count": posture["reference_intelligence_count"],
             "account_count": _account_count(tenant.id),
             "updated_at": assignment.updated_at.isoformat() if assignment and assignment.updated_at else None,
             "version": assignment.version if assignment else 0,

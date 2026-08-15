@@ -8,6 +8,7 @@ from services.database import get_db
 from models import GeneratedReport, Finding, ControlEvidence
 from routers.auth import require_role, get_auth_context
 from routers.audit import append_to_audit_log_db, AuditEntry
+from services.operational_events import record_operational_event
 
 from services.entitlements import require_module
 
@@ -223,6 +224,10 @@ def register_report(
     if not tenant_id:
         raise HTTPException(status_code=400, detail='Missing tenant context')
     approved_by = _verified_approval(req.approved_by, auth_ctx)
+    from services.customer_posture import canonical_exposure_rows
+    canonical_ids = {
+        finding.id for finding, _, _ in canonical_exposure_rows(db, tenant_id, open_only=True)
+    }
     
     # --- Data Anomalies Check ---
     # 1. Validate source findings exist and belong to correct tenant
@@ -237,6 +242,11 @@ def register_report(
             raise HTTPException(
                 status_code=400,
                 detail=f"ANOMALY_DETECTED: Reference finding {fid} belongs to a different tenant."
+            )
+        if fid not in canonical_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"ANOMALY_DETECTED: Reference finding {fid} is not a confirmed open customer exposure.",
             )
             
     # 2. Validate source evidence files exist and belong to correct tenant
@@ -450,6 +460,12 @@ def set_report_archive_state(
     })
     configuration['_lifecycle'] = lifecycle
     report.framework_configuration = configuration
+    record_operational_event(
+        db, tenant_id=auth_ctx.tenant_id,
+        event_type='report.archived' if req.archived else 'report.restored',
+        resource_type='generated_report', resource_id=report.id,
+        source_module='CLIENT_REPORTS', actor_id=auth_ctx.user_id,
+    )
     append_to_audit_log_db(db, AuditEntry(
         user=auth_ctx.user_id,
         action='REPORT_ARCHIVED' if req.archived else 'REPORT_RESTORED',
@@ -532,6 +548,13 @@ def get_poc_artifact(
         raise HTTPException(status_code=400, detail=str(exc))
     if not artifact_path.is_file():
         raise HTTPException(status_code=404, detail='Report artifact not found')
+    record_operational_event(
+        db, tenant_id=auth_ctx.tenant_id, event_type='report.downloaded',
+        resource_type='generated_report', resource_id=report.id,
+        source_module='CLIENT_REPORTS', actor_id=auth_ctx.user_id,
+        metadata={'format': artifact_format},
+    )
+    db.commit()
     media_types = {
         'html': 'text/html; charset=utf-8',
         'json': 'application/json',

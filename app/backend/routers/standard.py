@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from services.database import get_db
-from models import ControlStatus, ControlEvidence, IncidentReport
+from models import ControlStatus, ControlEvidence, Incident, IncidentReport
 from routers.audit import (
     append_to_audit_log,
     append_to_audit_log_db,
@@ -25,6 +25,8 @@ import urllib.parse
 from pathlib import Path
 
 from services.entitlements import require_module
+from services.customer_posture import canonical_exposure_rows
+from services.operational_events import record_operational_event
 
 router = APIRouter(dependencies=[Depends(require_module("STANDARD"))])
 VALID_STATUSES = ["not_assessed", "compliant", "partial", "non_compliant", "not_applicable"]
@@ -214,11 +216,11 @@ def _get_live_advisories(db: Session, tenant_id: str) -> dict:
         critical_findings = 0
         total_findings = 0
 
-    # Check KEV data for vulnerability counts
-    from services.kev_loader import get_finding_stats
-    kev_stats = get_finding_stats(db, tenant_id=tenant_id)
-    p0_count = kev_stats["critical_count"]
-    ransomware_count = kev_stats["ransomware_linked"]
+    # Compliance advisories use confirmed customer exposure, never catalogue totals.
+    from services.customer_posture import build_customer_posture
+    posture = build_customer_posture(db, tenant_id)
+    p0_count = posture["confirmed_critical_count"]
+    ransomware_count = posture["confirmed_ransomware_linked_count"]
 
     # Check STRIKE simulation results
     from models import StrikeAuthorization, StrikeSimulation
@@ -232,7 +234,10 @@ def _get_live_advisories(db: Session, tenant_id: str) -> dict:
         ).order_by(StrikeSimulation.completed_at.desc()).first()
         exploitable_count = 0
         if latest_sim and latest_sim.results:
-            exploitable_count = len([r for r in latest_sim.results if r.get("result") == "exploitable"])
+            exploitable_count = len([
+                r for r in latest_sim.results
+                if str(r.get("result") or "").upper() in {"EXPLOITABLE", "EXPLOITABLE_OBSERVED"}
+            ])
     except Exception:
         exploitable_count = 0
 
@@ -248,8 +253,8 @@ def _get_live_advisories(db: Session, tenant_id: str) -> dict:
     # ── Patching Controls ──
     if p0_count > 0:
         patch_msg = (
-            f"{p0_count} tracked P0 findings require applicability and remediation review. "
-            f"{ransomware_count} are ransomware-linked."
+            f"{p0_count} confirmed critical customer exposures require remediation review. "
+            f"{ransomware_count} confirmed exposures are ransomware-linked."
         )
         advisories["MAS-TRM-11.1.1"] = {"level": "critical", "message": patch_msg}
         advisories["IM8A-AM-3"] = {"level": "critical", "message": patch_msg}
@@ -294,13 +299,13 @@ def _get_live_advisories(db: Session, tenant_id: str) -> dict:
 
 
 def _get_control_status(db: Session, tenant_id: str, framework_id: str, control_id: str, default: str) -> str:
-    """Get control status from DB, falling back to default."""
+    """Get recorded tenant status; framework seed labels are not assessments."""
     row = db.query(ControlStatus).filter(
         ControlStatus.tenant_id == tenant_id,
         ControlStatus.framework_id == framework_id,
         ControlStatus.control_id == control_id
     ).first()
-    return row.status if row else default
+    return row.status if row else "not_assessed"
 
 def _get_evidence_count(db: Session, tenant_id: str, framework_id: str, control_id: str) -> int:
     return db.query(ControlEvidence).filter(
@@ -332,13 +337,28 @@ def get_frameworks(db: Session = Depends(get_db), user = Depends(get_current_use
         partial = sum(1 for s in statuses if s == "partial")
         non_compliant = sum(1 for s in statuses if s == "non_compliant")
         assessed = sum(1 for s in statuses if s != "not_assessed")
-        score = round(((compliant + partial * 0.5) / assessed * 100) if assessed > 0 else 0, 1)
+        assessment_coverage = round((assessed / total * 100) if total else 0, 1)
+        compliance_among_assessed = (
+            round((compliant + partial * 0.5) / assessed * 100, 1)
+            if assessed else None
+        )
 
         # Count advisories for this framework
         fw_advisories = sum(1 for c in controls if c["id"] in advisories and advisories[c["id"]].get("level") in ("warning", "critical"))
 
         result.append({
-            "id": key, "name": fw["name"], "score": score, "total_controls": total,
+            "id": key,
+            "name": fw["name"],
+            # Compatibility alias: this is never full-framework compliance.
+            "score": compliance_among_assessed,
+            "assessment_coverage_pct": assessment_coverage,
+            "assessment_coverage_label": f"{assessed} / {total}",
+            "compliance_among_assessed_pct": compliance_among_assessed,
+            "compliance_among_assessed_label": (
+                f"{compliance_among_assessed}%" if compliance_among_assessed is not None else "N/A"
+            ),
+            "total_controls": total,
+            "assessed_controls": assessed,
             "compliant": compliant, "partial": partial, "non_compliant": non_compliant,
             "not_assessed": total - assessed, "active_advisories": fw_advisories,
         })
@@ -406,6 +426,21 @@ def update_control_status(framework_id: str, control_id: str, update: ControlSta
         ))
     user_email = user.get("sub", "unknown")
     try:
+        record_operational_event(
+            db, tenant_id=tenant_id, event_type="control.assessed",
+            resource_type="control", resource_id=f"{framework_id}:{control_id}",
+            source_module="STANDARD", actor_id=user_email,
+            metadata={"previous_status": old_status, "status": update.status},
+        )
+        old_gap = old_status in {"partial", "non_compliant"}
+        new_gap = update.status in {"partial", "non_compliant"}
+        if old_gap != new_gap:
+            record_operational_event(
+                db, tenant_id=tenant_id,
+                event_type="gap.opened" if new_gap else "gap.closed",
+                resource_type="control", resource_id=f"{framework_id}:{control_id}",
+                source_module="STANDARD", actor_id=user_email,
+            )
         append_to_audit_log_db(db, AuditEntry(
             user=user_email, action="CONTROL_STATUS_UPDATE", module="STANDARD",
             detail=f"Control {control_id} ({ctrl['title']}) in {fw['name']}: {old_status} to {update.status}",
@@ -514,6 +549,12 @@ async def upload_evidence(
         )
         db.add(ev)
         db.flush()
+        record_operational_event(
+            db, tenant_id=assigned_tenant_id, event_type="control.evidence_attached",
+            resource_type="control", resource_id=f"{framework_id}:{control_id}",
+            source_module="STANDARD", actor_id=auth_ctx.user_id,
+            metadata={"evidence_id": ev.id, "filename": filename},
+        )
 
         log_evidence_action(
             auth_ctx, ev.id, "EVIDENCE_UPLOADED", "STANDARD",
@@ -839,6 +880,9 @@ def delete_evidence(
 # ── MAS TRM 1-Hour Incident Report ──────────────────────────────────────────
 
 class IncidentReportRequest(BaseModel):
+    incident_id: str | None = None
+    # Deprecated compatibility fields.  A draft is never created from these
+    # alone; callers must first create an Incident through /api/incidents.
     incident_type: str = "cyber_security_incident"
     description: str = ""
     severity: str = "high"
@@ -897,118 +941,97 @@ def generate_incident_report(
     tenant_id = _principal_tenant(user)
     now = datetime.now(timezone.utc)
 
-    # Gather live threat context
-    from services.kev_loader import get_finding_stats
-    kev_stats = get_finding_stats(db, tenant_id=tenant_id)
-    p0_count = kev_stats["critical_count"]
-    ransomware_count = kev_stats["ransomware_linked"]
+    if not req.incident_id:
+        raise HTTPException(
+            status_code=422,
+            detail="incident_id is required; create a tenant Incident before generating a MAS draft",
+        )
+    incident = db.query(Incident).filter(
+        Incident.id == req.incident_id,
+        Incident.tenant_id == tenant_id,
+    ).first()
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
 
-    # Get latest scanner findings
-    from models import ScanFinding
-    try:
-        recent_critical = db.query(ScanFinding).filter(
-            ScanFinding.tenant_id == tenant_id,
-            ScanFinding.risk.in_(["Critical", "High"])
-        ).order_by(ScanFinding.discovered_at.desc()).limit(10).all()
-        scanner_findings = [{
-            "target": f.target, "port": f.port, "service": f.service,
-            "risk": f.risk, "detail": f.detail, "cve": getattr(f, "cve_id", None) or ""
-        } for f in recent_critical]
-    except Exception:
-        scanner_findings = []
+    affected_ids = set(incident.affected_asset_ids or [])
+    related_ids = set(incident.related_finding_ids or [])
+    confirmed_rows = [
+        (finding, asset, link)
+        for finding, asset, link in canonical_exposure_rows(db, tenant_id, open_only=False)
+        if finding.id in related_ids and (not affected_ids or asset.id in affected_ids)
+    ]
+    confirmed_by_finding = {}
+    for finding, asset, link in confirmed_rows:
+        entry = confirmed_by_finding.setdefault(finding.id, {
+            "finding_id": finding.id,
+            "cve": finding.cve or finding.cve_id,
+            "title": finding.title,
+            "priority": finding.priority,
+            "ransomware_linked": bool(finding.ransomware),
+            "affected_assets": [],
+        })
+        entry["affected_assets"].append({
+            "asset_id": asset.id,
+            "name": asset.name,
+            "evidence": link.evidence,
+            "source": link.match_method,
+        })
 
-    # Get latest STRIKE results
-    from models import StrikeAuthorization, StrikeSimulation
-    try:
-        latest_sim = db.query(StrikeSimulation).join(
-            StrikeAuthorization,
-            StrikeSimulation.authorization_id == StrikeAuthorization.id,
-        ).filter(
-            StrikeSimulation.status == "completed",
-            StrikeAuthorization.tenant_id == tenant_id,
-        ).order_by(StrikeSimulation.completed_at.desc()).first()
-        strike_summary = None
-        if latest_sim and latest_sim.results:
-            exploitable = [r for r in latest_sim.results if r.get("result") == "exploitable"]
-            strike_summary = {
-                "simulation_id": latest_sim.id,
-                "techniques_tested": len(latest_sim.results),
-                "exploitable": len(exploitable),
-                "details": [{"technique": r.get("technique_id"), "name": r.get("technique_name"), "evidence": r.get("evidence")} for r in exploitable]
-            }
-    except Exception:
-        strike_summary = None
-
-    # Get TES score
-    from routers.synthesis import get_dashboard_data
-    dashboard = get_dashboard_data(db, tenant_id=tenant_id)
-    tes_score = dashboard.get("aggregate_tes")
-
-    # Build the structured report
-    report_id = f"INC-{now.strftime('%Y%m%d%H%M%S%f')}"
-    deadline = now + timedelta(hours=1)
-
+    report_id = f"INR-{now.strftime('%Y%m%d%H%M%S%f')}"
+    deadline = incident.discovered_at + timedelta(hours=1)
     report = {
         "report_id": report_id,
+        "incident_id": incident.id,
         "type": "MAS TRM 12.1.5 — 1-Hour Incident Notification",
         "generated_at": _iso_z(now),
         "generated_by": user_email,
         "notification_deadline": _iso_z(deadline),
         "status": "DRAFT — PENDING SUBMISSION TO MAS",
-
         "incident_summary": {
-            "type": req.incident_type or "Cyber Security Incident",
-            "severity": req.severity,
-            "description": req.description or "Automated incident report generated from Tempris CTEM platform.",
-            "affected_systems": req.affected_systems or "See scanner findings below.",
-            "discovery_time": _iso_z(now),
+            "external_event_id": incident.external_event_id,
+            "source": incident.source,
+            "title": incident.title,
+            "severity": incident.severity,
+            "status": incident.status,
+            "description": incident.summary,
+            "discovery_time": _iso_z(incident.discovered_at),
+            "observed_impact": incident.observed_impact,
         },
-
-        "threat_landscape": {
-            "tempris_exposure_score": round(tes_score, 2) if tes_score is not None else None,
-            "risk_band": ("Critical" if tes_score >= 8.0 else "High" if tes_score >= 6.0 else "Medium" if tes_score >= 4.0 else "Low") if tes_score is not None else "Unavailable",
-            "critical_cves_tracked": p0_count,
-            "ransomware_linked_cves": ransomware_count,
-            "total_kev_findings": kev_stats["total_findings"],
-        },
-
-        "scanner_findings": scanner_findings[:5],
-
-        "red_team_assessment": strike_summary,
-
-        "immediate_actions": [
-            "CSRO has been notified via TACF audit trail.",
-            "Incident response team activated per MAS-TRM-12.1.1.",
-            "All critical findings are being triaged via SPECTRUM EDIP engine.",
-            f"Current TES score: {tes_score:.2f} ({('Critical' if tes_score >= 8.0 else 'High' if tes_score >= 6.0 else 'Medium')}).",
-        ],
-
-        "regulatory_references": [
-            "MAS TRM 12.1.5 — Notify MAS within 1 hour of discovering a relevant incident.",
-            "MAS TRM 12.1.1 — Incident management and response procedures.",
-            "PDPA 26D — Notify PDPC within 3 calendar days of a notifiable data breach.",
-        ],
+        "affected_asset_ids": sorted(affected_ids),
+        "confirmed_related_exposures": list(confirmed_by_finding.values()),
+        "confirmed_critical_count": sum(
+            (row.get("priority") or "").upper() == "P0"
+            for row in confirmed_by_finding.values()
+        ),
+        "confirmed_ransomware_linked_count": sum(
+            bool(row.get("ransomware_linked")) for row in confirmed_by_finding.values()
+        ),
+        "observed_impact": incident.observed_impact,
+        "response_actions": incident.response_actions or [],
+        "evidence_references": incident.evidence_references or [],
+        "scope_note": "Only the recorded incident and related confirmed customer exposures are included; global intelligence is excluded.",
     }
-
     db.add(IncidentReport(
         report_id=report_id,
         tenant_id=tenant_id,
         report_type=report["type"],
         status=report["status"],
-        severity=req.severity,
+        severity=incident.severity,
         generated_by=user_email,
         generated_at=now,
         notification_deadline=deadline,
         payload=report,
     ))
-    try:
-        append_to_audit_log_db(db, AuditEntry(
-            user=user_email, action="MAS_TRM_INCIDENT_REPORT_GENERATED", module="STANDARD",
-            detail=f"Incident report {report_id} generated and stored. Severity: {req.severity}. TES: {tes_score:.2f}. Deadline: {_iso_z(deadline)}",
-        ), commit=False)
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise HTTPException(status_code=500, detail="Incident report generation failed")
-
+    record_operational_event(
+        db, tenant_id=tenant_id, event_type="incident.notification_draft_generated",
+        resource_type="incident", resource_id=incident.id, source_module="STANDARD",
+        actor_id=user_email, metadata={"report_id": report_id},
+    )
+    append_to_audit_log_db(db, AuditEntry(
+        user=user_email,
+        action="MAS_TRM_INCIDENT_REPORT_GENERATED",
+        module="STANDARD",
+        detail=f"Generated MAS draft {report_id} from incident {incident.id}",
+    ), commit=False)
+    db.commit()
     return report

@@ -1,0 +1,487 @@
+schema_version: "1.0"
+canonical_scope_version: "canonical-customer-exposure-v1"
+source_root: "C:/Tempris"
+definitions:
+  confirmed_customer_exposure: >-
+    An open finding with a confirmed AssetExposure relationship to an active
+    same-tenant asset, excluding reference-only and not-applicable findings.
+  finding_tes: "Server-generated contextual exposure score for one finding."
+  tenant_tes: >-
+    Mean of available finding TES values for distinct open confirmed customer
+    exposures. Unscoreable confirmed findings are excluded from the denominator.
+  sss: "Internal non-CVE base severity score, 0-10; full acronym expansion not verified."
+
+modules:
+  synthesis:
+    display_name: "SYNTHESIS"
+    purpose: "Prioritized tenant exposure overview and comparable posture snapshots."
+    classification: commercial_module
+    frontend_routes: ["/"]
+    api_routes: ["GET /api/synthesis/dashboard", "POST /api/synthesis/tes-snapshot"]
+    models: [Finding, Asset, AssetExposure, PostureSnapshot]
+    upstream_sources: [canonical_customer_posture, module_health]
+    downstream_consumers: [CISO, SPOTLIGHT]
+    metrics:
+      - id: SYN-TES-001
+        label: "Tenant TES"
+        definition: "Mean server score for scoreable open confirmed exposures."
+        subject: tenant
+        scope: confirmed_open_exposure
+        time_semantics: current
+        source:
+          frontend: "app/frontend compiled route /"
+          api: "GET /api/synthesis/dashboard"
+          service: "services.customer_posture.build_customer_posture"
+          model_fields: ["Finding.raw_inputs", "AssetExposure.status", "Asset.status"]
+        inclusion_rules: [confirmed_asset_exposure, same_tenant, active_asset, open_finding]
+        exclusion_rules: [reference, not_applicable, resolved, unconfirmed, unscoreable_from_denominator]
+        customer_safe_interpretation: "Current contextual exposure score for confirmed tenant findings."
+        incorrect_interpretations: [CVSS, GRC_AI_system_score, catalogue_average]
+      - id: SYN-TRD-002
+        label: "TES trend"
+        definition: "Difference from a comparable canonical snapshot."
+        subject: tenant
+        scope: comparable_posture_snapshots
+        time_semantics: current_vs_historical
+        source: {api: "GET /api/synthesis/dashboard", service: "routers.synthesis.dashboard", model_fields: ["PostureSnapshot.scope_version", "PostureSnapshot.aggregate_tenant_tes"]}
+        inclusion_rules: [matching_scope_version]
+        exclusion_rules: [legacy_incompatible_snapshot]
+        customer_safe_interpretation: "Directional comparison under the same scope."
+        incorrect_interpretations: [forecast]
+    actions:
+      - id: SYN-ACT-001
+        label: "Capture posture snapshot"
+        required_roles: [authenticated_entitled_user]
+        endpoint: "POST /api/synthesis/tes-snapshot"
+        side_effects: [creates_PostureSnapshot]
+        audit_events: []
+        reversible: false
+
+  spectrum:
+    display_name: "SPECTRUM"
+    purpose: "Tenant Finding Registry with explicit evidence scope and server EDIP decisions."
+    classification: commercial_module
+    frontend_routes: ["/spectrum"]
+    api_routes: ["GET /api/spectrum/findings", "POST /api/spectrum/findings/{finding_id}/edip", "POST /api/spectrum/calculate-tes"]
+    models: [Finding, AssetExposure, EdipDecision, FindingEvidence, FindingStatusHistory]
+    upstream_sources: [intake, SCOUT, VDP, reference_imports]
+    downstream_consumers: [CISO, SYNTHESIS, STANDARD, SPOTLIGHT, CLIENT_REPORTS]
+    metrics:
+      - id: SPC-TES-001
+        label: "Finding TES"
+        definition: "Server contextual exposure score for one finding."
+        subject: finding
+        scope: finding
+        time_semantics: current
+        source: {api: "POST /api/spectrum/calculate-tes", service: "services.tes_engine.calculate_finding_tes", model_fields: ["Finding.raw_inputs"]}
+        inclusion_rules: [valid_server_inputs]
+        exclusion_rules: []
+        customer_safe_interpretation: "Finding-level contextual score."
+        incorrect_interpretations: [tenant_TES]
+      - id: SPC-REG-002
+        label: "Finding Registry"
+        definition: "All tenant finding rows, separated by scope/status."
+        subject: finding_collection
+        scope: tenant_registry
+        time_semantics: current
+        source: {api: "GET /api/spectrum/findings", service: "routers.spectrum.list_findings", model_fields: ["Finding.id", "Finding.status"]}
+        inclusion_rules: [same_tenant]
+        exclusion_rules: []
+        customer_safe_interpretation: "Registry volume across lifecycle states."
+        incorrect_interpretations: [confirmed_customer_vulnerabilities]
+    actions:
+      - id: SPC-ACT-001
+        label: "Generate EDIP Decision"
+        required_roles: [authorized_EDIP_role]
+        endpoint: "POST /api/spectrum/findings/{finding_id}/edip"
+        side_effects: [creates_or_updates_ordered_decision, publishes_watch_event]
+        audit_events: [decision.created, decision.updated, decision.overridden]
+        reversible: false
+
+  scout:
+    display_name: "SCOUT"
+    purpose: "Authorized scanning and separately labeled reference intelligence."
+    classification: commercial_module
+    frontend_routes: ["/scout"]
+    api_routes: ["GET /api/scout/stats", "POST /api/scanner/scan", "GET /api/scanner/history", "GET /api/scanner/findings"]
+    models: [ScanJob, ScanFinding, Finding, Asset, AssetExposure]
+    upstream_sources: [Nmap, Nuclei, builtin_TCP, reference_catalogue]
+    downstream_consumers: [Intake_and_Triage, SPECTRUM, CISO]
+    metrics:
+      - id: SCT-REF-001
+        label: "Reference records"
+        definition: "Catalogue/reference records, not customer exposure."
+        subject: global_intelligence
+        scope: reference
+        time_semantics: current
+        source: {api: "GET /api/scout/stats", service: "routers.scout.stats", model_fields: ["Finding.source", "Finding.status"]}
+        inclusion_rules: [reference_classification]
+        exclusion_rules: [confirmed_customer_exposure]
+        customer_safe_interpretation: "Research catalogue volume."
+        incorrect_interpretations: [customer_vulnerability_count]
+      - id: SCT-RUN-004
+        label: "Scan runs"
+        definition: "Scanner executions including zero-result and failures."
+        subject: scan_job
+        scope: tenant
+        time_semantics: historical
+        source: {api: "GET /api/scanner/history", service: "routers.scanner.scan_history", model_fields: ["ScanJob.status", "ScanJob.started_at", "ScanJob.completed_at"]}
+        inclusion_rules: [same_tenant]
+        exclusion_rules: []
+        customer_safe_interpretation: "Recorded scanner jobs."
+        incorrect_interpretations: [attacks_blocked]
+    actions:
+      - id: SCT-ACT-001
+        label: "Run SCOUT Scan"
+        required_roles: [authorized_scanner_role]
+        endpoint: "POST /api/scanner/scan"
+        side_effects: [creates_ScanJob, creates_or_updates_ScanFinding, may_normalize_Finding, may_confirm_AssetExposure]
+        audit_events: [scan.started, scan.completed, scan.failed, scan.zero_results, scanfinding.created, scanfinding.normalized]
+        reversible: false
+
+  strike:
+    display_name: "STRIKE"
+    purpose: "Authorized security validation with evidence-explicit outcomes."
+    classification: commercial_module
+    frontend_routes: ["/strike"]
+    api_routes: ["GET /api/strike/matrix", "POST /api/strike/authorizations", "POST /api/strike/simulations"]
+    models: [StrikeAuthorization, StrikeSimulation]
+    upstream_sources: [signed_authorization, authorized_test_results]
+    downstream_consumers: [CISO, SPOTLIGHT]
+    metrics:
+      - id: STR-EXP-001
+        label: "Exploitable observed"
+        definition: "An authorized check recorded evidence of exploitable exposure."
+        subject: validation_result
+        scope: tenant_simulation
+        time_semantics: historical
+        source: {api: "GET /api/strike/matrix", service: "routers.strike", model_fields: ["StrikeSimulation.results"]}
+        inclusion_rules: [outcome_EXPLOITABLE_OBSERVED]
+        exclusion_rules: [no_exposure, untested, error]
+        customer_safe_interpretation: "Observed validation result."
+        incorrect_interpretations: [breach]
+      - id: STR-DBV-003
+        label: "Defensive block verified"
+        definition: "Executed test reached a named control and recorded prevention evidence."
+        subject: validation_result
+        scope: tenant_simulation
+        time_semantics: historical
+        source: {api: "GET /api/strike/matrix", service: "routers.strike._normalise_result", model_fields: ["StrikeSimulation.results"]}
+        inclusion_rules: [control_id_present, prevention_evidence_present]
+        exclusion_rules: [mere_absence_of_exploit]
+        customer_safe_interpretation: "Evidence-backed defensive prevention."
+        incorrect_interpretations: [no_exposure_observed]
+    actions:
+      - id: STR-ACT-001
+        label: "Generate STRIKE Simulation"
+        required_roles: [Admin, Superadmin]
+        endpoint: "POST /api/strike/simulations"
+        side_effects: [creates_tenant_StrikeSimulation]
+        audit_events: []
+        reversible: false
+
+  standard:
+    display_name: "STANDARD"
+    purpose: "Security/regulatory control assessment, evidence, and incident notification drafts."
+    classification: commercial_module
+    frontend_routes: ["/standard"]
+    api_routes: ["GET /api/standard/frameworks", "PUT /api/standard/frameworks/{framework_id}/controls/{control_id}", "POST /api/standard/mas-trm/incident-report"]
+    models: [ControlStatus, ControlEvidence, Incident, IncidentReport]
+    upstream_sources: [manual_assessment, evidence, canonical_customer_posture, incident_API]
+    downstream_consumers: [CISO, SPOTLIGHT, CLIENT_REPORTS]
+    metrics:
+      - id: STD-COV-001
+        label: "Assessment coverage"
+        definition: "Assessed controls divided by total framework controls."
+        subject: compliance_framework
+        scope: tenant
+        time_semantics: current
+        source: {api: "GET /api/standard/frameworks", service: "routers.standard.list_frameworks", model_fields: ["ControlStatus.status"]}
+        inclusion_rules: [all_framework_controls_in_denominator]
+        exclusion_rules: []
+        customer_safe_interpretation: "Assessment completeness."
+        incorrect_interpretations: [compliance_score]
+      - id: STD-CMP-002
+        label: "Compliance among assessed"
+        definition: "Compliant plus half-weight partial divided by assessed controls; N/A when none."
+        subject: compliance_framework
+        scope: assessed_controls
+        time_semantics: current
+        source: {api: "GET /api/standard/frameworks", service: "routers.standard.list_frameworks", model_fields: ["ControlStatus.status"]}
+        inclusion_rules: [assessed_controls]
+        exclusion_rules: [not_assessed]
+        customer_safe_interpretation: "Result within the assessed subset."
+        incorrect_interpretations: [full_framework_certification]
+    actions:
+      - id: STD-ACT-001
+        label: "Generate MAS Incident Draft"
+        required_roles: [authorized_STANDARD_role]
+        endpoint: "POST /api/standard/mas-trm/incident-report"
+        side_effects: [creates_IncidentReport_from_real_Incident]
+        audit_events: [incident.notification_draft_generated]
+        reversible: false
+
+  grc:
+    display_name: "GRC"
+    purpose: "AI-governance state, policy, evidence, and lifecycle management."
+    classification: commercial_module
+    frontend_routes: ["/grc"]
+    api_routes: ["GET /api/grc/state", "GET /api/grc/tes-score", "GET/POST /api/grc/policies", "PATCH /api/grc/policies/{policy_id}/archive", "DELETE /api/grc/policies/{policy_id}"]
+    models: [GrcState, GrcSignoff, GrcPolicyDocument]
+    upstream_sources: [governance_assessment, policy_content, evidence]
+    downstream_consumers: [SPOTLIGHT]
+    metrics:
+      - id: GRC-RSK-001
+        label: "AI-system risk score"
+        definition: "Final server score for the recorded AI-system governance state."
+        subject: AI_system
+        scope: AI_SYSTEM
+        time_semantics: current
+        source: {api: "GET /api/grc/tes-score", service: "routers.grc._public_ai_system_risk", model_fields: ["GrcState.toggles", "GrcState.sop_state"]}
+        inclusion_rules: [recorded_GRC_state]
+        exclusion_rules: [raw_factors_from_client_contract]
+        customer_safe_interpretation: "AI-system governance risk indicator."
+        incorrect_interpretations: [tenant_TES]
+    actions:
+      - id: GRC-ACT-001
+        label: "Policy lifecycle"
+        required_roles: [Manager, Admin, Superadmin]
+        endpoint: "POST/PATCH/DELETE /api/grc/policies"
+        side_effects: [version_archive_supersede_or_guarded_delete]
+        audit_events: [policy.created, policy.archived, policy.superseded, policy.deleted]
+        reversible: conditional
+
+  assets:
+    display_name: "ASSETS"
+    purpose: "Tenant asset inventory and lifecycle."
+    classification: commercial_module
+    frontend_routes: ["/assets"]
+    api_routes: ["GET/POST /api/assets", "GET /api/assets/stats", "PUT/DELETE /api/assets/{asset_id}"]
+    models: [Asset]
+    upstream_sources: [manual_inventory]
+    downstream_consumers: [SCOUT, Intake_and_Triage, CISO, CLIENT_REPORTS]
+    metrics:
+      - id: AST-ACT-002
+        label: "Active assets"
+        definition: "Tenant assets not decommissioned."
+        subject: asset_inventory
+        scope: tenant
+        time_semantics: current
+        source: {api: "GET /api/assets/stats", service: "routers.assets.get_asset_stats", model_fields: ["Asset.status"]}
+        inclusion_rules: [same_tenant, status_not_decommissioned]
+        exclusion_rules: [decommissioned]
+        customer_safe_interpretation: "Assets eligible for current posture."
+        incorrect_interpretations: [scanned_assets]
+    actions: []
+
+  spotlight:
+    display_name: "SPOTLIGHT"
+    purpose: "Executive narrative generated from authoritative tenant facts."
+    classification: commercial_module
+    frontend_routes: ["/spotlight"]
+    api_routes: ["POST /api/spotlight/generate", "GET /api/spotlight/history"]
+    models: [SpotlightReport]
+    upstream_sources: [canonical_customer_posture, STANDARD, STRIKE, safe_RAG]
+    downstream_consumers: [executive_user]
+    metrics:
+      - id: SPT-HIS-001
+        label: "Historical report TES"
+        definition: "TES metadata captured when a SPOTLIGHT report was generated."
+        subject: historical_report
+        scope: tenant_report_snapshot
+        time_semantics: historical
+        source: {api: "GET /api/spotlight/history", service: "index.get_spotlight_history", model_fields: ["SpotlightReport.tes_score", "SpotlightReport.generated_at"]}
+        inclusion_rules: [same_tenant]
+        exclusion_rules: []
+        customer_safe_interpretation: "Score metadata at generation time."
+        incorrect_interpretations: [current_tenant_TES]
+    actions:
+      - id: SPT-ACT-001
+        label: "Generate SPOTLIGHT Brief"
+        required_roles: [authenticated_entitled_user]
+        endpoint: "POST /api/spotlight/generate"
+        side_effects: [creates_SpotlightReport]
+        audit_events: [SPOTLIGHT_REPORT_GENERATED]
+        reversible: false
+
+  ciso:
+    display_name: "CISO"
+    purpose: "Authoritative read-only executive customer posture."
+    classification: commercial_module
+    frontend_routes: ["/ciso"]
+    api_routes: ["GET /api/ciso/summary", "GET /api/ciso/findings/{finding_id}"]
+    models: [Finding, Asset, AssetExposure, PostureSnapshot, ControlStatus, IncidentReport, GeneratedReport]
+    upstream_sources: [canonical_customer_posture, STANDARD, CLIENT_REPORTS]
+    downstream_consumers: [executives]
+    metrics:
+      - id: CIS-OPN-004
+        label: "Confirmed vulnerabilities"
+        definition: "Distinct open confirmed customer-exposure findings."
+        subject: finding_collection
+        scope: confirmed_open_exposure
+        time_semantics: current
+        source: {api: "GET /api/ciso/summary", service: "services.customer_posture.build_customer_posture", model_fields: ["AssetExposure.status", "Finding.status", "Asset.status"]}
+        inclusion_rules: [confirmed_relationship, same_tenant, active_asset, open]
+        exclusion_rules: [reference, not_applicable, resolved, legacy_unverified]
+        customer_safe_interpretation: "Unique evidenced findings affecting active tenant assets."
+        incorrect_interpretations: [affected_asset_links, catalogue_total]
+      - id: CIS-LNK-005
+        label: "Affected asset links"
+        definition: "Confirmed finding/asset relationship occurrences."
+        subject: exposure_relationship
+        scope: confirmed_open_exposure
+        time_semantics: current
+        source: {api: "GET /api/ciso/summary", service: "services.customer_posture.canonical_exposure_rows", model_fields: ["AssetExposure.finding_id", "AssetExposure.asset_id"]}
+        inclusion_rules: [canonical_relationship]
+        exclusion_rules: [legacy_pointer]
+        customer_safe_interpretation: "Many-to-many exposure occurrences."
+        incorrect_interpretations: [unique_findings]
+    actions: []
+
+  client_reports:
+    display_name: "CLIENT REPORTS"
+    purpose: "Immutable current-state report artifacts and lifecycle."
+    classification: platform_utility
+    frontend_routes: ["/reports"]
+    api_routes: ["POST /api/reports/poc/generate", "GET /api/reports", "POST /api/reports/{report_id}/regenerate", "PATCH /api/reports/{report_id}/archive", "DELETE /api/reports/{report_id}"]
+    models: [GeneratedReport, Finding, AssetExposure]
+    upstream_sources: [canonical_customer_posture, STANDARD_evidence]
+    downstream_consumers: [customers, CISO]
+    metrics:
+      - id: RPT-SRC-001
+        label: "Included findings"
+        definition: "Distinct canonical open findings captured at generation."
+        subject: report_snapshot
+        scope: confirmed_open_exposure
+        time_semantics: immutable_snapshot
+        source: {api: "GET /api/reports/{report_id}", service: "services.reporting_engine.generate_poc_report_pipeline", model_fields: ["GeneratedReport.source_finding_ids"]}
+        inclusion_rules: [canonical_open_exposure_at_generation]
+        exclusion_rules: [legacy, reference, not_applicable, unresolved_suggestion]
+        customer_safe_interpretation: "Current-state findings when report was generated."
+        incorrect_interpretations: [historical_period_reconstruction]
+    actions:
+      - id: RPT-ACT-001
+        label: "Generate immutable report package"
+        required_roles: [authorized_report_role]
+        endpoint: "POST /api/reports/poc/generate"
+        side_effects: [creates_artifacts, creates_GeneratedReport, stores_hash]
+        audit_events: [report.generated]
+        reversible: false
+
+  tenant_access:
+    display_name: "Tenant & Module Administration"
+    purpose: "Superadmin entitlement configuration without impersonation."
+    classification: administrative_capability
+    frontend_routes: ["/packages"]
+    api_routes: ["GET /api/tenants", "GET /api/tenants/{tenant_id}", "PUT /api/tenants/{tenant_id}/entitlements"]
+    models: [TenantConfiguration, Asset, Finding, AssetExposure]
+    upstream_sources: [tenant_registry, packages, canonical_customer_posture]
+    downstream_consumers: [backend_entitlement_enforcement]
+    metrics:
+      - id: TNA-MOD-001
+        label: "Enabled modules"
+        definition: "Effective commercial modules from package plus overrides."
+        subject: tenant_entitlement
+        scope: selected_tenant
+        time_semantics: current
+        source: {api: "GET /api/tenants/{tenant_id}", service: "services.entitlements", model_fields: ["TenantConfiguration.package_code", "TenantConfiguration.module_overrides"]}
+        inclusion_rules: [commercial_modules]
+        exclusion_rules: [utilities_not_licensed_as_modules]
+        customer_safe_interpretation: "Backend-enforced module access."
+        incorrect_interpretations: [tenant_impersonation]
+    actions:
+      - id: TNA-ACT-001
+        label: "Save access policy"
+        required_roles: [Superadmin]
+        endpoint: "PUT /api/tenants/{tenant_id}/entitlements"
+        side_effects: [updates_package_and_overrides, increments_configuration_version]
+        audit_events: [tenant_access_policy_updated]
+        reversible: true
+
+  intake_triage:
+    display_name: "INTAKE & TRIAGE"
+    purpose: "Create registry findings and classify/confirm asset exposure."
+    classification: platform_utility
+    frontend_routes: ["/sss-intake"]
+    api_routes: ["POST /api/edip/intake/sss", "POST /api/edip/intake/blflaw", "GET /api/workflow/overview", "PUT /api/workflow/findings/{finding_id}/assets", "POST /api/workflow/findings/{finding_id}/resolve", "POST /api/workflow/findings/{finding_id}/reopen"]
+    models: [Finding, AssetExposure, FindingStatusHistory]
+    upstream_sources: [manual_forms, Microsoft_Graph, AEV, SCOUT, VDP]
+    downstream_consumers: [SPECTRUM, CISO, SYNTHESIS]
+    metrics:
+      - id: INQ-CLS-002
+        label: "Needs classification"
+        definition: "Open unconfirmed review candidates selected by canonical service."
+        subject: finding_collection
+        scope: tenant_review_queue
+        time_semantics: current
+        source: {api: "GET /api/workflow/overview", service: "services.customer_posture.build_customer_posture", model_fields: ["Finding.status", "ScanFinding.normalized_finding_id"]}
+        inclusion_rules: [suggested_or_scanner_candidate_or_non_catalogue_intake]
+        exclusion_rules: [confirmed, reference, not_applicable, resolved]
+        customer_safe_interpretation: "Records requiring analyst disposition."
+        incorrect_interpretations: [confirmed_exposure, work_in_progress]
+    actions:
+      - id: INQ-ACT-001
+        label: "Assign Assets"
+        required_roles: [Analyst, Admin, Superadmin]
+        endpoint: "PUT /api/workflow/findings/{finding_id}/assets"
+        side_effects: [creates_or_updates_confirmed_AssetExposure, publishes_watch_event, recalculates_posture]
+        audit_events: [finding.asset_confirmed]
+        reversible: true
+
+  vdp_queue:
+    display_name: "VDP QUEUE"
+    purpose: "Restricted vulnerability disclosure submission triage."
+    classification: internal_security_operation
+    frontend_routes: ["/vdp-queue"]
+    api_routes: ["GET /api/surge/submissions", "POST /api/surge/submissions/{submission_id}/triage", "DELETE /api/surge/submissions/{submission_id}"]
+    models: [SurgeResearcher, SurgeSubmission, Finding]
+    upstream_sources: [public_VDP_form]
+    downstream_consumers: [SPECTRUM]
+    metrics:
+      - id: VDP-QUE-001
+        label: "Reports"
+        definition: "Restricted queue submissions matching filters."
+        subject: VDP_submission
+        scope: authorized_queue
+        time_semantics: current
+        source: {api: "GET /api/surge/submissions", service: "routers.surge.list_submissions", model_fields: ["SurgeSubmission.status"]}
+        inclusion_rules: [authorized_visibility]
+        exclusion_rules: []
+        customer_safe_interpretation: "Researcher submission queue."
+        incorrect_interpretations: [confirmed_findings]
+    actions: []
+
+  audit_log:
+    display_name: "AUDIT LOG"
+    purpose: "Tenant-scoped hash-chained accountability record."
+    classification: shared_platform_service
+    frontend_routes: ["/audit"]
+    api_routes: ["GET /api/audit/log", "GET /api/audit/verify", "POST /api/audit/log"]
+    models: [AuditLog]
+    upstream_sources: [all_mutating_modules]
+    downstream_consumers: [assurance_users]
+    metrics:
+      - id: AUD-EVT-001
+        label: "Audit entries"
+        definition: "Tenant-scoped append-only human/audit records."
+        subject: audit_record
+        scope: tenant
+        time_semantics: historical
+        source: {api: "GET /api/audit/log", service: "routers.audit", model_fields: ["AuditLog.action", "AuditLog.hash"]}
+        inclusion_rules: [same_tenant, role_visibility]
+        exclusion_rules: []
+        customer_safe_interpretation: "Recorded accountability actions."
+        incorrect_interpretations: [complete_operational_telemetry]
+    actions: []
+
+  speak:
+    display_name: "SPEAK"
+    purpose: "Conversational explanation over tenant-safe facts and references."
+    classification: shared_platform_service
+    frontend_routes: ["floating_widget"]
+    api_routes: ["UNVERIFIED / PRODUCT CLARIFICATION REQUIRED: direct SPEAK route is defined in app/backend/index.py"]
+    models: [ChatSession, ChatMessage]
+    upstream_sources: [safe_AI_context, RAG]
+    downstream_consumers: [authenticated_user]
+    metrics: []
+    actions: []

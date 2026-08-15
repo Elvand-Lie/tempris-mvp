@@ -12,6 +12,7 @@ from models import (
     Finding,
     GeneratedReport,
     IncidentReport,
+    PostureSnapshot,
     TesSnapshot,
 )
 from routers.audit import AuditEntry, append_to_audit_log_db
@@ -26,6 +27,11 @@ from services.workflow_connections import (
     build_workflow_readiness,
 )
 from services.exposure_links import confirmed_asset_ids_by_finding
+from services.customer_posture import (
+    SCOPE_VERSION,
+    build_customer_posture,
+    canonical_exposure_rows,
+)
 
 router = APIRouter(dependencies=[Depends(require_module("CISO"))])
 EXECUTIVE_ROLES = ('Superadmin', 'Admin')
@@ -78,23 +84,32 @@ def _as_utc(value: datetime | None) -> datetime | None:
 
 
 def _risk_trend(
-    snapshots: list[TesSnapshot],
+    snapshots: list[PostureSnapshot],
     current_findings: int,
     current_critical: int,
 ) -> dict:
-    if not snapshots:
+    comparable = [row for row in snapshots if row.scope_version == SCOPE_VERSION]
+    if len(comparable) < 2:
         return {
-            'status': 'unavailable',
+            'status': 'not_comparable',
+            'comparable_snapshot_count': len(comparable),
             'current_critical': current_critical,
             'current_findings': current_findings,
-            'reason': 'No saved tenant snapshot exists. Current live exposure is not presented as a historical trend.',
+            'reason': 'Two snapshots with the same canonical exposure scope are required.',
         }
+    newest, previous = comparable[0], comparable[1]
+    delta = newest.confirmed_open_exposure_count - previous.confirmed_open_exposure_count
     return {
-        'status': 'unavailable',
-        'legacy_snapshot_count': len(snapshots),
+        'status': 'available',
+        'scope_version': SCOPE_VERSION,
+        'from': previous.confirmed_open_exposure_count,
+        'to': newest.confirmed_open_exposure_count,
+        'delta': delta,
+        'direction': 'improving' if delta < 0 else ('worsening' if delta > 0 else 'unchanged'),
+        'previous_at': previous.captured_at.isoformat() if previous.captured_at else None,
+        'current_at': newest.captured_at.isoformat() if newest.captured_at else None,
         'current_critical': current_critical,
         'current_findings': current_findings,
-        'reason': 'Saved TES snapshots predate evidence-scoped asset-link tracking, so their finding totals are not comparable with this dashboard. Tempris will not label a trend until two evidence-scoped snapshots exist.',
     }
 
 
@@ -216,15 +231,12 @@ def get_ciso_summary(
         Asset.tenant_id == tenant_id,
         Asset.status != 'decommissioned',
     ).all()
-    asset_map = {asset.id: asset for asset in assets}
-    links = confirmed_asset_ids_by_finding(db, tenant_id, asset_map)
-    confirmed_findings = [finding for finding in findings if links.get(finding.id)]
-    open_findings = [finding for finding in confirmed_findings if _is_open(finding)]
-    open_exposures = [
-        (finding, asset_id)
-        for finding in open_findings
-        for asset_id in sorted(links.get(finding.id, set()))
-    ]
+    posture_metrics = build_customer_posture(db, tenant_id)
+    canonical_rows = canonical_exposure_rows(db, tenant_id, open_only=True)
+    confirmed_ids = {finding.id for finding, _, _ in canonical_rows}
+    open_findings = [finding for finding in findings if finding.id in confirmed_ids]
+    confirmed_findings = open_findings
+    open_exposures = [(finding, asset.id) for finding, asset, _ in canonical_rows]
     severities = defaultdict(int)
     for finding in open_findings:
         severities[_severity(finding)] += 1
@@ -245,9 +257,9 @@ def get_ciso_summary(
         posture = 'no_data'
 
     snapshots = (
-        db.query(TesSnapshot)
-        .filter(TesSnapshot.tenant_id == tenant_id)
-        .order_by(TesSnapshot.snapshot_at.desc())
+        db.query(PostureSnapshot)
+        .filter(PostureSnapshot.tenant_id == tenant_id)
+        .order_by(PostureSnapshot.captured_at.desc())
         .limit(2)
         .all()
     )
@@ -292,19 +304,21 @@ def get_ciso_summary(
 
     response = {
         'tenant_id': tenant_id,
-        'metric_scope': 'confirmed_asset_linked_findings',
+        'metric_scope': posture_metrics['scope'],
+        'scope_version': posture_metrics['scope_version'],
+        'as_of': posture_metrics['as_of'],
         'overall_risk_posture': posture,
         'findings': {
             'total': len(confirmed_findings),
             'unresolved': len(open_findings),
             'critical': severities['critical'],
             'high': severities['high'],
-            'recorded_total': len(findings),
+            'recorded_total': posture_metrics['total_stored_finding_count'],
             'confirmed_asset_linked': len(confirmed_findings),
             'confirmed_exposure_occurrences': len(open_exposures),
-            'unlinked_open': sum(
-                1 for finding in findings if _is_open(finding) and not links.get(finding.id)
-            ),
+            'needs_classification': posture_metrics['needs_classification_count'],
+            'reference_intelligence': posture_metrics['reference_intelligence_count'],
+            'legacy_unverified_links': posture_metrics['legacy_unverified_link_count'],
         },
         'risk_trend': _risk_trend(
             snapshots,

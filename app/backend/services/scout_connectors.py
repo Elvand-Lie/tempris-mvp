@@ -40,7 +40,6 @@ def entra_authentication_method_findings(
             "escalated_severity": "HIGH",
             "identity_subject": principal,
             "deprecated_methods": sorted(set(deprecated)),
-            "engine_decision": "PATCH",
         })
     return findings
 
@@ -75,5 +74,4 @@ def aev_verdict_finding(payload: dict) -> dict:
         "evidence_ref": payload["evidence_ref"],
         "revalidate_by": payload["revalidate_by"],
         "validated": True,
-        "engine_decision": "INVESTIGATE",
     }

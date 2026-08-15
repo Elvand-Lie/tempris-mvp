@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from models import Asset, AssetExposure, Finding
 
 
-CONFIRMED_STATUSES = {"confirmed", "accepted"}
+CONFIRMED_STATUSES = {"confirmed"}
 CATALOG_SOURCES = {"kev", "cisa", "nvd", "catalog"}
 TOKEN_STOPWORDS = {
     "and", "the", "for", "with", "from", "that", "this", "server", "service",
@@ -37,23 +37,35 @@ def confirmed_asset_ids_by_finding(
     tenant_id: str,
     assets: dict[str, Asset] | None = None,
 ) -> dict[str, set[str]]:
-    """Return confirmed links, retaining legacy finding.asset_id compatibility."""
+    """Return confirmed relationships only; legacy finding.asset_id never counts."""
     active = assets if assets is not None else active_asset_map(db, tenant_id)
+    valid_findings = {
+        row[0] for row in db.query(Finding.id).filter(Finding.tenant_id == tenant_id).all()
+    }
     links: dict[str, set[str]] = defaultdict(set)
     rows = db.query(AssetExposure).filter(
         AssetExposure.tenant_id == tenant_id,
         AssetExposure.status.in_(CONFIRMED_STATUSES),
     ).all()
     for row in rows:
-        if row.asset_id in active:
+        if row.asset_id in active and row.finding_id in valid_findings:
             links[row.finding_id].add(row.asset_id)
-
-    # Existing deployments stored one link directly on findings. Migration 007
-    # backfills these rows, while this fallback keeps rolling deploys safe.
-    for finding in db.query(Finding).filter(Finding.tenant_id == tenant_id).all():
-        if finding.asset_id in active:
-            links[finding.id].add(finding.asset_id)
     return dict(links)
+
+
+def legacy_unverified_asset_ids_by_finding(
+    db: Session,
+    tenant_id: str,
+    assets: dict[str, Asset] | None = None,
+) -> dict[str, set[str]]:
+    """Expose legacy direct pointers for review without treating them as evidence."""
+    active = assets if assets is not None else active_asset_map(db, tenant_id)
+    confirmed = confirmed_asset_ids_by_finding(db, tenant_id, active)
+    legacy: dict[str, set[str]] = defaultdict(set)
+    for finding in db.query(Finding).filter(Finding.tenant_id == tenant_id).all():
+        if finding.asset_id in active and finding.asset_id not in confirmed.get(finding.id, set()):
+            legacy[finding.id].add(finding.asset_id)
+    return dict(legacy)
 
 
 def exposure_rows_for_finding(db: Session, tenant_id: str, finding_id: str) -> list[AssetExposure]:
@@ -72,6 +84,9 @@ def confirm_finding_assets(
     match_method: str = "manual_confirmation",
 ) -> list[AssetExposure]:
     """Idempotently confirm one finding on one or more active tenant assets."""
+    invalid = [asset.id for asset in assets if asset.tenant_id != finding.tenant_id or asset.status == "decommissioned"]
+    if invalid:
+        raise ValueError("Asset confirmation requires active assets from the finding tenant")
     existing = {
         row.asset_id: row
         for row in exposure_rows_for_finding(db, finding.tenant_id, finding.id)
@@ -127,8 +142,8 @@ def set_finding_assets(
         asset_id for asset_id, row in existing.items()
         if row.status in CONFIRMED_STATUSES
     )
-    if finding.asset_id and finding.asset_id not in before:
-        before.append(finding.asset_id)
+    # A direct legacy pointer is intentionally absent from ``before``.  Selecting
+    # that same asset is a real confirmation transition, not an unchanged state.
     selected = {asset.id: asset for asset in assets}
     after = sorted(selected)
 

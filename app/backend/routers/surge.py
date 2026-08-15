@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from models import Finding, SurgeResearcher, SurgeSubmission
-from routers.audit import AuditEntry, append_to_audit_log, get_client_ip
+from routers.audit import AuditEntry, append_to_audit_log, append_to_audit_log_db, get_client_ip
 from routers.auth import get_auth_context, require_role
 from services.database import get_db
 from services.tes_engine import calculate_sss_tes, priority_from_tes
@@ -88,6 +88,13 @@ def _validated_http_url(value: str | None) -> str | None:
 
 def require_vdp_staff(user=Depends(require_role("Superadmin", "Admin", "Analyst"))):
     """Keep the Tempris-operated VDP queue out of customer tenant accounts."""
+    if get_auth_context(user).tenant_id != VDP_TENANT_ID:
+        raise HTTPException(status_code=403, detail="VDP operations require Tempris security staff")
+    return user
+
+
+def require_vdp_superadmin(user=Depends(require_role("Superadmin"))):
+    """Destructive VDP maintenance is restricted to the platform Superadmin."""
     if get_auth_context(user).tenant_id != VDP_TENANT_ID:
         raise HTTPException(status_code=403, detail="VDP operations require Tempris security staff")
     return user
@@ -259,6 +266,48 @@ def submissions(db: Session = Depends(get_db), user=Depends(require_vdp_staff)):
         row.id: row for row in db.query(SurgeResearcher).filter(SurgeResearcher.id.in_(researcher_ids)).all()
     } if researcher_ids else {}
     return {"data": [_submission_dict(row, researchers.get(row.researcher_id)) for row in rows]}
+
+
+@router.delete("/submissions/{submission_id}")
+def delete_submission(
+    submission_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(require_vdp_superadmin),
+):
+    submission = db.query(SurgeSubmission).filter(SurgeSubmission.id == submission_id).first()
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    if submission.finding_id or submission.status in {"accepted", "paid"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Accepted or paid reports are retained as security evidence",
+        )
+
+    researcher_id = submission.researcher_id
+    previous_status = submission.status
+    db.delete(submission)
+    db.flush()
+    researcher_removed = False
+    if researcher_id and not db.query(SurgeSubmission.id).filter(
+        SurgeSubmission.researcher_id == researcher_id,
+    ).first():
+        researcher = db.query(SurgeResearcher).filter(SurgeResearcher.id == researcher_id).first()
+        if researcher:
+            db.delete(researcher)
+            researcher_removed = True
+    append_to_audit_log_db(db, AuditEntry(
+        user=user.get("sub", "unknown"),
+        action="SURGE_SUBMISSION_DELETED",
+        module="SURGE",
+        detail=f"Deleted unlinked SURGE submission {submission_id}",
+        metadata={
+            "submission_id": submission_id,
+            "previous_status": previous_status,
+            "orphaned_researcher_removed": researcher_removed,
+        },
+    ), commit=False)
+    db.commit()
+    return {"status": "deleted", "submission_id": submission_id}
 
 
 @router.patch("/submissions/{submission_id}/status")

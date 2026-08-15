@@ -15,11 +15,14 @@ from typing import Optional
 from uuid import uuid4
 from services.database import get_db
 from services.entitlements import require_module
-from models import GrcState, GrcSignoff, GrcPolicyDocument, ControlEvidence
+from models import GrcState, GrcSignoff, GrcPolicyDocument, ControlEvidence, GeneratedReport
 from routers.audit import append_to_audit_log, AuditEntry
 from routers.auth import get_current_user, require_role, get_auth_context, scoped_evidence_query, EvidencePermission
+from services.operational_events import record_operational_event
 import os
+import json
 import re
+from datetime import datetime, timezone
 import uuid
 import unicodedata
 import urllib.parse
@@ -359,6 +362,30 @@ def _calc_composite_tes(toggles: dict) -> dict:
     }
 
 
+def _public_ai_system_risk(toggles: dict) -> dict:
+    """Customer-safe presentation contract; never expose scoring internals."""
+    normalized = _normalize_toggles(toggles)
+    internal = _calc_composite_tes(normalized)
+    drivers = []
+    if not all(normalized.get("agm", [])):
+        drivers.append("Governance controls incomplete")
+    if not all(normalized.get("drf", [])[:2]) or any(normalized.get("drf", [])[2:]):
+        drivers.append("Data readiness or bias controls require attention")
+    if not all(normalized.get("tef", [])):
+        drivers.append("Third-party dependency risk present")
+    if not drivers:
+        drivers.append("Recorded governance controls are complete")
+    return {
+        "score": round(float(internal["score"]), 1),
+        "band": internal["band"],
+        "direction": None,
+        "drivers": drivers,
+        "scope": "AI_SYSTEM",
+        "subject": "AI-powered credit-scoring system",
+        "as_of": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 # Ã¢â€â‚¬Ã¢â€â‚¬ Request Models Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 class GrcStateRequest(BaseModel):
@@ -388,13 +415,13 @@ def get_grc_state(
     sop_state = _effective_sop_state(db, tenant_id)
     if state:
         return {
-            "toggles": _normalize_toggles(state.toggles),
+            "governance_flags_recorded": bool(state.toggles),
             "sop_state": sop_state,
             "updated_by": state.updated_by,
             "updated_at": state.updated_at.isoformat() if state.updated_at else None,
         }
     return {
-        "toggles": _normalize_toggles(None),
+        "governance_flags_recorded": False,
         "sop_state": sop_state,
         "updated_by": None,
         "updated_at": None,
@@ -449,23 +476,23 @@ def save_grc_state(
     db.refresh(state)
     
     # Calculate TES server-side from validated toggles
-    tes = _calc_composite_tes(validated_toggles)
+    risk_score = _public_ai_system_risk(validated_toggles)
     
     append_to_audit_log(AuditEntry(
         user=user.get("sub", "unknown"),
         action="GRC_STATE_UPDATED",
         module="GRC",
-        detail=f"GRC state saved. Composite TES: {tes['score']} ({tes['band']}). AGM={tes['agm']} DRF={tes['drf']} TEF={tes['tef']}"
+        detail=f"GRC state saved. AI-system risk score: {risk_score['score']} ({risk_score['band']})."
     ))
     
-    return {"status": "saved", "id": state.id, "tes": tes}
+    return {"status": "saved", "id": state.id, "risk_score": risk_score}
 
 @router.get("/tes-score")
 def get_tes_score(
     db: Session = Depends(get_db),
     user = Depends(get_current_user),
 ):
-    """Calculate composite TES from saved toggles."""
+    """Compatibility route returning the safe AI-system risk presentation."""
     tenant_id = _verified_tenant_id(user)
     state = (
         db.query(GrcState)
@@ -474,12 +501,12 @@ def get_tes_score(
         .first()
     )
     toggles = _normalize_toggles(state.toggles if state else None)
-    return _calc_composite_tes(toggles)
+    return _public_ai_system_risk(toggles)
 
 @router.get("/controls")
 def get_grc_controls(user = Depends(get_current_user)):
     """Return the ISO 42001 control definitions."""
-    return GRC_CONTROLS
+    return [{key: value for key, value in control.items() if key != "tes_modifier"} for control in GRC_CONTROLS]
 
 @router.post("/signoff/{control_id}")
 def record_signoff(
@@ -547,7 +574,6 @@ def get_gap_analysis(
             "domain": ctrl["domain"],
             "title": ctrl["title"],
             "sg_ref": ctrl["sg_ref"],
-            "tes_modifier": ctrl["tes_modifier"],
             "pic": s.get("pic", ""),
             "status": status,
         })
@@ -613,7 +639,7 @@ AI_RISK_REGISTER = [
      "likelihood": "Medium", "impact": "Medium", "mitigation": "Offline fallback engine, no training data shared",
      "residual_risk": "Low", "controls": ["A.10.3"]},
     {"risk_id": "AIR-005", "category": "Bias", "description": "AI produces biased vulnerability assessments",
-     "likelihood": "Low", "impact": "Medium", "mitigation": "CISA KEV data is objective/factual, DRF modifier tracks bias",
+     "likelihood": "Low", "impact": "Medium", "mitigation": "Documented data-quality controls and human review",
      "residual_risk": "Low", "controls": ["A.5.2", "A.7.4"]},
 ]
 
@@ -764,6 +790,10 @@ def _policy_row_to_dict(row: GrcPolicyDocument) -> dict:
         "review_cycle": row.review_cycle,
         "available": True,
         "source": "custom",
+        "archived": row.archived_at is not None,
+        "archived_at": row.archived_at.isoformat() if row.archived_at else None,
+        "supersedes_id": row.supersedes_id,
+        "superseded_by_id": row.superseded_by_id,
         "size_bytes": len((row.content or "").encode("utf-8")),
     }
 
@@ -809,6 +839,16 @@ class PolicyCreate(BaseModel):
     content: str = ""
 
 
+class PolicyArchiveRequest(BaseModel):
+    archived: bool = True
+
+
+class PolicySupersedeRequest(BaseModel):
+    version: str
+    content: str
+    title: str | None = None
+
+
 @router.post("/policies")
 def create_policy(payload: PolicyCreate, db: Session = Depends(get_db), user=Depends(require_role("Superadmin", "Admin"))):
     """Create a custom policy document in the GRC library."""
@@ -839,6 +879,11 @@ def create_policy(payload: PolicyCreate, db: Session = Depends(get_db), user=Dep
         created_by=user.get("sub", "unknown"),
     )
     db.add(row)
+    record_operational_event(
+        db, tenant_id=tenant_id, event_type="policy.created",
+        resource_type="grc_policy", resource_id=row.id, source_module="GRC",
+        actor_id=user.get("sub", "unknown"), metadata={"version": row.version},
+    )
     db.commit()
     db.refresh(row)
 
@@ -950,6 +995,132 @@ def update_policy(policy_id: str, payload: PolicyUpdate, db: Session = Depends(g
     ))
 
     return {"message": "Policy updated successfully"}
+
+
+def _custom_policy_or_404(db: Session, tenant_id: str, policy_id: str) -> GrcPolicyDocument:
+    if policy_id in POLICY_REGISTRY:
+        raise HTTPException(status_code=409, detail="Bundled policies are immutable and cannot be deleted")
+    row = db.query(GrcPolicyDocument).filter(
+        GrcPolicyDocument.id == policy_id,
+        GrcPolicyDocument.tenant_id == tenant_id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    return row
+
+
+def _policy_is_referenced(db: Session, row: GrcPolicyDocument) -> bool:
+    if db.query(GrcPolicyDocument).filter(
+        GrcPolicyDocument.tenant_id == row.tenant_id,
+        GrcPolicyDocument.id != row.id,
+        ((GrcPolicyDocument.supersedes_id == row.id) | (GrcPolicyDocument.superseded_by_id == row.id)),
+    ).first():
+        return True
+    reports = db.query(GeneratedReport).filter(GeneratedReport.tenant_id == row.tenant_id).all()
+    return any(row.id in json.dumps(report.framework_configuration or {}, sort_keys=True) for report in reports)
+
+
+@router.patch("/policies/{policy_id}/archive")
+def set_policy_archive(
+    policy_id: str,
+    payload: PolicyArchiveRequest,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("Superadmin", "Admin")),
+):
+    tenant_id = _verified_tenant_id(user)
+    row = _custom_policy_or_404(db, tenant_id, policy_id)
+    actor = user.get("sub", "unknown")
+    row.archived_at = datetime.now(timezone.utc) if payload.archived else None
+    row.archived_by = actor if payload.archived else None
+    row.status = "Archived" if payload.archived else "Active"
+    event_type = "policy.archived" if payload.archived else "policy.restored"
+    record_operational_event(
+        db, tenant_id=tenant_id, event_type=event_type,
+        resource_type="grc_policy", resource_id=row.id, source_module="GRC", actor_id=actor,
+    )
+    db.commit()
+    append_to_audit_log(AuditEntry(
+        user=actor, action="POLICY_ARCHIVED" if payload.archived else "POLICY_RESTORED",
+        module="GRC", detail=f"{'Archived' if payload.archived else 'Restored'} custom policy {row.id}",
+    ))
+    return _policy_row_to_dict(row)
+
+
+@router.post("/policies/{policy_id}/supersede")
+def supersede_policy(
+    policy_id: str,
+    payload: PolicySupersedeRequest,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("Superadmin", "Admin")),
+):
+    tenant_id = _verified_tenant_id(user)
+    old = _custom_policy_or_404(db, tenant_id, policy_id)
+    if old.superseded_by_id:
+        raise HTTPException(status_code=409, detail="Policy has already been superseded")
+    if not payload.version.strip() or len(payload.content) > MAX_POLICY_SIZE:
+        raise HTTPException(status_code=422, detail="A version and valid policy content are required")
+    new_id = f"{old.id[:60]}-v-{uuid4().hex[:8]}"
+    actor = user.get("sub", "unknown")
+    new = GrcPolicyDocument(
+        id=new_id, tenant_id=tenant_id, title=(payload.title or old.title).strip(),
+        category=old.category, version=payload.version.strip(), status="Active",
+        owner=old.owner, review_cycle=old.review_cycle, content=payload.content,
+        created_by=actor, supersedes_id=old.id,
+    )
+    old.status = "Superseded"
+    old.superseded_by_id = new.id
+    old.archived_at = datetime.now(timezone.utc)
+    old.archived_by = actor
+    db.add(new)
+    record_operational_event(
+        db, tenant_id=tenant_id, event_type="policy.superseded",
+        resource_type="grc_policy", resource_id=old.id, source_module="GRC", actor_id=actor,
+        metadata={"replacement_policy_id": new.id, "version": new.version},
+    )
+    db.commit()
+    append_to_audit_log(AuditEntry(
+        user=actor, action="POLICY_SUPERSEDED", module="GRC",
+        detail=f"Superseded custom policy {old.id} with {new.id}",
+    ))
+    return {"superseded": _policy_row_to_dict(old), "replacement": _policy_row_to_dict(new)}
+
+
+@router.delete("/policies/{policy_id}")
+def delete_policy(
+    policy_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("Superadmin")),
+):
+    tenant_id = _verified_tenant_id(user)
+    row = _custom_policy_or_404(db, tenant_id, policy_id)
+    actor = user.get("sub", "unknown")
+    if _policy_is_referenced(db, row):
+        row.archived_at = datetime.now(timezone.utc)
+        row.archived_by = actor
+        row.status = "Archived"
+        record_operational_event(
+            db, tenant_id=tenant_id, event_type="policy.archived",
+            resource_type="grc_policy", resource_id=row.id, source_module="GRC", actor_id=actor,
+            metadata={"reason": "referenced_policy_delete_requested"},
+        )
+        db.commit()
+        append_to_audit_log(AuditEntry(
+            user=actor, action="POLICY_ARCHIVED", module="GRC",
+            detail=f"Archived referenced custom policy {row.id}; hard deletion was prevented",
+        ))
+        return {"status": "archived", "reason": "Policy is referenced and cannot be hard-deleted"}
+    deleted_id = row.id
+    record_operational_event(
+        db, tenant_id=tenant_id, event_type="policy.deleted",
+        resource_type="grc_policy", resource_id=row.id, source_module="GRC", actor_id=actor,
+    )
+    db.delete(row)
+    db.commit()
+    append_to_audit_log(AuditEntry(
+        user=actor, action="POLICY_DELETED", module="GRC",
+        detail=f"Deleted unreferenced custom policy {deleted_id}",
+    ))
+    return {"status": "deleted", "policy_id": deleted_id}
 
 
 # Ã¢â€â‚¬Ã¢â€â‚¬ Evidence Upload / Download / Delete Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬

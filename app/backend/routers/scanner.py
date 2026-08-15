@@ -6,7 +6,7 @@ Falls back to built-in TCP port scanner if Nuclei is unavailable.
 from fastapi import APIRouter, Request, Depends, HTTPException
 from pydantic import BaseModel
 from routers.audit import append_to_audit_log, AuditEntry
-from routers.auth import get_current_user, require_role
+from routers.auth import get_auth_context, get_current_user, require_role
 import asyncio
 import subprocess
 import json
@@ -14,10 +14,13 @@ import socket
 import shutil
 import ipaddress
 import logging
+from uuid import uuid4
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from services.database import get_db
-from models import ScanFinding
+from models import ScanFinding, ScanJob
+from services.operational_events import record_operational_event
+from services.scan_normalizer import normalize_observation, normalize_target
 
 logger = logging.getLogger("tempris.scanner")
 
@@ -130,6 +133,12 @@ async def _run_nuclei_scan(target: str, scan_id: str) -> list[dict]:
                     "template_id": result.get("template-id", ""),
                     "cve_id": _extract_cve(info),
                     "matched_at": result.get("matched-at", ""),
+                    "engine": "nuclei",
+                    "metadata": {
+                        "tags": info.get("tags", []),
+                        "classification": info.get("classification", {}),
+                        "reference": info.get("reference", []),
+                    },
                     "discovered_at": datetime.now(timezone.utc).isoformat(),
                 }
                 findings.append(finding)
@@ -247,6 +256,7 @@ async def _run_nmap_scan(target: str, scan_id: str) -> list[dict]:
                             "template_id": "nmap-sV",
                             "cve_id": "",
                             "matched_at": f"{target}:{port_id}",
+                            "engine": "nmap",
                             "discovered_at": datetime.now(timezone.utc).isoformat(),
                         })
         except ET.ParseError:
@@ -323,6 +333,7 @@ async def _run_builtin_scan(target: str, scan_id: str) -> list[dict]:
                 "template_id": "builtin-tcp",
                 "cve_id": "",
                 "matched_at": f"{target}:{port}",
+                "engine": "builtin_tcp",
                 "discovered_at": datetime.now(timezone.utc).isoformat(),
             }
         except Exception:
@@ -376,6 +387,8 @@ async def trigger_scan(
     - ports: Nmap port/service scan only
     - quick: Nuclei with fast templates only
     """
+    if target.scan_type not in {"full", "ports", "quick"}:
+        raise HTTPException(status_code=422, detail="scan_type must be full, ports, or quick")
     host_clean = _clean_host(target.target)
     if _is_blocked_target(host_clean):
         raise HTTPException(
@@ -383,36 +396,96 @@ async def trigger_scan(
             detail="Scanning internal, private, or link-local IP addresses is prohibited."
         )
 
-    scan_id = f"SCAN-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    tenant_id = get_auth_context(user).tenant_id
+    scan_id = f"SCAN-{uuid4().hex[:20].upper()}"
     user_email = user.get("sub", "unknown")
     all_findings = []
+    engines_used = _engines_for(target.scan_type)
+    job = ScanJob(
+        id=scan_id,
+        tenant_id=tenant_id,
+        target=target.target,
+        normalized_target=normalize_target(target.target),
+        scan_type=target.scan_type,
+        engines=engines_used,
+        status="started",
+        started_by=user_email,
+        authorization_context={"requested_by": user_email, "request_ip": request.client.host if request.client else None},
+    )
+    db.add(job)
+    record_operational_event(
+        db, tenant_id=tenant_id, event_type="scan.started",
+        resource_type="scan_job", resource_id=scan_id, source_module="SCOUT",
+        actor_id=user_email, correlation_id=scan_id,
+        metadata={"target": job.normalized_target, "engines": engines_used},
+    )
+    db.commit()
 
-    if target.scan_type == "full":
-        if NUCLEI_AVAILABLE:
-            nuclei_task = _run_nuclei_scan(target.target, scan_id)
-            port_task = _run_port_scan(target.target, scan_id)
-            nuclei_results, port_results = await asyncio.gather(nuclei_task, port_task)
-            all_findings = _merge_findings(nuclei_results, port_results)
-        else:
+    try:
+        if target.scan_type == "full":
+            if NUCLEI_AVAILABLE:
+                nuclei_task = _run_nuclei_scan(target.target, scan_id)
+                port_task = _run_port_scan(target.target, scan_id)
+                nuclei_results, port_results = await asyncio.gather(nuclei_task, port_task)
+                all_findings = _merge_findings(nuclei_results, port_results)
+            else:
+                all_findings = await _run_port_scan(target.target, scan_id)
+
+        elif target.scan_type == "ports":
             all_findings = await _run_port_scan(target.target, scan_id)
 
-    elif target.scan_type == "ports":
-        all_findings = await _run_port_scan(target.target, scan_id)
+        elif target.scan_type == "quick":
+            if NUCLEI_AVAILABLE:
+                all_findings = await _run_nuclei_scan(target.target, scan_id)
+            else:
+                all_findings = await _run_builtin_scan(target.target, scan_id)
 
-    elif target.scan_type == "quick":
-        if NUCLEI_AVAILABLE:
-            all_findings = await _run_nuclei_scan(target.target, scan_id)
-        else:
-            all_findings = await _run_builtin_scan(target.target, scan_id)
-
-    # Persist all findings to DB
-    for nf in all_findings:
-        db.add(ScanFinding(
-            id=nf["id"], scan_id=nf["scan_id"], target=nf["target"],
-            port=nf.get("port", 0), service=nf["service"], risk=nf["risk"],
-            detail=nf["detail"], status=nf["status"]
-        ))
+        # Persist observations and deterministically normalize only vulnerability matches.
+        normalized = []
+        for nf in all_findings:
+            normalized.append(normalize_observation(
+                db,
+                tenant_id=tenant_id,
+                scan_job=job,
+                observation=nf,
+                actor_id=user_email,
+            ))
+    except Exception as exc:
+        db.rollback()
+        job = db.query(ScanJob).filter(
+            ScanJob.id == scan_id,
+            ScanJob.tenant_id == tenant_id,
+        ).first()
+        if job:
+            job.status = "failed"
+            job.error = str(exc)[:2000]
+            job.completed_at = datetime.now(timezone.utc)
+            record_operational_event(
+                db, tenant_id=tenant_id, event_type="scan.failed",
+                resource_type="scan_job", resource_id=scan_id, source_module="SCOUT",
+                actor_id=user_email, correlation_id=scan_id,
+                metadata={"error_type": type(exc).__name__},
+            )
+            db.commit()
+        logger.exception("SCOUT scan failed for scan job %s", scan_id)
+        raise HTTPException(status_code=500, detail="Scanner execution failed") from exc
+    job.status = "completed"
+    job.result_count = len(all_findings)
+    job.completed_at = datetime.now(timezone.utc)
+    record_operational_event(
+        db, tenant_id=tenant_id,
+        event_type="scan.zero_results" if not all_findings else "scan.completed",
+        resource_type="scan_job", resource_id=scan_id, source_module="SCOUT",
+        actor_id=user_email, correlation_id=scan_id,
+        metadata={"result_count": len(all_findings)},
+    )
     db.commit()
+
+    try:
+        from routers.edip import _publish_sss_event
+        _publish_sss_event(tenant_id, {"type": "finding.refresh", "scan_id": scan_id})
+    except Exception:
+        logger.debug("Finding refresh event could not be published", exc_info=True)
 
     # Classify results
     critical_count = len([f for f in all_findings if f["risk"] in ("Critical",)])
@@ -420,8 +493,6 @@ async def trigger_scan(
 
     # Audit log
     client_ip = request.client.host if request.client else None
-    engines_used = _engines_for(target.scan_type)
-
     append_to_audit_log(AuditEntry(
         user=user_email,
         action="SCOUT_SCAN_COMPLETED",
@@ -441,6 +512,8 @@ async def trigger_scan(
         "critical": critical_count,
         "high": high_count,
         "findings": all_findings,
+        "normalized_findings": sum(item["finding"] is not None for item in normalized),
+        "confirmed_exposures": sum(item["exposure"] == "confirmed" for item in normalized),
         "message": f"Scan completed via {', '.join(engines_used)}. "
                    f"Discovered {len(all_findings)} findings on {target.target}."
     }
@@ -449,11 +522,17 @@ async def trigger_scan(
 @router.get("/findings")
 def get_scan_findings(db: Session = Depends(get_db), user = Depends(get_current_user)):
     """Return all findings generated from scans."""
-    db_findings = db.query(ScanFinding).order_by(ScanFinding.discovered_at.desc()).limit(200).all()
+    tenant_id = get_auth_context(user).tenant_id
+    db_findings = db.query(ScanFinding).filter(
+        ScanFinding.tenant_id == tenant_id,
+    ).order_by(ScanFinding.last_seen_at.desc()).limit(200).all()
     return [{
         "id": f.id, "scan_id": f.scan_id, "target": f.target,
         "port": f.port, "service": f.service, "risk": f.risk,
         "detail": f.detail, "status": f.status,
+        "observation_type": "vulnerability_match" if f.normalized_finding_id else "scan_observation",
+        "normalized_finding_id": f.normalized_finding_id,
+        "asset_id": f.asset_id,
         "discovered_at": f.discovered_at.isoformat() if f.discovered_at else ""
     } for f in db_findings]
 
@@ -461,9 +540,11 @@ def get_scan_findings(db: Session = Depends(get_db), user = Depends(get_current_
 @router.get("/findings/summary")
 def get_scan_summary(db: Session = Depends(get_db), user = Depends(get_current_user)):
     """Return summary stats of scan findings."""
-    all_findings = db.query(ScanFinding).all()
+    tenant_id = get_auth_context(user).tenant_id
+    all_findings = db.query(ScanFinding).filter(ScanFinding.tenant_id == tenant_id).all()
+    jobs = db.query(ScanJob).filter(ScanJob.tenant_id == tenant_id).all()
     if not all_findings:
-        return {"total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0, "scans": 0}
+        return {"total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0, "scans": len(jobs), "normalized_findings": 0}
 
     scan_ids = set(f.scan_id for f in all_findings)
     return {
@@ -472,32 +553,28 @@ def get_scan_summary(db: Session = Depends(get_db), user = Depends(get_current_u
         "high": len([f for f in all_findings if f.risk == "High"]),
         "medium": len([f for f in all_findings if f.risk == "Medium"]),
         "low": len([f for f in all_findings if f.risk == "Low"]),
-        "scans": len(scan_ids)
+        "scans": len(jobs),
+        "normalized_findings": len({f.normalized_finding_id for f in all_findings if f.normalized_finding_id}),
     }
 
 
 @router.get("/history")
 def get_scan_history(db: Session = Depends(get_db), user = Depends(get_current_user)):
     """Return scan history grouped by scan_id."""
-    all_findings = db.query(ScanFinding).order_by(ScanFinding.discovered_at.desc()).all()
-    scans = {}
-    for f in all_findings:
-        if f.scan_id not in scans:
-            scans[f.scan_id] = {
-                "scan_id": f.scan_id,
-                "target": f.target,
-                "started_at": f.discovered_at.isoformat() if f.discovered_at else "",
-                "findings_count": 0,
-                "critical": 0,
-                "high": 0,
-            }
-        scans[f.scan_id]["findings_count"] += 1
-        if f.risk == "Critical":
-            scans[f.scan_id]["critical"] += 1
-        elif f.risk == "High":
-            scans[f.scan_id]["high"] += 1
-
-    return list(scans.values())[:20]
+    tenant_id = get_auth_context(user).tenant_id
+    jobs = db.query(ScanJob).filter(
+        ScanJob.tenant_id == tenant_id,
+    ).order_by(ScanJob.started_at.desc()).limit(20).all()
+    return [{
+        "scan_id": row.id,
+        "target": row.target,
+        "started_at": row.started_at.isoformat() if row.started_at else "",
+        "completed_at": row.completed_at.isoformat() if row.completed_at else "",
+        "status": row.status,
+        "engines": row.engines or [],
+        "findings_count": row.result_count,
+        "error": row.error,
+    } for row in jobs]
 
 
 @router.get("/engines")
