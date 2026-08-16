@@ -184,7 +184,8 @@ def test_native_module_routes_are_not_extension_takeovers_and_keep_primary_contr
     assert "strokeDashoffset:e.aggregate_tes==null?502" in bundle
     assert "No confirmed scoreable exposure" in bundle
     assert "scope=confirmed_exposure" in bundle
-    assert "history=1" in bundle
+    assert "window.location.search.includes(`history=1`)?`/api/spectrum/findings?limit=2000`:`/api/spectrum/findings?limit=2000&scope=confirmed_exposure`" in bundle
+    assert "$(`window.location.search.includes" not in bundle
     assert "Linked assets and evidence" in bundle
     assert "Current decision — revise if new evidence is recorded" in bundle
     assert "No EDIP decision" in bundle

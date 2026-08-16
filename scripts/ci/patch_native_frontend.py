@@ -238,8 +238,8 @@ def patch_canonical_bundle(source: str) -> str:
     """
     source = replace_once(
         source,
-        "/api/spectrum/findings?limit=2000&scope=confirmed_exposure",
-        "window.location.search.includes('history=1')?'/api/spectrum/findings?limit=2000':'/api/spectrum/findings?limit=2000&scope=confirmed_exposure'",
+        "$(\u0060/api/spectrum/findings?limit=2000&scope=confirmed_exposure\u0060)",
+        "$(window.location.search.includes(\u0060history=1\u0060)?\u0060/api/spectrum/findings?limit=2000\u0060:\u0060/api/spectrum/findings?limit=2000&scope=confirmed_exposure\u0060)",
         "SPECTRUM historical decision access",
     )
     source = replace_once(
