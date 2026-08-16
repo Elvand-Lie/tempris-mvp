@@ -89,12 +89,12 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     stylesheet = client.get("/extensions/tempris-modules.css")
     logo = client.get("/brand/tempris-logo-light.png")
 
-    assert 'src="/assets/index-DUrFdX-d.js?v=20260816b"' in index.text
-    assert 'src="/extensions/tempris-bootstrap.js?v=20260816b"' in index.text
-    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260816b"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260816b"')
-    assert 'src="/extensions/tempris-sss-ui.js?v=20260816b"' in index.text
-    assert 'src="/extensions/tempris-modules.js?v=20260816b"' in index.text
-    assert 'href="/extensions/tempris-modules.css?v=20260816b"' in index.text
+    assert 'src="/assets/index-DUrFdX-d.js?v=20260816c"' in index.text
+    assert 'src="/extensions/tempris-bootstrap.js?v=20260816c"' in index.text
+    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260816c"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260816c"')
+    assert 'src="/extensions/tempris-sss-ui.js?v=20260816c"' in index.text
+    assert 'src="/extensions/tempris-modules.js?v=20260816c"' in index.text
+    assert 'href="/extensions/tempris-modules.css?v=20260816c"' in index.text
     assert script.status_code == 200
     assert script.headers["cache-control"] == "no-store, max-age=0"
     assert bootstrap.headers["cache-control"] == "no-store, max-age=0"
@@ -189,8 +189,11 @@ def test_native_module_routes_are_not_extension_takeovers_and_keep_primary_contr
     assert "window.location.search.includes(`history=1`)?`/api/spectrum/findings?limit=2000`:`/api/spectrum/findings?limit=2000&scope=confirmed_exposure`" in bundle
     assert "$(`window.location.search.includes" not in bundle
     assert "Linked assets and evidence" in bundle
+    assert "Edit linked assets & evidence" in bundle
+    assert "href:`/sss-intake?finding=${encodeURIComponent(n.id)}`" in bundle
     assert "Current decision — revise if new evidence is recorded" in bundle
     assert "No EDIP decision" in bundle
+    assert "const requestedFinding = new URLSearchParams(window.location.search).get('finding');" in extension
 
 
 def test_every_retained_bundle_excludes_tes_internals():

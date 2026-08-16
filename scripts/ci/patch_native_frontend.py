@@ -105,6 +105,12 @@ def patch(source: str) -> str:
         "(0,Y.jsxs)(`section`,{className:`px-6 pb-2`,children:[(0,Y.jsx)(`h3`,{className:`text-sm font-semibold uppercase tracking-wider text-text-muted mb-3`,children:`Linked assets and evidence`}),(n.assets||[]).length?(0,Y.jsx)(`div`,{className:`space-y-2`,children:n.assets.map(e=>(0,Y.jsxs)(`div`,{className:`text-sm border border-border rounded-lg p-3`,children:[(0,Y.jsx)(`strong`,{children:e.name||e.hostname||e.asset_id}),(0,Y.jsx)(`p`,{className:`text-text-muted text-xs mt-1`,children:e.evidence||`No assignment note recorded.`})]},e.asset_id))}):(0,Y.jsx)(`p`,{className:`text-sm text-text-muted`,children:`No confirmed customer asset is linked.`}),(n.evidence_files||[]).length?(0,Y.jsxs)(`div`,{className:`mt-3 text-xs text-text-muted`,children:[`Attached evidence: `,n.evidence_files.map(e=>e.filename).join(`, `)]}):null]}),(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[",
         "SPECTRUM linked assets and evidence",
     )
+    source = replace_once(
+        source,
+        "n.evidence_files.map(e=>e.filename).join(`, `)]}):null]}),(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[",
+        "n.evidence_files.map(e=>e.filename).join(`, `)]}):null,(0,Y.jsx)(`a`,{href:`/sss-intake?finding=${encodeURIComponent(n.id)}`,className:`inline-flex mt-3 text-sm text-primary-400 hover:underline`,children:`Edit linked assets & evidence`})]}),(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[",
+        "SPECTRUM evidence editor link",
+    )
     source = source.replace("Decision Recorded", "Current decision — revise if new evidence is recorded")
 
     # Remove the old client-side GRC scoring implementation while retaining
@@ -247,6 +253,12 @@ def patch_canonical_bundle(source: str) -> str:
         "(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[",
         "(0,Y.jsxs)(`section`,{className:`px-6 pb-2`,children:[(0,Y.jsx)(`h3`,{className:`text-sm font-semibold uppercase tracking-wider text-text-muted mb-3`,children:`Linked assets and evidence`}),(n.assets||[]).length?(0,Y.jsx)(`div`,{className:`space-y-2`,children:n.assets.map(e=>(0,Y.jsxs)(`div`,{className:`text-sm border border-border rounded-lg p-3`,children:[(0,Y.jsx)(`strong`,{children:e.name||e.hostname||e.asset_id}),(0,Y.jsx)(`p`,{className:`text-text-muted text-xs mt-1`,children:e.evidence||`No assignment note recorded.`})]},e.asset_id))}):(0,Y.jsx)(`p`,{className:`text-sm text-text-muted`,children:`No confirmed customer asset is linked.`}),(n.evidence_files||[]).length?(0,Y.jsxs)(`div`,{className:`mt-3 text-xs text-text-muted`,children:[`Attached evidence: `,n.evidence_files.map(e=>e.filename).join(`, `)]}):null]}),(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[",
         "SPECTRUM linked assets and evidence",
+    )
+    source = replace_once(
+        source,
+        "n.evidence_files.map(e=>e.filename).join(`, `)]}):null]}),(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[",
+        "n.evidence_files.map(e=>e.filename).join(`, `)]}):null,(0,Y.jsx)(`a`,{href:`/sss-intake?finding=${encodeURIComponent(n.id)}`,className:`inline-flex mt-3 text-sm text-primary-400 hover:underline`,children:`Edit linked assets & evidence`})]}),(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[",
+        "SPECTRUM evidence editor link",
     )
     source = source.replace("Decision Recorded", "Current decision — revise if new evidence is recorded")
     return source.replace("✓ Mitigated", "✓ Mitigation planned")

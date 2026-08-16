@@ -1344,6 +1344,11 @@
         }
       });
     }
+    const requestedFinding = new URLSearchParams(window.location.search).get('finding');
+    if (requestedFinding && canManage) {
+      window.history.replaceState({}, '', '/sss-intake');
+      openAssetPicker(requestedFinding).catch((error) => window.alert(error.message || 'Unable to load the finding.'));
+    }
     if (classificationModal) {
       classificationModal.querySelectorAll('[data-classification-close]').forEach((button) => button.addEventListener('click', closeClassificationDialog));
       classificationModal.addEventListener('click', (event) => { if (event.target === classificationModal) closeClassificationDialog(); });
