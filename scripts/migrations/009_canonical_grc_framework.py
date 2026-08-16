@@ -39,11 +39,18 @@ def database_url(args: argparse.Namespace) -> str:
 
 
 def _load_backend() -> None:
-    root = Path(__file__).resolve().parents[2]
-    backend = root / "app" / "backend"
-    if not backend.is_dir():
-        backend = Path.cwd()
-    sys.path.insert(0, str(backend))
+    # The guarded release mounts this script at /migrations and the backend at
+    # /staged.  Local execution instead starts from the repository root.
+    candidates = [Path.cwd(), *Path(__file__).resolve().parents]
+    for candidate in candidates:
+        backend = candidate / "app" / "backend"
+        if backend.is_dir():
+            sys.path.insert(0, str(backend))
+            return
+        if (candidate / "models.py").is_file():
+            sys.path.insert(0, str(candidate))
+            return
+    raise RuntimeError("Unable to locate the backend source for migration 009")
 
 
 def inventory(engine) -> dict:
