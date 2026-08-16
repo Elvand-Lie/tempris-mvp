@@ -98,6 +98,7 @@ def test_agentic_and_identity_posture_contracts(client_and_headers):
             "credential_scope": "tenant-read",
             "ingestion_paths": ["support-rag", "mcp-tools"],
             "egress_controlled": True,
+            "base_severity": 6.5,
             "patch_available": True,
         },
     )
@@ -133,7 +134,9 @@ def test_agentic_and_identity_posture_contracts(client_and_headers):
     finding = entra.json()["data"][0]
     assert finding["class"] == "IDENTITY_POSTURE"
     assert finding["sub_class"] == "MFA_ENROLMENT"
-    assert finding["edip_decision"] == "PATCH"
+    # Pending ISO 42001 assessments now provide the live tenant governance
+    # context for this open non-CVE finding, so the server elevates it.
+    assert finding["edip_decision"] == "ESCALATE"
 
 
 def test_aev_verdict_authentication_and_server_deadline_states(client_and_headers, monkeypatch):
@@ -148,6 +151,7 @@ def test_aev_verdict_authentication_and_server_deadline_states(client_and_header
         "evidence_ref": "urn:tempris:evidence:aev-path-22",
         "revalidate_by": "2026-08-15",
         "engagement_token": "wrong-token",
+        "base_severity": 6.5,
     }
     rejected = client.post("/api/edip/connectors/aev/verdicts", headers=headers, json=payload)
     assert rejected.status_code == 401
@@ -229,5 +233,5 @@ def test_live_entra_sync_reuses_normalizer_and_prevents_duplicates(client_and_he
         Finding.cve == "SSS-ENTRA-sync-phone",
     ).all()
     assert len(rows) == 1
-    assert rows[0].decision == "PATCH"
+    assert rows[0].decision == "ESCALATE"
     db.close()

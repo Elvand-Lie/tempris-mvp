@@ -9,6 +9,7 @@
 - STRIKE `NO_EXPOSURE_OBSERVED` does not claim a defensive block. `DEFENSIVE_BLOCK_VERIFIED` requires recorded prevention evidence.
 - Nmap/TCP output remains a SCOUT observation. Only deterministic qualifying Nuclei matches enter the Finding Registry.
 - STANDARD and GRC are separate: STANDARD assesses security/regulatory controls; GRC manages AI-governance policy and workflow.
+- GRC uses one server-managed ISO/IEC 42001:2023 control catalogue. Policies are supporting evidence only; they never create controls, complete controls, or directly alter SSS/TES.
 - Tenant & Module Administration controls entitlements; it does not impersonate tenant users.
 
 ## Current limitations

@@ -30,6 +30,7 @@ def _finding_to_dict(f) -> dict:
         "shortDescription": f.short_description,
         "requiredAction": f.required_action,
         "raw_inputs": f.raw_inputs or {},
+        "cve_context": f.cve_context or {},
         "edip_decision": None,
         "edip_rationale": None,
         "asset": f.asset_data,

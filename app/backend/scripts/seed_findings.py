@@ -246,7 +246,11 @@ def seed_sss_findings(db, existing_ids: set):
             continue
 
         scoring = sf.get('scoring', {})
-        base_severity = scoring.get('base_severity', 7.0)
+        base_severity = scoring.get('base_severity')
+        if base_severity is None:
+            logger.warning("Skipping SSS seed %s without explicit base severity", fid)
+            continue
+        base_severity = float(base_severity)
         tes_score = calculate_sss_tes(scoring)
         priority = priority_from_tes(tes_score)
 
@@ -308,7 +312,11 @@ def _seed_threat_pack(db, existing_ids: set, filename: str, id_base: int, label:
             continue
 
         scoring = tf.get('scoring', {})
-        base_severity = float(scoring.get('base_severity', 7.0) or 7.0)
+        base_severity = scoring.get('base_severity')
+        if base_severity is None:
+            logger.warning("Skipping %s seed %s without explicit base severity", label, finding_key)
+            continue
+        base_severity = float(base_severity)
         tes_score = calculate_sss_tes(scoring)
         priority = priority_from_tes(tes_score)
 

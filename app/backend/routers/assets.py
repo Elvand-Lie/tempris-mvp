@@ -194,6 +194,12 @@ def update_asset(
         try:
             asset.updated_at = datetime.now(timezone.utc)
             db.flush()
+            recalculated = []
+            if {"criticality", "status"} & set(req.model_fields_set):
+                from services.tes_engine import recalculate_open_cve_findings
+                recalculated = recalculate_open_cve_findings(
+                    db, asset.tenant_id, actor_id=user.get("sub", "unknown"), reason="asset_context_updated",
+                )
             append_to_audit_log_db(db, AuditEntry(
                 user=user.get("sub", "unknown"),
                 action="ASSET_UPDATED",
@@ -201,6 +207,10 @@ def update_asset(
                 detail=f"Updated {asset_id}: {'; '.join(changes[:5])}"
             ), commit=False)
             db.commit()
+            if recalculated:
+                from routers.edip import _publish_sss_event
+                for finding_id in recalculated:
+                    _publish_sss_event(asset.tenant_id, {"type": "finding.refresh", "finding_id": finding_id})
         except Exception:
             db.rollback()
             raise HTTPException(status_code=500, detail="Asset update failed")
@@ -225,6 +235,10 @@ def decommission_asset(
         asset.status = "decommissioned"
         asset.updated_at = datetime.now(timezone.utc)
         db.flush()
+        from services.tes_engine import recalculate_open_cve_findings
+        recalculated = recalculate_open_cve_findings(
+            db, asset.tenant_id, actor_id=user.get("sub", "unknown"), reason="asset_decommissioned",
+        )
         append_to_audit_log_db(db, AuditEntry(
             user=user.get("sub", "unknown"),
             action="ASSET_DECOMMISSIONED",
@@ -232,6 +246,10 @@ def decommission_asset(
             detail=f"Decommissioned asset {asset_id}: {asset.name}"
         ), commit=False)
         db.commit()
+        if recalculated:
+            from routers.edip import _publish_sss_event
+            for finding_id in recalculated:
+                _publish_sss_event(asset.tenant_id, {"type": "finding.refresh", "finding_id": finding_id})
     except Exception:
         db.rollback()
         raise HTTPException(status_code=500, detail="Asset decommission failed")

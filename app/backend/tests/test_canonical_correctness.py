@@ -409,11 +409,11 @@ def test_grc_policy_delete_rules_and_audit_events(db, monkeypatch):
         delete_policy("iso42001", db=db, user=user)
     assert bundled.value.status_code == 409
 
-    first = create_policy(PolicyCreate(title="Disposable custom", content="fixture"), db=db, user=user)
+    first = create_policy(PolicyCreate(title="Disposable custom", content="fixture", unmapped=True), db=db, user=user)
     assert delete_policy(first["id"], db=db, user=user)["status"] == "deleted"
     assert db.query(GrcPolicyDocument).filter(GrcPolicyDocument.id == first["id"]).first() is None
 
-    second = create_policy(PolicyCreate(title="Referenced custom", content="fixture"), db=db, user=user)
+    second = create_policy(PolicyCreate(title="Referenced custom", content="fixture", unmapped=True), db=db, user=user)
     db.add(GeneratedReport(
         id="REP-POL", tenant_id="tenant-a", report_type="json", generator_version="test",
         requested_by="super@example.test", source_finding_ids=[], source_evidence_ids=[],

@@ -71,7 +71,9 @@ DOMINATE’s nine-module count refers only to the nine commercial modules from S
 - **Purpose:** AI-governance inventory, SOP/sign-off, policy, evidence, and AI-system risk workflow. It is not STANDARD.
 - **Trace:** `/grc` → `/api/grc/state|controls|gap-analysis|policies` → `GrcState`, `GrcSignoff`, `GrcPolicyDocument`, GRC evidence records.
 - **Actions:** save state, sign off, create/edit/archive/restore/supersede/delete custom policy, attach evidence.
-- **Policy rules:** bundled content is immutable; unreferenced custom policy can be Superadmin-deleted; referenced custom policy archives instead; lifecycle actions are audited.
+- **Control model:** ISO/IEC 42001:2023 is the single server-managed framework. SOP Builder stores tenant assessment; Gap Analysis is a read-only view of that same assessment state.
+- **Policy rules:** policies are supporting documents only. They require explicit ISO control links or an explicit unmapped declaration; a policy link never completes a control or directly changes TES. Bundled content is immutable; unreferenced custom policy can be Superadmin-deleted; referenced custom policy archives instead; lifecycle actions are audited.
+- **Policy Library navigation:** native title, framework, linked-control, bundled/custom, and lifecycle filters use 25-item pages. Each card states its framework, linked controls (or None), and that its scoring effect is indirect supporting evidence only.
 - **Scoring:** client sees only final AI-system score, band, direction, qualitative drivers, scope, and timestamp.
 
 ## ASSETS

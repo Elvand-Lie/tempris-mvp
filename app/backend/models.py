@@ -350,6 +350,83 @@ class GrcPolicyDocument(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class FrameworkDefinition(Base):
+    """Server-managed GRC framework catalogue entry."""
+
+    __tablename__ = "framework_definitions"
+    id = Column(String(80), primary_key=True)
+    version = Column(String(40), nullable=False)
+    name = Column(String(255), nullable=False)
+    description = Column(Text)
+    server_managed = Column(Boolean, nullable=False, default=True)
+    active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class FrameworkControl(Base):
+    """Server-managed control definition; customers assess but cannot create it."""
+
+    __tablename__ = "framework_controls"
+    __table_args__ = (
+        UniqueConstraint("framework_id", "control_id", name="uq_framework_control"),
+        Index("ix_framework_controls_framework_order", "framework_id", "display_order"),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    framework_id = Column(String(80), nullable=False, index=True)
+    framework_version = Column(String(40), nullable=False)
+    control_id = Column(String(40), nullable=False)
+    domain = Column(String(120), nullable=False)
+    requirement = Column(String(500), nullable=False)
+    description = Column(Text)
+    modifier_group = Column(String(10), nullable=False, default="NONE")
+    display_order = Column(Integer, nullable=False)
+    active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class ControlAssessment(Base):
+    """The tenant-owned SOP assessment for one server-defined framework control."""
+
+    __tablename__ = "control_assessments"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "framework_id", "control_id", name="uq_control_assessment_tenant_control"),
+        Index("ix_control_assessments_tenant_framework", "tenant_id", "framework_id"),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(50), nullable=False, index=True)
+    framework_id = Column(String(80), nullable=False)
+    control_id = Column(String(40), nullable=False)
+    status = Column(String(20), nullable=False, default="pending")
+    pic = Column(String(255), default="")
+    notes = Column(Text, default="")
+    end_user_agreed = Column(Boolean, nullable=False, default=False)
+    pic_signed_off = Column(Boolean, nullable=False, default=False)
+    created_by = Column(String(255))
+    updated_by = Column(String(255))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class PolicyControlLink(Base):
+    """Explicit supporting-document link; never a scoring or completion shortcut."""
+
+    __tablename__ = "policy_control_links"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "policy_id", "framework_id", "control_id", name="uq_policy_control_link"),
+        Index("ix_policy_control_links_tenant_control", "tenant_id", "framework_id", "control_id"),
+    )
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(50), nullable=False, index=True)
+    policy_id = Column(String(80), nullable=False, index=True)
+    framework_id = Column(String(80), nullable=False)
+    control_id = Column(String(40), nullable=False)
+    relation_type = Column(String(40), nullable=False, default="supporting_evidence")
+    created_by = Column(String(255))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class Tenant(Base):
     __tablename__ = "tenants"
     id = Column(String(50), primary_key=True)
@@ -416,6 +493,9 @@ class Finding(Base):
     short_description = Column(Text)
     required_action = Column(Text)
     raw_inputs = Column(JSON)                              # TES calculation inputs
+    # Current CVE context is deliberately separate from legacy ``raw_inputs``.
+    # It records analyst-entered impact and trusted evidence provenance only.
+    cve_context = Column(JSON, default={})
     asset_id = Column(String(50))                          # linked asset FK
     asset_data = Column(JSON)                              # denormalized asset match info
     sss_data = Column(JSON)                                # SSS metadata (non-CVE only)

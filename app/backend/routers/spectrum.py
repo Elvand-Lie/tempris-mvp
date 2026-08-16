@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from services.tes_engine import calculate_tes, TESInputs, calculate_finding_tes, decision_from_tes, priority_from_tes, public_severity, public_decision_for_finding
+from services.tes_engine import calculate_tes, TESInputs, calculate_finding_tes, decision_from_tes, priority_from_tes, public_severity, public_decision_for_finding, public_cve_context, recalculate_open_cve_findings
 from services.sss_contract import public_sss_output
 from routers.audit import append_to_audit_log, AuditEntry
 from routers.auth import get_current_user, require_role
@@ -31,6 +31,11 @@ class PublicTESResponse(BaseModel):
     tes_score: float
     decision: str
 
+
+class BusinessImpactUpdate(BaseModel):
+    value: float = Field(ge=0, le=10)
+    justification: str = Field(min_length=10, max_length=2000)
+
 def _load_edip_decisions(db: Session, user_tenant_id: str | None, is_superadmin: bool) -> dict:
     """Load all EDIP decisions from DB into a lookup dict, filtered by tenant."""
     if not user_tenant_id:
@@ -49,8 +54,9 @@ def _load_edip_decisions(db: Session, user_tenant_id: str | None, is_superadmin:
 
 
 
-def _public_tes_score(f: dict) -> float:
-    return calculate_finding_tes(f)
+def _public_tes_score(f: dict, db: Session, tenant_id: str) -> float:
+    """Use live server-side GRC context for non-CVE findings."""
+    return calculate_finding_tes(f, db=db, tenant_id=tenant_id)
 
 
 def _strip_internal_fields(f: dict) -> dict:
@@ -180,10 +186,15 @@ def get_findings(
         f_copy = f.copy()
         f_copy["record_scope"] = scope_label
         f_copy["record_scope_label"] = scope_label.replace("_", " ").title()
-        f_copy["tes_score"] = _public_tes_score(f)
-        f_copy["tes_decision"] = public_decision_for_finding(f, f_copy["tes_score"])
-        f_copy["tes_priority"] = priority_from_tes(f_copy["tes_score"])
+        try:
+            f_copy["tes_score"] = _public_tes_score(f, db, auth_ctx.tenant_id)
+        except (KeyError, TypeError, ValueError):
+            f_copy["tes_score"] = None
+        f_copy["tes_decision"] = public_decision_for_finding(f, f_copy["tes_score"] or 0.0)
+        f_copy["tes_priority"] = priority_from_tes(f_copy["tes_score"] or 0.0)
         f_copy["severity"] = public_severity(f)
+        if str(f.get("cve") or "").upper().startswith("CVE-") and f_copy["tes_score"] is not None:
+            f_copy["business_impact"] = public_cve_context(f, db=db, tenant_id=auth_ctx.tenant_id)["business_impact"]
         
         # Native SPECTRUM receives canonical confirmed assets, never the legacy
         # Finding.asset_id convenience field.
@@ -222,6 +233,64 @@ def get_findings(
         "data": result,
         "meta": {"total": total, "page": page, "limit": limit, "scope": scope}
     }
+
+
+@router.patch("/findings/{finding_id}/business-impact")
+def update_business_impact(
+    finding_id: str,
+    req: BusinessImpactUpdate,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("Superadmin", "Admin", "Analyst")),
+):
+    """Record explicit analyst impact for a confirmed CVE exposure."""
+    from datetime import datetime, timezone
+    from models import Finding
+    from routers.audit import append_to_audit_log_db, AuditEntry
+    from routers.auth import get_auth_context
+
+    auth = get_auth_context(user)
+    finding = db.query(Finding).filter(
+        Finding.id == finding_id,
+        Finding.tenant_id == auth.tenant_id,
+    ).first()
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    if not str(finding.cve or finding.cve_id or "").upper().startswith("CVE-"):
+        raise HTTPException(status_code=422, detail="Business impact assessment is available for CVE findings")
+    if not any(row[0].id == finding.id for row in canonical_exposure_rows(db, auth.tenant_id)):
+        raise HTTPException(status_code=409, detail="Business impact requires a confirmed active customer exposure")
+
+    context = dict(finding.cve_context or {})
+    context["business_impact"] = {
+        "value": req.value,
+        "justification": req.justification.strip(),
+        "source": "analyst_assessment",
+        "assessed_by": auth.user_id,
+        "assessed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    finding.cve_context = context
+    recalculated = recalculate_open_cve_findings(
+        db, auth.tenant_id, actor_id=auth.user_id, reason="business_impact_updated",
+    )
+    from services.operational_events import record_operational_event
+    record_operational_event(
+        db, tenant_id=auth.tenant_id, event_type="finding.business_impact_assessed",
+        resource_type="finding", resource_id=finding.id, source_module="SPECTRUM",
+        actor_id=auth.user_id, metadata={"assessed": True},
+    )
+    append_to_audit_log_db(db, AuditEntry(
+        user=auth.user_id, action="FINDING_BUSINESS_IMPACT_UPDATED", module="SPECTRUM",
+        detail=f"Recorded business impact for {finding.id}",
+        metadata={"finding_id": finding.id, "business_impact": req.value},
+    ), commit=False)
+    db.commit()
+    try:
+        from routers.edip import _publish_sss_event
+        for refreshed_id in set(recalculated) | {finding.id}:
+            _publish_sss_event(auth.tenant_id, {"type": "finding.refresh", "finding_id": refreshed_id})
+    except Exception:
+        pass
+    return {"finding_id": finding.id, "business_impact": req.value, "recalculated_finding_ids": recalculated}
 
 @router.post("/findings/{finding_id}/edip")
 async def record_edip_decision(

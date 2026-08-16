@@ -52,3 +52,17 @@ Migration `scripts/migrations/008_canonical_posture_and_operations.py` adds sche
 - Updated frontend cache versions so browsers request the reviewed extension assets.
 
 On 2026-08-16 the production FreeLLM gateway credential and JWT signing secret were rotated in the protected VPS environment. Retired credentials are rejected, replacement authentication passes, the environment remains mode 600, and existing JWT sessions were intentionally invalidated. The canonicalization release remains pending the guarded commit, preflight, backup, migration, deployment, reconciliation, and smoke-test sequence.
+
+## GRC to SSS/TES canonicalization
+
+- Added server-managed ISO/IEC 42001:2023 framework/control storage and canonical tenant `ControlAssessment` rows.
+- Made SOP Builder authoritative and Gap Analysis a derived view of the same assessment state.
+- Added explicit policy-to-control supporting-evidence links; policy documents never complete controls or directly alter TES.
+- Applied live server-side GRC context to open non-CVE SSS TES, retaining prior values as scoring provenance.
+- Removed the manual Identity/Agentic silent SSS default and require analyst base severity in native intake.
+
+## CVE live-context correction
+
+- Added additive migration 010 for `Finding.cve_context`; no legacy asset link is promoted or rewritten.
+- Replaced CVE seed-time `Finding.raw_inputs` as current context with exact-CVE metadata, confirmed active asset context, authorised Business Impact, and deterministic trusted exploit/threat evidence.
+- Added the tenant-scoped SPECTRUM Business Impact action, audit/operational event, and refresh path. Resolved findings retain historical score provenance until reopened.

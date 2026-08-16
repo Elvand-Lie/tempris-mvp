@@ -116,18 +116,18 @@ def seed_executive_data():
         Finding(
             id='F-ALPHA',
             tenant_id='tenant-alpha',
+            cve='CVE-2026-1000',
+            cvss=8.0,
             title='Alpha finding',
             priority='P0',
             status='unmitigated',
             sla=1,
             asset_id='ASSET-ALPHA',
             created_at=now - timedelta(days=3),
-            raw_inputs={
-                'cvss': 8.0,
-                'exploitability': 8.0,
-                'business_impact': 8.0,
-                'asset_criticality': 8.0,
-                'threat_actor_activity': 8.0,
+            cve_context={
+                'business_impact': {'value': 6.8, 'source': 'test_assessment'},
+                'exploitability': {'value': 8.0, 'source': 'test_evidence'},
+                'threat_actor_activity': {'value': 8.0, 'source': 'test_evidence'},
             },
         ),
         Finding(
@@ -356,7 +356,7 @@ def test_grc_state_and_custom_policies_are_tenant_scoped():
     created = client.post(
         '/api/grc/policies',
         headers=alpha_headers,
-        json={'title': 'Alpha policy', 'content': 'Fictional tenant content'},
+        json={'title': 'Alpha policy', 'content': 'Fictional tenant content', 'unmapped': True},
     )
     assert created.status_code == 200
     policy_id = created.json()['id']
@@ -417,16 +417,16 @@ def test_synthesis_uses_asset_linked_tes_tenant_snapshots_and_repository_health(
         Finding(
             id='F-SYNTH',
             tenant_id='tenant-alpha',
+            cve='CVE-2026-1001',
+            cvss=4.0,
             title='Asset-linked synthesis finding',
             priority='P0',
             status='unmitigated',
             asset_id='ASSET-SYNTH',
-            raw_inputs={
-                'cvss': 4.0,
-                'exploitability': 4.0,
-                'business_impact': 4.0,
-                'asset_criticality': 4.0,
-                'threat_actor_activity': 4.0,
+            cve_context={
+                'business_impact': {'value': 4.0, 'source': 'test_assessment'},
+                'exploitability': {'value': 4.0, 'source': 'test_evidence'},
+                'threat_actor_activity': {'value': 4.0, 'source': 'test_evidence'},
             },
         ),
         AssetExposure(
@@ -467,8 +467,8 @@ def test_synthesis_uses_asset_linked_tes_tenant_snapshots_and_repository_health(
     response = client.get('/api/synthesis/dashboard', headers=headers)
     assert response.status_code == 200
     data = response.json()
-    assert data['aggregate_tes'] == 4.0
-    assert data['tes_trend'] == '+2.0'
+    assert data['aggregate_tes'] == 4.1
+    assert data['tes_trend'] == '+2.1'
     assert data['exposure_coverage']['asset_linked_count'] == 1
     assert data['exposure_coverage']['asset_link_coverage_pct'] == 100.0
     assert data['alerts'] == []
@@ -635,7 +635,10 @@ def test_exposure_assignments_are_searchable_reversible_and_audited():
     expanded = client.put(
         '/api/workflow/findings/F-ALPHA/assets',
         headers=analyst,
-        json={'asset_ids': ['ASSET-ALPHA', 'ASSET-ALPHA-2']},
+        json={
+            'asset_ids': ['ASSET-ALPHA', 'ASSET-ALPHA-2'],
+            'evidence': 'Analyst verified the affected software on both assets',
+        },
     )
     assert expanded.status_code == 200
     assert expanded.json()['added_asset_ids'] == ['ASSET-ALPHA-2']
@@ -860,6 +863,7 @@ def test_sql_shaped_ids_and_tenant_mass_assignment_fail_closed():
         json={
             'title': 'Policy ' + quote + ' OR 1=1 --',
             'content': 'Fictional SQL-shaped content',
+            'unmapped': True,
             'tenant_id': 'tenant-beta',
         },
     )

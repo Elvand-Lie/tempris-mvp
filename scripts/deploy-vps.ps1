@@ -55,6 +55,8 @@ source_backup="`$root/backups/releases/`$release.tar.gz"
 db_backup="`$root/backups/database/`$release.dump"
 report_backup="`$root/backups/reports/`$release.tar.gz"
 migration_report="`$root/backups/migrations/`$release-migration-008.json"
+migration_009_report="`$root/backups/migrations/`$release-migration-009.txt"
+migration_010_report="`$root/backups/migrations/`$release-migration-010.txt"
 stage="`$(mktemp -d)"
 restore_stage=''
 source_changed=0
@@ -88,7 +90,7 @@ rollback() {
 }
 trap rollback ERR
 
-mkdir -p "`$(dirname "`$source_backup")" "`$(dirname "`$db_backup")" "`$(dirname "`$report_backup")" "`$(dirname "`$migration_report")"
+mkdir -p "`$(dirname "`$source_backup")" "`$(dirname "`$db_backup")" "`$(dirname "`$report_backup")" "`$(dirname "`$migration_report")" "`$(dirname "`$migration_009_report")" "`$(dirname "`$migration_010_report")"
 tar -C "`$root" -czf "`$source_backup" --exclude='app/deploy/.env' --exclude='app/freellmapi/.env' --exclude='app/backend/data' app
 tar -tzf "`$source_backup" >/dev/null
 tar -C "`$stage" -xzf "`$archive"
@@ -134,6 +136,25 @@ docker run --rm --network host -u 0 \
     --database-url-env --backup-file /backup.dump --externally-verified-backup \
     --report-file "/migration-report/`$(basename "`$migration_report")"
 
+# 009 is additive: it seeds the server-managed ISO/IEC 42001 catalogue and
+# preserves legacy SOP state without guessing policy-control links.
+docker run --rm --network host -u 0 \
+  --env-file "`$root/app/deploy/.env" \
+  -v "`$stage/app/backend:/staged:ro" \
+  -v "`$stage/scripts/migrations:/migrations:ro" \
+  -w /staged "`$backend_image" \
+  python /migrations/009_canonical_grc_framework.py --database-url-env > "`$migration_009_report"
+test -s "`$migration_009_report"
+
+# 010 only adds auditable CVE-context storage. It never promotes legacy links.
+docker run --rm --network host -u 0 \
+  --env-file "`$root/app/deploy/.env" \
+  -v "`$stage/app/backend:/staged:ro" \
+  -v "`$stage/scripts/migrations:/migrations:ro" \
+  -w /staged "`$backend_image" \
+  python /migrations/010_live_cve_tes_context.py --database-url-env > "`$migration_010_report"
+test -s "`$migration_010_report"
+
 source_changed=1
 rsync -a --delete --exclude='deploy/.env' --exclude='freellmapi/.env' --exclude='backend/data/' "`$stage/app/" "`$root/app/"
 docker cp "`$stage/app/backend/data/v62_debrief_findings.json" tempris_backend:/app/data/v62_debrief_findings.json
@@ -148,6 +169,18 @@ docker run --rm --network host -u 0 \
   -v "`$stage/scripts/migrations:/migrations:ro" \
   -w /staged "`$backend_image" \
   python /migrations/008_canonical_posture_and_operations.py --database-url-env --dry-run >/dev/null
+docker run --rm --network host -u 0 \
+  --env-file "`$root/app/deploy/.env" \
+  -v "`$stage/app/backend:/staged:ro" \
+  -v "`$stage/scripts/migrations:/migrations:ro" \
+  -w /staged "`$backend_image" \
+  python /migrations/009_canonical_grc_framework.py --database-url-env --dry-run >/dev/null
+docker run --rm --network host -u 0 \
+  --env-file "`$root/app/deploy/.env" \
+  -v "`$stage/app/backend:/staged:ro" \
+  -v "`$stage/scripts/migrations:/migrations:ro" \
+  -w /staged "`$backend_image" \
+  python /migrations/010_live_cve_tes_context.py --database-url-env --dry-run >/dev/null
 printf '%s\n' '$commit' > "`$root/app/REVISION"
 
 source_changed=0

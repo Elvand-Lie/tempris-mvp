@@ -5,6 +5,9 @@ import os
 
 
 PHONE_METHOD = "#microsoft.graph.phoneAuthenticationMethod"
+# Connector-specific server rule for deprecated phone-based MFA.  Manual intake
+# must always supply SSS explicitly; this is not a universal fallback.
+ENTRA_LEGACY_PHONE_SSS = 7.0
 
 
 def entra_authentication_method_findings(
@@ -32,7 +35,7 @@ def entra_authentication_method_findings(
             "description": "Microsoft Graph authenticationMethods reports legacy phone-based MFA factors.",
             "affected_ecosystem": "Microsoft Entra ID",
             "attack_vectors": ["SMS_MFA", "VOICE_MFA"],
-            "base_severity": 7.0,
+            "base_severity": ENTRA_LEGACY_PHONE_SSS,
             "patch_available": True,
             "recommended_action": "PATCH",
             "itdr_source": "Microsoft Graph authenticationMethods",
@@ -59,6 +62,8 @@ def aev_verdict_finding(payload: dict) -> dict:
     if verdict not in {"allowed", "detected", "prevented"}:
         raise ValueError("verdict must be allowed, detected, or prevented")
     validate_aev_engagement_token(str(payload.get("engagement_token", "")))
+    if payload.get("base_severity") is None:
+        raise ValueError("base_severity is required for an AEV verdict")
     return {
         "finding_id": payload.get("finding_id") or f"SSS-AEV-{payload['path_id']}",
         "class": payload.get("finding_class") or "VALIDATION_EVIDENCE",
@@ -66,7 +71,7 @@ def aev_verdict_finding(payload: dict) -> dict:
         "title": payload.get("title") or f"AEV validation verdict for {payload['path_id']}",
         "description": payload.get("description") or "Third-party validation evidence received by SCOUT.",
         "affected_ecosystem": payload.get("affected_ecosystem") or "SCOUT AEV",
-        "base_severity": float(payload.get("base_severity", 7.0)),
+        "base_severity": float(payload["base_severity"]),
         "patch_available": bool(payload.get("patch_available", True)),
         "recommended_action": payload.get("recommended_action") or "INVESTIGATE",
         "path_id": payload["path_id"],

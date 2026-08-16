@@ -167,6 +167,19 @@ non-CVE -> SSS base --/                              |
 
 No browser component contains the contextual scoring internals.
 
+## GRC to non-CVE TES context
+
+```text
+ISO/IEC 42001:2023 framework definition
+  -> server-managed FrameworkControl
+  -> tenant ControlAssessment in SOP Builder
+  -> derived Gap Analysis
+  -> server-only live GRC context
+  -> open non-CVE finding TES refresh
+```
+
+Policy documents can be explicitly linked as supporting evidence, but a policy document neither creates a control nor changes a control's completion state. A confirmed AssetExposure is still required before an open finding affects CISO or SYNTHESIS customer posture.
+
 ## Exposure state transitions
 
 | From | Action | To | Canonical posture effect |

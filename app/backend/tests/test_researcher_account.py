@@ -152,6 +152,7 @@ def test_researcher_findings_are_not_visible_to_operational_tenant():
             "subtype": "IDOR",
             "title": "Tenant boundary test",
             "description": "Synthetic researcher-only tenant record.",
+            "base_severity": 5.0,
         },
     )
     assert created.status_code == 200

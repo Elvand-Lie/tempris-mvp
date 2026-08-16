@@ -8,17 +8,26 @@ References:
   - Singapore alignment: PDPA, MAS TRM, MAS FEAT, IMDA AI Governance Framework v2
 """
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 from services.database import get_db
 from services.entitlements import require_module
-from models import GrcState, GrcSignoff, GrcPolicyDocument, ControlEvidence, GeneratedReport
+from models import (
+    GrcState, GrcSignoff, GrcPolicyDocument, ControlEvidence, GeneratedReport,
+    ControlAssessment, FrameworkControl, PolicyControlLink,
+)
 from routers.audit import append_to_audit_log, AuditEntry
 from routers.auth import get_current_user, require_role, get_auth_context, scoped_evidence_query, EvidencePermission
 from services.operational_events import record_operational_event
+from services.grc_framework import (
+    CONTROL_CATALOG, ISO_42001_ID, ISO_42001_NAME, ISO_42001_VERSION,
+    assessment_rows, assessment_state, ensure_framework_catalog,
+    ensure_tenant_assessments, framework_controls, get_live_grc_modifiers,
+    qualitative_drivers, recalculate_open_sss_findings,
+)
 import os
 import json
 import re
@@ -115,52 +124,18 @@ def _verified_tenant_id(user: dict) -> str:
 # Ã¢â€â‚¬Ã¢â€â‚¬ ISO 42001 Control definitions Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 GRC_CONTROLS = [
-    {"id": "A.2.2", "domain": "AI Policy", "title": "Document AI Policy for Development / Use",
-     "sg_ref": "PDPA / MAS FEAT Principles", "tes_modifier": "AGM"},
-    {"id": "A.3.2", "domain": "Internal Org", "title": "Define & Allocate AI Roles and Responsibilities",
-     "sg_ref": "MAS TRM Guidelines Section 4", "tes_modifier": "AGM"},
-    {"id": "A.5.2", "domain": "Impact Assessment", "title": "Establish AI System Impact Assessment Process",
-     "sg_ref": "PDPA DPIA / MAS FEAT", "tes_modifier": "AGM"},
-    {"id": "A.6.2.2", "domain": "AI Lifecycle", "title": "Specify & Document AI System Requirements",
-     "sg_ref": "IMDA AI Governance Framework v2", "tes_modifier": "AGM"},
-    {"id": "A.7.4", "domain": "Data Quality", "title": "Define Data Quality Requirements for AI Systems",
-     "sg_ref": "MAS Notice 655 / ISO/IEC 25024", "tes_modifier": "DRF"},
-    {"id": "A.9.2", "domain": "Responsible Use", "title": "Define Processes for Responsible AI Use",
-     "sg_ref": "IMDA Model AI Governance Framework", "tes_modifier": "AGM"},
-    {"id": "A.10.3", "domain": "Third-party", "title": "Ensure Supplier AI Alignment with Org Policy",
-     "sg_ref": "MAS TRM Guidelines Section 9", "tes_modifier": "TEF"},
+    {"id": control_id, "domain": domain, "title": requirement, "description": description,
+     "tes_modifier": modifier_group}
+    for control_id, domain, requirement, description, modifier_group in CONTROL_CATALOG
 ]
 
-# Default toggle states
-DEFAULT_TOGGLES = {
-    "agm": [True, False, True, False, False],
-    "drf": [True, False, True],
-    "tef": [True, False],
-}
-
-
-TOGGLE_GROUP_LENGTHS = {"agm": 5, "drf": 3, "tef": 2}
-
-
-def _normalize_toggles(toggles) -> dict:
-    """Return the complete, typed toggle contract for legacy or malformed rows."""
-    source = toggles if isinstance(toggles, dict) else {}
-    normalized = {}
-    for key, default_values in DEFAULT_TOGGLES.items():
-        values = source.get(key)
-        if (
-            isinstance(values, list)
-            and len(values) == TOGGLE_GROUP_LENGTHS[key]
-            and all(isinstance(value, bool) for value in values)
-        ):
-            normalized[key] = list(values)
-        else:
-            normalized[key] = list(default_values)
-    return normalized
+def _legacy_toggle_snapshot(toggles) -> dict:
+    """Retain legacy native-client input without allowing it to drive risk."""
+    return toggles if isinstance(toggles, dict) else {}
 
 
 DEFAULT_SOP_STATE = [
-    {"id": c["id"], "pic": "", "notes": "", "endUserAgreed": False, "picAgreed": False}
+    {"id": c["id"], "status": "pending", "pic": "", "notes": "", "endUserAgreed": False, "picAgreed": False}
     for c in GRC_CONTROLS
 ]
 
@@ -192,6 +167,7 @@ def _normalize_sop_state(sop_state, fallback=None) -> list[dict]:
         source_item = source_state[idx] if source_state and isinstance(source_state[idx], dict) else {}
         normalized.append({
             "id": ctrl["id"],
+            "status": str(source_item.get("status", base_item.get("status", "pending"))).strip().lower().replace(" ", "_") if str(source_item.get("status", base_item.get("status", "pending"))).strip().lower().replace(" ", "_") in {"pending", "in_review", "completed"} else "pending",
             "pic": source_item.get("pic", base_item.get("pic", "")) if isinstance(source_item.get("pic", base_item.get("pic", "")), str) else base_item.get("pic", ""),
             "notes": source_item.get("notes", base_item.get("notes", "")) if isinstance(source_item.get("notes", base_item.get("notes", "")), str) else base_item.get("notes", ""),
             "endUserAgreed": _coerce_bool(source_item.get("endUserAgreed", base_item.get("endUserAgreed", False))),
@@ -228,17 +204,17 @@ def _signoff_state_from_db(db: Session, tenant_id: str) -> dict[str, set[str]]:
 
 
 def _effective_sop_state(db: Session, tenant_id: str) -> list[dict]:
-    base_state = _latest_sop_state_from_db(db, tenant_id)
-    signoff_state = _signoff_state_from_db(db, tenant_id)
-    merged = []
-    for entry in base_state:
-        control_signoffs = signoff_state.get(entry["id"], set())
-        merged.append({
-            **entry,
-            "endUserAgreed": "end_user" in control_signoffs,
-            "picAgreed": "pic" in control_signoffs,
-        })
-    return merged
+    return [
+        {
+            "id": control.control_id,
+            "pic": assessment.pic or "",
+            "notes": assessment.notes or "",
+            "status": status,
+            "endUserAgreed": bool(assessment.end_user_agreed),
+            "picAgreed": bool(assessment.pic_signed_off),
+        }
+        for control, assessment, status, _ in assessment_rows(db, tenant_id)
+    ]
 
 
 def _sync_signoff_record(
@@ -301,85 +277,23 @@ BASE_EXPOSURE = 0.7
 BASE_LIKELIHOOD = 0.6
 
 
-def _calc_agm(toggles: dict) -> float:
-    agm_list = toggles.get("agm", [True, False, True, False, False])
-    ratio = sum(1 for x in agm_list if x) / max(len(agm_list), 1)
-    return round(1.5 - 0.5 * ratio, 3)
-
-
-def _calc_drf(toggles: dict) -> float:
-    drf_list = toggles.get("drf", [True, False, True])
-    pts = 0
-    if len(drf_list) > 0 and not drf_list[0]:
-        pts += 1
-    if len(drf_list) > 1 and not drf_list[1]:
-        pts += 1
-    if len(drf_list) > 2 and drf_list[2]:  # bias exists = risk
-        pts += 1
-    return round(1.0 + pts * 0.1, 3)
-
-
-def _calc_tef(toggles: dict) -> float:
-    tef_list = toggles.get("tef", [True, False])
-    p = tef_list[0] if len(tef_list) > 0 else True
-    a = tef_list[1] if len(tef_list) > 1 else False
-    if p and a:
-        return 1.0
-    if p or a:
-        return 1.1
-    return 1.2
-
-
-def _calc_composite_tes(toggles: dict) -> dict:
-    toggles = _normalize_toggles(toggles)
-    agm = _calc_agm(toggles)
-    drf = _calc_drf(toggles)
-    tef = _calc_tef(toggles)
-    base = round(BASE_VULN * BASE_EXPOSURE * BASE_LIKELIHOOD, 3)
-    final = round(base * agm * drf * tef, 3)
-    
-    if final >= 7:
+def _public_ai_system_risk(db: Session, tenant_id: str) -> dict:
+    """Customer-safe presentation contract; never expose scoring internals."""
+    modifiers = get_live_grc_modifiers(db, tenant_id)
+    score = round(BASE_VULN * BASE_EXPOSURE * BASE_LIKELIHOOD * modifiers["AGM"] * modifiers["DRF"] * modifiers["TEF"], 3)
+    if score >= 7:
         band = "CRITICAL"
-        sla = "24 hours"
-    elif final >= 5:
+    elif score >= 5:
         band = "HIGH"
-        sla = "72 hours"
-    elif final >= 3:
+    elif score >= 3:
         band = "MEDIUM"
-        sla = "7 days"
     else:
         band = "LOW"
-        sla = "30 days"
-    
     return {
-        "score": final,
+        "score": round(float(score), 1),
         "band": band,
-        "sla": sla,
-        "base": base,
-        "agm": agm,
-        "drf": drf,
-        "tef": tef,
-    }
-
-
-def _public_ai_system_risk(toggles: dict) -> dict:
-    """Customer-safe presentation contract; never expose scoring internals."""
-    normalized = _normalize_toggles(toggles)
-    internal = _calc_composite_tes(normalized)
-    drivers = []
-    if not all(normalized.get("agm", [])):
-        drivers.append("Governance controls incomplete")
-    if not all(normalized.get("drf", [])[:2]) or any(normalized.get("drf", [])[2:]):
-        drivers.append("Data readiness or bias controls require attention")
-    if not all(normalized.get("tef", [])):
-        drivers.append("Third-party dependency risk present")
-    if not drivers:
-        drivers.append("Recorded governance controls are complete")
-    return {
-        "score": round(float(internal["score"]), 1),
-        "band": internal["band"],
         "direction": None,
-        "drivers": drivers,
+        "drivers": qualitative_drivers(db, tenant_id),
         "scope": "AI_SYSTEM",
         "subject": "AI-powered credit-scoring system",
         "as_of": datetime.now(timezone.utc).isoformat(),
@@ -389,13 +303,31 @@ def _public_ai_system_risk(toggles: dict) -> dict:
 # Ã¢â€â‚¬Ã¢â€â‚¬ Request Models Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 class GrcStateRequest(BaseModel):
-    toggles: dict
+    # Legacy native clients still send this field. It is retained only for compatibility.
+    toggles: dict = Field(default_factory=dict)
     sop_state: list[dict]
 
 class SignoffRequest(BaseModel):
     signoff_type: str  # 'end_user' or 'pic'
     signed: bool = True
     notes: Optional[str] = None
+
+
+def _save_assessments_from_sop_state(db: Session, tenant_id: str, sop_state: list[dict], actor: str) -> None:
+    supplied = {entry.get("id"): entry for entry in _normalize_sop_state(sop_state)}
+    for control, assessment, _, _ in assessment_rows(db, tenant_id):
+        entry = supplied[control.control_id]
+        requested = str(entry.get("status") or "").strip().lower().replace(" ", "_")
+        end_user = _coerce_bool(entry.get("endUserAgreed", False))
+        pic_signed = _coerce_bool(entry.get("picAgreed", False))
+        if requested not in {"pending", "in_review", "completed"}:
+            requested = "completed" if end_user and pic_signed else "in_review" if end_user or pic_signed else "pending"
+        assessment.status = requested
+        assessment.pic = entry.get("pic", "")
+        assessment.notes = entry.get("notes", "")
+        assessment.end_user_agreed = end_user
+        assessment.pic_signed_off = pic_signed
+        assessment.updated_by = actor
 
 # Ã¢â€â‚¬Ã¢â€â‚¬ Endpoints Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
@@ -433,58 +365,40 @@ def save_grc_state(
     db: Session = Depends(get_db),
     user = Depends(require_role("Superadmin", "Admin", "Analyst")),
 ):
-    """Save GRC toggles + SOP state. Logged in audit trail.
-    
-    Server-side validation: toggles must have correct structure and boolean values.
-    TES is always recalculated server-side to prevent score manipulation.
-    """
+    """Save canonical SOP state; legacy toggle input has no scoring effect."""
     # Ã¢â€â‚¬Ã¢â€â‚¬ Validate toggle structure Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     tenant_id = _verified_tenant_id(user)
-    toggles = req.toggles
-    EXPECTED_LENGTHS = {"agm": 5, "drf": 3, "tef": 2}
-    
-    for key, expected_len in EXPECTED_LENGTHS.items():
-        arr = toggles.get(key)
-        if arr is None:
-            raise HTTPException(status_code=400, detail=f"Missing toggle group: {key}")
-        if not isinstance(arr, list):
-            raise HTTPException(status_code=400, detail=f"Toggle group '{key}' must be an array")
-        if len(arr) != expected_len:
-            raise HTTPException(status_code=400, detail=f"Toggle group '{key}' must have exactly {expected_len} items, got {len(arr)}")
-        if not all(isinstance(v, bool) for v in arr):
-            raise HTTPException(status_code=400, detail=f"All values in toggle group '{key}' must be boolean")
-    
-    # Sanitize: only keep known keys
-    validated_toggles = {k: toggles[k] for k in EXPECTED_LENGTHS}
+    actor = user.get("sub", "unknown")
     validated_sop_state = _normalize_sop_state(req.sop_state)
+    _save_assessments_from_sop_state(db, tenant_id, validated_sop_state, actor)
+    _sync_signoffs_from_sop_state(db, tenant_id, validated_sop_state, actor)
 
-    _sync_signoffs_from_sop_state(
-        db=db,
-        tenant_id=tenant_id,
-        sop_state=validated_sop_state,
-        signed_by=user.get("sub", "unknown"),
-    )
-    
+    # Keep an immutable compatibility snapshot for the existing native client.
     state = GrcState(
         tenant_id=tenant_id,
-        toggles=validated_toggles,
+        toggles=_legacy_toggle_snapshot(req.toggles),
         sop_state=validated_sop_state,
-        updated_by=user.get("sub", "unknown"),
+        updated_by=actor,
     )
     db.add(state)
+    recalculated = recalculate_open_sss_findings(db, tenant_id, actor)
     db.commit()
     db.refresh(state)
-    
-    # Calculate TES server-side from validated toggles
-    risk_score = _public_ai_system_risk(validated_toggles)
+    risk_score = _public_ai_system_risk(db, tenant_id)
     
     append_to_audit_log(AuditEntry(
-        user=user.get("sub", "unknown"),
+        user=actor,
         action="GRC_STATE_UPDATED",
         module="GRC",
         detail=f"GRC state saved. AI-system risk score: {risk_score['score']} ({risk_score['band']})."
     ))
     
+    for finding_id in recalculated:
+        try:
+            from routers.edip import _publish_sss_event
+            _publish_sss_event(tenant_id, {"type": "finding.refresh", "finding_id": finding_id, "reason": "grc_assessment_changed"})
+        except Exception:
+            pass
     return {"status": "saved", "id": state.id, "risk_score": risk_score}
 
 @router.get("/tes-score")
@@ -494,19 +408,77 @@ def get_tes_score(
 ):
     """Compatibility route returning the safe AI-system risk presentation."""
     tenant_id = _verified_tenant_id(user)
-    state = (
-        db.query(GrcState)
-        .filter(GrcState.tenant_id == tenant_id)
-        .order_by(GrcState.id.desc())
-        .first()
-    )
-    toggles = _normalize_toggles(state.toggles if state else None)
-    return _public_ai_system_risk(toggles)
+    return _public_ai_system_risk(db, tenant_id)
 
 @router.get("/controls")
-def get_grc_controls(user = Depends(get_current_user)):
+def get_grc_controls(db: Session = Depends(get_db), user = Depends(get_current_user)):
     """Return the ISO 42001 control definitions."""
-    return [{key: value for key, value in control.items() if key != "tes_modifier"} for control in GRC_CONTROLS]
+    _verified_tenant_id(user)
+    return [{
+        "id": control.control_id,
+        "framework_id": control.framework_id,
+        "framework_version": control.framework_version,
+        "control_id": control.control_id,
+        "domain": control.domain,
+        "requirement": control.requirement,
+        "title": control.requirement,
+        "sg_ref": ISO_42001_NAME,
+        "description": control.description,
+        "modifier_group": control.modifier_group,
+        "display_order": control.display_order,
+    } for control in framework_controls(db)]
+
+
+@router.get("/assessments")
+def list_control_assessments(
+    q: str = "",
+    status: str = "",
+    modifier_group: str = "",
+    page: int = 1,
+    page_size: int = 25,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Canonical SOP assessment list used by both SOP Builder and Gap Analysis."""
+    tenant_id = _verified_tenant_id(user)
+    page = max(1, page)
+    page_size = min(max(1, page_size), 100)
+    query = q.strip().lower()
+    wanted_status = status.strip().lower().replace(" ", "_")
+    wanted_group = modifier_group.strip().upper()
+    rows = []
+    for control, assessment, label, completion in assessment_rows(db, tenant_id):
+        normalized_status = label.lower().replace(" ", "_")
+        searchable = " ".join((control.control_id, control.domain, control.requirement)).lower()
+        if query and query not in searchable:
+            continue
+        if wanted_status and wanted_status != normalized_status:
+            continue
+        if wanted_group and wanted_group != control.modifier_group:
+            continue
+        rows.append({
+            "framework_id": control.framework_id,
+            "framework_version": control.framework_version,
+            "control_id": control.control_id,
+            "domain": control.domain,
+            "requirement": control.requirement,
+            "description": control.description,
+            "modifier_group": control.modifier_group,
+            "status": label,
+            "pic": assessment.pic or "",
+            "notes": assessment.notes or "",
+            "end_user_agreed": bool(assessment.end_user_agreed),
+            "pic_signed_off": bool(assessment.pic_signed_off),
+            "evidence_count": db.query(ControlEvidence).filter(
+                ControlEvidence.tenant_id == tenant_id,
+                ControlEvidence.framework_id == ISO_42001_ID,
+                ControlEvidence.control_id == control.control_id,
+            ).count(),
+            "updated_at": assessment.updated_at.isoformat() if assessment.updated_at else None,
+        })
+    total = len(rows)
+    start = (page - 1) * page_size
+    return {"framework": ISO_42001_NAME, "items": rows[start:start + page_size], "total": total, "page": page, "page_size": page_size}
 
 @router.post("/signoff/{control_id}")
 def record_signoff(
@@ -533,6 +505,15 @@ def record_signoff(
         signed_by=user.get("sub", "unknown"),
         notes=req.notes,
     )
+    assessment = next(row for control, row, _, _ in assessment_rows(db, tenant_id) if control.control_id == control_id)
+    if req.signoff_type == "end_user":
+        assessment.end_user_agreed = req.signed
+    else:
+        assessment.pic_signed_off = req.signed
+    if assessment.status == "pending" and req.signed:
+        assessment.status = "in_review"
+    assessment.updated_by = user.get("sub", "unknown")
+    recalculated = recalculate_open_sss_findings(db, tenant_id, user.get("sub", "unknown"))
     db.commit()
     
     append_to_audit_log(AuditEntry(
@@ -542,6 +523,9 @@ def record_signoff(
         detail=f"ISO 42001 {control_id} ({ctrl['title']}): {req.signoff_type} sign-off {action}"
     ))
     
+    for finding_id in recalculated:
+        from routers.edip import _publish_sss_event
+        _publish_sss_event(tenant_id, {"type": "finding.refresh", "finding_id": finding_id, "reason": "grc_signoff_changed"})
     return {"status": action, "control_id": control_id, "signoff_type": req.signoff_type}
 
 @router.get("/gap-analysis")
@@ -549,32 +533,29 @@ def get_gap_analysis(
     db: Session = Depends(get_db),
     user = Depends(get_current_user),
 ):
-    """Return gap analysis derived from SOP state."""
-    sop_state = _effective_sop_state(db, _verified_tenant_id(user))
-    
+    """Return the read-only derived view of canonical SOP assessments."""
+    tenant_id = _verified_tenant_id(user)
     results = []
     completed = 0
     in_review = 0
     pending = 0
     
-    for i, ctrl in enumerate(GRC_CONTROLS):
-        s = sop_state[i] if i < len(sop_state) else {"endUserAgreed": False, "picAgreed": False, "pic": ""}
-        if s.get("endUserAgreed") and s.get("picAgreed"):
-            status = "Completed"
+    for ctrl, assessment, status, _ in assessment_rows(db, tenant_id):
+        if status == "Completed":
             completed += 1
-        elif s.get("endUserAgreed") or s.get("picAgreed"):
-            status = "In Review"
+        elif status == "In Review":
             in_review += 1
         else:
-            status = "Pending"
             pending += 1
         
         results.append({
-            "control_id": ctrl["id"],
-            "domain": ctrl["domain"],
-            "title": ctrl["title"],
-            "sg_ref": ctrl["sg_ref"],
-            "pic": s.get("pic", ""),
+            "framework_id": ctrl.framework_id,
+            "control_id": ctrl.control_id,
+            "domain": ctrl.domain,
+            "title": ctrl.requirement,
+            "sg_ref": ISO_42001_NAME,
+            "modifier_group": ctrl.modifier_group,
+            "pic": assessment.pic or "",
             "status": status,
         })
     
@@ -673,32 +654,18 @@ def get_ai_policy_status(
     user=Depends(get_current_user),
 ):
     """ISO 42001 compliance dashboard: returns overall AI governance posture."""
-    # Get current GRC state for toggle-based scoring
     tenant_id = _verified_tenant_id(user)
-    state = (
-        db.query(GrcState)
-        .filter(GrcState.tenant_id == tenant_id)
-        .order_by(GrcState.id.desc())
-        .first()
-    )
-    toggles = _normalize_toggles(state.toggles if state else None)
-    tes = _calc_composite_tes(toggles)
-
-    # Get signoff progress
-    signoff_state = _signoff_state_from_db(db, tenant_id)
-
-    ai_controls = [c for c in GRC_CONTROLS]
+    tes = _public_ai_system_risk(db, tenant_id)
+    ai_controls = assessment_rows(db, tenant_id)
     ai_compliance = []
-    for ctrl in ai_controls:
-        control_signoffs = signoff_state.get(ctrl["id"], set())
-        has_signoff = "end_user" in control_signoffs and "pic" in control_signoffs
+    for ctrl, assessment, status, _ in ai_controls:
+        has_signoff = status == "Completed"
         ai_compliance.append({
-            "control_id": ctrl["id"],
-            "domain": ctrl["domain"],
-            "title": ctrl["title"],
-            "sg_ref": ctrl["sg_ref"],
+            "control_id": ctrl.control_id,
+            "domain": ctrl.domain,
+            "title": ctrl.requirement,
             "signed_off": has_signoff,
-            "status": "Implemented" if has_signoff else "In Progress",
+            "status": "Implemented" if has_signoff else status,
         })
 
     implemented = len([c for c in ai_compliance if c["signed_off"]])
@@ -779,7 +746,40 @@ def _slugify_policy_id(title: str) -> str:
     return slug[:70] or f"policy-{uuid4().hex[:8]}"
 
 
-def _policy_row_to_dict(row: GrcPolicyDocument) -> dict:
+def _policy_links(db: Session, tenant_id: str, policy_id: str) -> list[dict]:
+    return [{"framework_id": row.framework_id, "control_id": row.control_id, "relation_type": row.relation_type}
+            for row in db.query(PolicyControlLink).filter(
+                PolicyControlLink.tenant_id == tenant_id,
+                PolicyControlLink.policy_id == policy_id,
+            ).order_by(PolicyControlLink.framework_id, PolicyControlLink.control_id).all()]
+
+
+def _replace_policy_links(
+    db: Session, tenant_id: str, policy_id: str, framework_id: str | None,
+    control_ids: list[str], unmapped: bool, actor: str,
+) -> None:
+    if control_ids:
+        if framework_id != ISO_42001_ID:
+            raise HTTPException(status_code=422, detail="Policies may link only to ISO/IEC 42001:2023 controls")
+        valid = {control.control_id for control in framework_controls(db)}
+        invalid = sorted(set(control_ids) - valid)
+        if invalid:
+            raise HTTPException(status_code=422, detail=f"Unknown framework controls: {', '.join(invalid)}")
+    elif not unmapped:
+        raise HTTPException(status_code=422, detail="Select one or more controls or explicitly mark the policy unmapped")
+    db.query(PolicyControlLink).filter(
+        PolicyControlLink.tenant_id == tenant_id,
+        PolicyControlLink.policy_id == policy_id,
+    ).delete(synchronize_session=False)
+    for control_id in sorted(set(control_ids)):
+        db.add(PolicyControlLink(
+            tenant_id=tenant_id, policy_id=policy_id, framework_id=framework_id,
+            control_id=control_id, relation_type="supporting_evidence", created_by=actor,
+        ))
+
+
+def _policy_row_to_dict(row: GrcPolicyDocument, db: Session | None = None) -> dict:
+    links = _policy_links(db, row.tenant_id, row.id) if db is not None else []
     return {
         "id": row.id,
         "title": row.title,
@@ -795,11 +795,19 @@ def _policy_row_to_dict(row: GrcPolicyDocument) -> dict:
         "supersedes_id": row.supersedes_id,
         "superseded_by_id": row.superseded_by_id,
         "size_bytes": len((row.content or "").encode("utf-8")),
+        "framework_id": links[0]["framework_id"] if links else None,
+        "linked_controls": links,
+        "unmapped": not links,
+        "scoring_effect": "None directly — supporting evidence only",
     }
 
 
 @router.get("/policies")
-def list_policies(db: Session = Depends(get_db), user=Depends(get_current_user)):
+def list_policies(
+    q: str = "", framework_id: str = "", control_id: str = "", source: str = "",
+    lifecycle: str = "", page: int = 1, page_size: int = 25,
+    db: Session = Depends(get_db), user=Depends(get_current_user),
+):
     """List all available policy documents with metadata."""
     tenant_id = _verified_tenant_id(user)
     policies = []
@@ -807,6 +815,7 @@ def list_policies(db: Session = Depends(get_db), user=Depends(get_current_user))
         filepath = _policy_path(meta)
         exists = filepath.exists()
         size = filepath.stat().st_size if exists else 0
+        links = _policy_links(db, tenant_id, key)
         policies.append({
             "id": key,
             "title": meta["title"],
@@ -818,6 +827,10 @@ def list_policies(db: Session = Depends(get_db), user=Depends(get_current_user))
             "available": exists,
             "source": "bundled",
             "size_bytes": size,
+            "framework_id": links[0]["framework_id"] if links else None,
+            "linked_controls": links,
+            "unmapped": not links,
+            "scoring_effect": "None directly — supporting evidence only",
         })
     custom_rows = (
         db.query(GrcPolicyDocument)
@@ -825,8 +838,24 @@ def list_policies(db: Session = Depends(get_db), user=Depends(get_current_user))
         .order_by(GrcPolicyDocument.created_at.desc())
         .all()
     )
-    policies.extend(_policy_row_to_dict(row) for row in custom_rows)
-    return {"policies": policies, "total": len(policies)}
+    policies.extend(_policy_row_to_dict(row, db) for row in custom_rows)
+    q = q.strip().lower()
+    source = source.strip().lower()
+    lifecycle = lifecycle.strip().lower()
+    control_id = control_id.strip()
+    framework_id = framework_id.strip()
+    policies = [item for item in policies if (
+        (not q or q in item["title"].lower())
+        and (not source or item["source"] == source)
+        and (not framework_id or item.get("framework_id") == framework_id)
+        and (not control_id or any(link["control_id"] == control_id for link in item["linked_controls"]))
+        and (not lifecycle or ("archived" if item.get("archived") else "active") == lifecycle)
+    )]
+    page = max(1, page)
+    page_size = min(max(1, page_size), 100)
+    total = len(policies)
+    start = (page - 1) * page_size
+    return {"policies": policies[start:start + page_size], "total": total, "page": page, "page_size": page_size}
 
 
 class PolicyCreate(BaseModel):
@@ -837,6 +866,11 @@ class PolicyCreate(BaseModel):
     owner: str = "CSRO"
     review_cycle: str = "Annual"
     content: str = ""
+    framework_id: str | None = None
+    control_ids: list[str] = Field(default_factory=list)
+    # The caller must deliberately choose an unmapped supporting document when
+    # it does not link to an ISO control.
+    unmapped: bool
 
 
 class PolicyArchiveRequest(BaseModel):
@@ -847,6 +881,12 @@ class PolicySupersedeRequest(BaseModel):
     version: str
     content: str
     title: str | None = None
+
+
+class PolicyControlLinksUpdate(BaseModel):
+    framework_id: str | None = None
+    control_ids: list[str] = Field(default_factory=list)
+    unmapped: bool = False
 
 
 @router.post("/policies")
@@ -879,6 +919,11 @@ def create_policy(payload: PolicyCreate, db: Session = Depends(get_db), user=Dep
         created_by=user.get("sub", "unknown"),
     )
     db.add(row)
+    db.flush()
+    _replace_policy_links(
+        db, tenant_id, row.id, payload.framework_id, payload.control_ids,
+        payload.unmapped, user.get("sub", "unknown"),
+    )
     record_operational_event(
         db, tenant_id=tenant_id, event_type="policy.created",
         resource_type="grc_policy", resource_id=row.id, source_module="GRC",
@@ -893,7 +938,7 @@ def create_policy(payload: PolicyCreate, db: Session = Depends(get_db), user=Dep
         module="GRC",
         detail=f"Created custom policy document: {row.title}"
     ))
-    return _policy_row_to_dict(row)
+    return _policy_row_to_dict(row, db)
 
 
 @router.get("/policies/{policy_id}")
@@ -914,7 +959,7 @@ def get_policy(policy_id: str, db: Session = Depends(get_db), user=Depends(get_c
             module="GRC",
             detail=f"Viewed custom policy: {row.title}"
         ))
-        data = _policy_row_to_dict(row)
+        data = _policy_row_to_dict(row, db)
         data["content"] = row.content
         return data
 
@@ -932,6 +977,7 @@ def get_policy(policy_id: str, db: Session = Depends(get_db), user=Depends(get_c
         detail=f"Viewed policy: {meta['title']}"
     ))
 
+    links = _policy_links(db, tenant_id, policy_id)
     return {
         "id": policy_id,
         "title": meta["title"],
@@ -940,6 +986,10 @@ def get_policy(policy_id: str, db: Session = Depends(get_db), user=Depends(get_c
         "status": meta["status"],
         "owner": meta["owner"],
         "content": content,
+        "framework_id": links[0]["framework_id"] if links else None,
+        "linked_controls": links,
+        "unmapped": not links,
+        "scoring_effect": "None directly — supporting evidence only",
     }
 
 
@@ -997,6 +1047,28 @@ def update_policy(policy_id: str, payload: PolicyUpdate, db: Session = Depends(g
     return {"message": "Policy updated successfully"}
 
 
+@router.put("/policies/{policy_id}/links")
+def update_policy_links(
+    policy_id: str,
+    payload: PolicyControlLinksUpdate,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("Superadmin", "Admin")),
+):
+    tenant_id = _verified_tenant_id(user)
+    if policy_id not in POLICY_REGISTRY:
+        _custom_policy_or_404(db, tenant_id, policy_id)
+    _replace_policy_links(
+        db, tenant_id, policy_id, payload.framework_id, payload.control_ids,
+        payload.unmapped, user.get("sub", "unknown"),
+    )
+    db.commit()
+    append_to_audit_log(AuditEntry(
+        user=user.get("sub", "unknown"), action="POLICY_CONTROL_LINKS_UPDATED", module="GRC",
+        detail=f"Updated explicit control links for policy {policy_id}",
+    ))
+    return {"policy_id": policy_id, "linked_controls": _policy_links(db, tenant_id, policy_id), "scoring_effect": "None directly — supporting evidence only"}
+
+
 def _custom_policy_or_404(db: Session, tenant_id: str, policy_id: str) -> GrcPolicyDocument:
     if policy_id in POLICY_REGISTRY:
         raise HTTPException(status_code=409, detail="Bundled policies are immutable and cannot be deleted")
@@ -1010,6 +1082,11 @@ def _custom_policy_or_404(db: Session, tenant_id: str, policy_id: str) -> GrcPol
 
 
 def _policy_is_referenced(db: Session, row: GrcPolicyDocument) -> bool:
+    if db.query(PolicyControlLink).filter(
+        PolicyControlLink.tenant_id == row.tenant_id,
+        PolicyControlLink.policy_id == row.id,
+    ).first():
+        return True
     if db.query(GrcPolicyDocument).filter(
         GrcPolicyDocument.tenant_id == row.tenant_id,
         GrcPolicyDocument.id != row.id,
@@ -1043,7 +1120,7 @@ def set_policy_archive(
         user=actor, action="POLICY_ARCHIVED" if payload.archived else "POLICY_RESTORED",
         module="GRC", detail=f"{'Archived' if payload.archived else 'Restored'} custom policy {row.id}",
     ))
-    return _policy_row_to_dict(row)
+    return _policy_row_to_dict(row, db)
 
 
 @router.post("/policies/{policy_id}/supersede")
@@ -1072,6 +1149,12 @@ def supersede_policy(
     old.archived_at = datetime.now(timezone.utc)
     old.archived_by = actor
     db.add(new)
+    db.flush()
+    for link in _policy_links(db, tenant_id, old.id):
+        db.add(PolicyControlLink(
+            tenant_id=tenant_id, policy_id=new.id, framework_id=link["framework_id"],
+            control_id=link["control_id"], relation_type=link["relation_type"], created_by=actor,
+        ))
     record_operational_event(
         db, tenant_id=tenant_id, event_type="policy.superseded",
         resource_type="grc_policy", resource_id=old.id, source_module="GRC", actor_id=actor,
@@ -1082,7 +1165,7 @@ def supersede_policy(
         user=actor, action="POLICY_SUPERSEDED", module="GRC",
         detail=f"Superseded custom policy {old.id} with {new.id}",
     ))
-    return {"superseded": _policy_row_to_dict(old), "replacement": _policy_row_to_dict(new)}
+    return {"superseded": _policy_row_to_dict(old, db), "replacement": _policy_row_to_dict(new, db)}
 
 
 @router.delete("/policies/{policy_id}")

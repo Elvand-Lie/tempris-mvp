@@ -137,7 +137,9 @@ def build_customer_posture(db: Session, tenant_id: str) -> dict:
     unscoreable_ids: list[str] = []
     for finding in confirmed_findings:
         try:
-            score_rows.append((finding, float(calculate_finding_tes(_finding_to_dict(finding)))))
+            score_rows.append((finding, float(calculate_finding_tes(
+                _finding_to_dict(finding), db=db, tenant_id=tenant_id,
+            ))))
         except (KeyError, TypeError, ValueError):
             unscoreable_ids.append(finding.id)
     aggregate_tes = (

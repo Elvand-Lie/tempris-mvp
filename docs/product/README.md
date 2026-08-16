@@ -27,6 +27,8 @@ The structured source of truth is [`tempris_data_dictionary.yaml`](tempris_data_
 - [Known limitations and decisions](TEMPRIS_KNOWN_LIMITATIONS_AND_DECISIONS.md): deliberate boundaries and open clarifications.
 - [Canonicalization changelog](TEMPRIS_CANONICALIZATION_CHANGELOG.md): changes from legacy semantics.
 - [Migration 008 runbook](TEMPRIS_MIGRATION_008_RUNBOOK.md): backup, rehearsal, verification, release, and rollback procedure.
+- [Migration 009 runbook](TEMPRIS_MIGRATION_009_RUNBOOK.md): canonical GRC framework/control rehearsal, verification, and rollback procedure.
+- [Migration 010 runbook](TEMPRIS_MIGRATION_010_RUNBOOK.md): additive live CVE-context storage rehearsal, verification, and rollback procedure.
 - [Production validation status](TEMPRIS_PRODUCTION_VALIDATION_STATUS.md): latest completed checks and outstanding release gates.
 
 ## Evidence convention
@@ -39,6 +41,7 @@ Paths are relative to `app/backend` or `app/frontend`. The primary implementatio
 - `services/reporting_engine.py::generate_poc_report_pipeline`
 - `routers/ciso.py::get_ciso_summary`
 - `routers/standard.py::list_frameworks` and `generate_mas_trm_incident_report`
+- `services/grc_framework.py::get_live_grc_modifiers` and `recalculate_open_sss_findings`
 - `extensions/tempris-modules.js`
 
 Where the repository does not establish a product fact, the documents use **UNVERIFIED / PRODUCT CLARIFICATION REQUIRED** instead of guessing.

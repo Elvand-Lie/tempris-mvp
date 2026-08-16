@@ -21,6 +21,7 @@ from services.cvss_remap import v2_to_v31_remap
 from services.scout_connectors import aev_verdict_finding, entra_authentication_method_findings
 from services.sss_contract import FindingClass, FindingSubclass, deadline_state, public_sss_output, validate_subclass
 from services.operational_events import record_operational_event
+from services.grc_framework import get_live_grc_modifiers
 
 router = APIRouter()
 
@@ -81,10 +82,11 @@ class SssIntake(BaseModel):
     description: str = Field(..., max_length=2000)
     affected_ecosystem: str = Field(default="Application", max_length=255)
     attack_vectors: list[str] = Field(default_factory=list)
-    base_severity: float = Field(default=7.0, ge=0, le=10)
-    agm: float = Field(default=1.0, ge=0, le=2)
-    drf: float = Field(default=1.0, ge=0, le=2)
-    tef: float = Field(default=1.0, ge=0, le=2)
+    base_severity: float | None = Field(default=None, ge=0, le=10)
+    # Accepted only for backwards-compatible clients. Live GRC state is authoritative.
+    agm: float | None = Field(default=None, ge=0, le=2)
+    drf: float | None = Field(default=None, ge=0, le=2)
+    tef: float | None = Field(default=None, ge=0, le=2)
     patch_available: bool = False
     source_tool: str = Field(default="Manual", max_length=100)
     pii_exposed: bool = False
@@ -144,6 +146,8 @@ class SssIntake(BaseModel):
                     "BLFLAW requires subtype: " + ", ".join(sorted(BLFLAW_SUBTYPES))
                 )
             self.finding_subtype = subtype
+        if self.base_severity is None:
+            raise ValueError("SSS base severity is required for non-CVE intake")
         if category == FindingClass.IDENTITY_POSTURE.value and not self.sub_class:
             raise ValueError("IDENTITY_POSTURE requires sub_class")
         if category == FindingClass.AGENTIC_EXPOSURE.value:
@@ -221,7 +225,7 @@ class AevVerdictIntake(BaseModel):
     title: str | None = Field(default=None, max_length=255)
     description: str | None = Field(default=None, max_length=2000)
     affected_ecosystem: str | None = Field(default=None, max_length=255)
-    base_severity: float = Field(default=7.0, ge=0, le=10)
+    base_severity: float = Field(..., ge=0, le=10)
     patch_available: bool = True
     recommended_action: str = "INVESTIGATE"
 
@@ -270,7 +274,13 @@ def _create_finding(
     category = (req.finding_class or req.finding_type or kind).upper()
     sub_class = validate_subclass(category, req.sub_class)
     subtype = req.finding_subtype
-    scoring = {"base_severity": req.base_severity, "AGM": req.agm, "DRF": req.drf, "TEF": req.tef}
+    live_modifiers = get_live_grc_modifiers(db, tenant_id)
+    scoring = {
+        "base_severity": req.base_severity,
+        "AGM": live_modifiers["AGM"],
+        "DRF": live_modifiers["DRF"],
+        "TEF": live_modifiers["TEF"],
+    }
     tes = calculate_sss_tes(scoring)
     public_decision = engine_decision or public_decision_for_finding(
         {"sss_data": {"patch_available": req.patch_available}, "source": "sss"},
@@ -325,9 +335,9 @@ def _create_finding(
         raw_inputs={
             "cvss": req.base_severity,
             "exploitability": 10.0,
-            "business_impact": min(10.0, req.base_severity * req.drf),
-            "asset_criticality": min(10.0, 7.0 * req.tef),
-            "threat_actor_activity": min(10.0, 7.0 * req.agm),
+            "business_impact": req.base_severity,
+            "asset_criticality": 7.0,
+            "threat_actor_activity": 7.0,
         },
         asset_id=req.asset_id,
         asset_data=({
@@ -349,6 +359,7 @@ def _create_finding(
             "pii_exposed": req.pii_exposed,
             "compensating_control_notes": req.compensating_control_notes,
             "scoring": scoring,
+            "modifier_snapshot": {**live_modifiers, "reason": "intake"},
             "patch_available": req.patch_available,
             "compensating_controls": req.compensating_controls,
             "attack_vectors": req.attack_vectors,
@@ -393,7 +404,13 @@ def _upsert_connector_finding(
         return _create_finding(db, req, kind, tenant_id, connector_data=connector_data), True
 
     category = (req.finding_class or req.finding_type or kind).upper()
-    scoring = {"base_severity": req.base_severity, "AGM": req.agm, "DRF": req.drf, "TEF": req.tef}
+    live_modifiers = get_live_grc_modifiers(db, tenant_id)
+    scoring = {
+        "base_severity": req.base_severity,
+        "AGM": live_modifiers["AGM"],
+        "DRF": live_modifiers["DRF"],
+        "TEF": live_modifiers["TEF"],
+    }
     score = calculate_sss_tes(scoring)
     decision = public_decision_for_finding(
         {"sss_data": {"patch_available": req.patch_available}, "source": "sss"}, score
@@ -437,6 +454,7 @@ def _upsert_connector_finding(
         "sub_class": existing.sub_class,
         "source_tool": req.source_tool,
         "scoring": scoring,
+        "modifier_snapshot": {**live_modifiers, "reason": "connector_sync"},
         "patch_available": req.patch_available,
         "attack_vectors": req.attack_vectors,
         "engine_decision": decision,
@@ -448,7 +466,7 @@ def _upsert_connector_finding(
     return existing, False
 
 
-def _public(f: Finding) -> dict:
+def _public(f: Finding, db: Session | None = None) -> dict:
     sss = f.sss_data or {}
     data = {
         "id": f.id,
@@ -475,7 +493,8 @@ def _public(f: Finding) -> dict:
         "source_references": sss.get("references", []),
     }
     data.update(public_sss_output(sss))
-    score = calculate_sss_tes(sss.get("scoring", {}))
+    live_modifiers = get_live_grc_modifiers(db, f.tenant_id) if db is not None else None
+    score = calculate_sss_tes(sss.get("scoring", {}), live_modifiers=live_modifiers)
     data["sss"] = round(float(sss.get("scoring", {}).get("base_severity", f.cvss or 0)), 2)
     data["tes_score"] = score
     data["tes"] = score
@@ -490,7 +509,7 @@ def _list_findings(db: Session, kind: str, tenant_id: str) -> list[dict]:
         Finding.source == "sss",
         Finding.tenant_id == tenant_id,
     ).order_by(Finding.created_at.desc()).limit(300).all()
-    return [_public(f) for f in rows if ((f.sss_data or {}).get("source") == kind or (f.sss_data or {}).get("type") == kind)]
+    return [_public(f, db) for f in rows if ((f.sss_data or {}).get("source") == kind or (f.sss_data or {}).get("type") == kind)]
 
 
 def _audit_connector(db: Session, request: Request, user: dict, action: str, detail: str) -> None:
@@ -523,7 +542,7 @@ def create_sss(
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _public(finding)
+    return _public(finding, db)
 
 
 @router.get("/intake/sss")
@@ -540,7 +559,7 @@ def list_sss(
     links = confirmed_asset_ids_by_finding(db, tenant_id, assets)
     data = []
     for finding in rows:
-        item = _public(finding)
+        item = _public(finding, db)
         asset_ids = sorted(links.get(finding.id, set()))
         item["asset_ids"] = asset_ids
         item["assets"] = [
@@ -615,7 +634,10 @@ def update_sss(
             sss["kev_due"] = req.kev_due
         else:
             sss.pop("kev_due", None)
+    live_modifiers = get_live_grc_modifiers(db, tenant_id)
+    scoring.update({key: live_modifiers[key] for key in ("AGM", "DRF", "TEF")})
     sss["scoring"] = scoring
+    sss["modifier_snapshot"] = {**live_modifiers, "reason": "intake_update"}
     sss.pop("engine_decision", None)
     score = calculate_sss_tes(scoring)
     decision = public_decision_for_finding({"sss_data": sss, "source": "sss"}, score)
@@ -636,7 +658,7 @@ def update_sss(
             "watch_flag": req.watch_flag,
             "kev_due": sss.get("kev_due"),
         })
-    return _public(finding)
+    return _public(finding, db)
 
 
 @router.post("/intake/sss/{finding_id}/resolve")
@@ -676,7 +698,7 @@ def resolve_sss(
     db.commit()
     db.refresh(finding)
     _publish_sss_event(_tenant_id(user), {"type": "finding.refresh", "finding_id": finding.id, "status": "resolved"})
-    return _public(finding)
+    return _public(finding, db)
 
 
 @router.post("/intake/legacy-cve")
@@ -724,7 +746,7 @@ def create_legacy_cve(
     except HTTPException:
         db.rollback()
         raise
-    response = _public(finding)
+    response = _public(finding, db)
     response["cvss_remap"] = remap
     return response
 
@@ -763,7 +785,7 @@ def ingest_entra_authentication_methods(
         db.rollback()
         raise
     return {
-        "data": [_public(finding) for finding in findings],
+        "data": [_public(finding, db) for finding in findings],
         "flagged_users": len(findings),
         "created": created_count,
         "updated": len(findings) - created_count,
@@ -824,7 +846,7 @@ def ingest_aev_verdict(
     except HTTPException:
         db.rollback()
         raise
-    response = _public(finding)
+    response = _public(finding, db)
     _publish_sss_event(tenant_id, {
         "type": "sss.finding",
         "finding_id": finding.id,
@@ -854,7 +876,7 @@ def create_blflaw(req: SssIntake, request: Request, db: Session = Depends(get_db
     except Exception:
         db.rollback()
         raise HTTPException(status_code=500, detail="EDIP intake failed")
-    return _public(finding)
+    return _public(finding, db)
 
 
 @router.get("/intake/blflaw")
@@ -875,13 +897,14 @@ def update_blflaw(finding_id: str, req: SssIntake, db: Session = Depends(get_db)
     f.vendor = req.affected_ecosystem
     f.product = ", ".join(req.attack_vectors)
     f.required_action = req.recommended_action
-    scoring = {"base_severity": req.base_severity, "AGM": req.agm, "DRF": req.drf, "TEF": req.tef}
+    live_modifiers = get_live_grc_modifiers(db, _tenant_id(user))
+    scoring = {"base_severity": req.base_severity, **{key: live_modifiers[key] for key in ("AGM", "DRF", "TEF")}}
     f.cvss = req.base_severity
     f.priority = priority_from_tes(calculate_sss_tes(scoring))
-    f.sss_data = {**(f.sss_data or {}), "type": req.finding_type or "BLFLAW", "source": "BLFLAW", "scoring": scoring, "patch_available": req.patch_available, "compensating_controls": req.compensating_controls, "attack_vectors": req.attack_vectors, "references": req.references}
+    f.sss_data = {**(f.sss_data or {}), "type": req.finding_type or "BLFLAW", "source": "BLFLAW", "scoring": scoring, "modifier_snapshot": {**live_modifiers, "reason": "intake_update"}, "patch_available": req.patch_available, "compensating_controls": req.compensating_controls, "attack_vectors": req.attack_vectors, "references": req.references}
     db.commit()
     db.refresh(f)
-    return _public(f)
+    return _public(f, db)
 
 
 @router.post("/intake/nhi")
@@ -903,7 +926,7 @@ def create_nhi(req: SssIntake, request: Request, db: Session = Depends(get_db), 
     except Exception:
         db.rollback()
         raise HTTPException(status_code=500, detail="EDIP intake failed")
-    return _public(finding)
+    return _public(finding, db)
 
 
 @router.get("/intake/nhi")
@@ -912,4 +935,4 @@ def list_nhi(db: Session = Depends(get_db), user=Depends(require_role("Superadmi
         Finding.source == "sss",
         Finding.tenant_id == _tenant_id(user),
     ).order_by(Finding.created_at.desc()).limit(300).all()
-    return {"data": [_public(f) for f in rows if str((f.sss_data or {}).get("type", "")).startswith("NHI") or (f.sss_data or {}).get("source") == "NHI"]}
+    return {"data": [_public(f, db) for f in rows if str((f.sss_data or {}).get("type", "")).startswith("NHI") or (f.sss_data or {}).get("source") == "NHI"]}

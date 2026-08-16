@@ -32,7 +32,7 @@ modules:
           frontend: "app/frontend compiled route /"
           api: "GET /api/synthesis/dashboard"
           service: "services.customer_posture.build_customer_posture"
-          model_fields: ["Finding.raw_inputs", "AssetExposure.status", "Asset.status"]
+          model_fields: ["Finding.cvss", "Finding.cve_context", "AssetExposure.status", "Asset.status", "Asset.criticality"]
         inclusion_rules: [confirmed_asset_exposure, same_tenant, active_asset, open_finding]
         exclusion_rules: [reference, not_applicable, resolved, unconfirmed, unscoreable_from_denominator]
         customer_safe_interpretation: "Current contextual exposure score for confirmed tenant findings."
@@ -62,7 +62,7 @@ modules:
     purpose: "Confirmed-exposure CTEM analysis, TES, lifecycle, and server EDIP decisions."
     classification: commercial_module
     frontend_routes: ["/spectrum"]
-    api_routes: ["GET /api/spectrum/findings", "POST /api/spectrum/findings/{finding_id}/edip", "POST /api/spectrum/calculate-tes"]
+    api_routes: ["GET /api/spectrum/findings", "POST /api/spectrum/findings/{finding_id}/edip", "PATCH /api/spectrum/findings/{finding_id}/business-impact", "POST /api/spectrum/calculate-tes"]
     models: [Finding, AssetExposure, EdipDecision, FindingEvidence, FindingStatusHistory]
     upstream_sources: [intake, SCOUT, VDP, reference_imports]
     downstream_consumers: [CISO, SYNTHESIS, STANDARD, SPOTLIGHT, CLIENT_REPORTS]
@@ -73,7 +73,7 @@ modules:
         subject: finding
         scope: finding
         time_semantics: current
-        source: {api: "POST /api/spectrum/calculate-tes", service: "services.tes_engine.calculate_finding_tes", model_fields: ["Finding.raw_inputs"]}
+        source: {api: "POST /api/spectrum/calculate-tes", service: "services.tes_engine.calculate_finding_tes", model_fields: ["Finding.cvss", "Finding.cve_context", "AssetExposure.status", "Asset.criticality"]}
         inclusion_rules: [valid_server_inputs]
         exclusion_rules: []
         customer_safe_interpretation: "Finding-level contextual score."
@@ -97,6 +97,13 @@ modules:
         side_effects: [creates_or_updates_ordered_decision, publishes_watch_event]
         audit_events: [decision.created, decision.updated, decision.overridden]
         reversible: false
+      - id: SPC-ACT-002
+        label: "Assess business impact"
+        required_roles: [superadmin, analyst]
+        endpoint: "PATCH /api/spectrum/findings/{finding_id}/business-impact"
+        side_effects: [stores_assessment_and_justification, recalculates_open_confirmed_CVE, publishes_watch_event]
+        audit_events: [finding.business_impact_assessed]
+        reversible: true
 
   scout:
     display_name: "SCOUT"
@@ -223,11 +230,11 @@ modules:
 
   grc:
     display_name: "GRC"
-    purpose: "AI-governance state, policy, evidence, and lifecycle management."
+    purpose: "AI-governance SOP assessment, derived gaps, supporting policies, evidence, and lifecycle management."
     classification: commercial_module
     frontend_routes: ["/grc"]
-    api_routes: ["GET /api/grc/state", "GET /api/grc/tes-score", "GET/POST /api/grc/policies", "PATCH /api/grc/policies/{policy_id}/archive", "DELETE /api/grc/policies/{policy_id}"]
-    models: [GrcState, GrcSignoff, GrcPolicyDocument]
+    api_routes: ["GET /api/grc/state", "GET /api/grc/controls", "GET /api/grc/assessments", "GET /api/grc/gap-analysis", "GET /api/grc/tes-score", "GET/POST /api/grc/policies", "PUT /api/grc/policies/{policy_id}/links", "PATCH /api/grc/policies/{policy_id}/archive", "DELETE /api/grc/policies/{policy_id}"]
+    models: [FrameworkDefinition, FrameworkControl, ControlAssessment, GrcState, GrcSignoff, PolicyControlLink, GrcPolicyDocument]
     upstream_sources: [governance_assessment, policy_content, evidence]
     downstream_consumers: [SPOTLIGHT]
     metrics:
@@ -237,7 +244,7 @@ modules:
         subject: AI_system
         scope: AI_SYSTEM
         time_semantics: current
-        source: {api: "GET /api/grc/tes-score", service: "routers.grc._public_ai_system_risk", model_fields: ["GrcState.toggles", "GrcState.sop_state"]}
+        source: {api: "GET /api/grc/tes-score", service: "routers.grc._public_ai_system_risk", model_fields: ["ControlAssessment.status", "ControlAssessment.end_user_agreed", "ControlAssessment.pic_signed_off"]}
         inclusion_rules: [recorded_GRC_state]
         exclusion_rules: [raw_factors_from_client_contract]
         customer_safe_interpretation: "AI-system governance risk indicator."

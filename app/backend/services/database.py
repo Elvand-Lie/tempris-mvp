@@ -59,6 +59,14 @@ def init_db():
                     file=sys.stderr,
                 )
                 sys.exit(1)
+            if "cve_context" not in finding_columns:
+                print(
+                    "FATAL: Database schema is out of date. Required findings.cve_context "
+                    "column is missing. Run scripts/migrations/010_live_cve_tes_context.py "
+                    "with a verified backup.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
         canonical_columns = {
             "strike_simulations": {"tenant_id"},
@@ -163,5 +171,4 @@ def init_db():
             logger.info("audit_logs append-only enforced.")
     except Exception as e:
         logger.debug(f"Could not enforce append-only (may already be set): {e}")
-
 

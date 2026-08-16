@@ -938,6 +938,7 @@
         <div class="tmx-field"><label for="tmx-posture-subclass">Sub-class</label><select id="tmx-posture-subclass" name="sub_class" data-posture-subclass><option value="MFA_ENROLMENT" data-class="IDENTITY_POSTURE">MFA enrolment</option><option value="SESSION_TOKEN" data-class="IDENTITY_POSTURE">Session token</option><option value="MACHINE_KEY" data-class="IDENTITY_POSTURE">Machine key</option><option value="CONDITIONAL_ACCESS" data-class="IDENTITY_POSTURE">Conditional access</option><option value="AUTH_FLOW_ABUSE" data-class="IDENTITY_POSTURE">Authentication flow abuse</option><option value="INJECTION_PATH" data-class="AGENTIC_EXPOSURE">Injection path</option><option value="MEMORY_RAG" data-class="AGENTIC_EXPOSURE">Memory / RAG</option><option value="TOOL_MCP" data-class="AGENTIC_EXPOSURE">Tool / MCP</option><option value="TRAINING_SUPPLY" data-class="AGENTIC_EXPOSURE">Training supply</option><option value="ADVERSARY_AI" data-class="AGENTIC_EXPOSURE">Adversary AI</option><option value="AUTONOMOUS_PRINCIPAL" data-class="AGENTIC_EXPOSURE">Autonomous principal</option></select></div>
         <div class="tmx-field tmx-field-wide"><label for="tmx-posture-title">Title</label><input id="tmx-posture-title" name="title" maxlength="255" required></div>
         <div class="tmx-field"><label for="tmx-posture-ecosystem">Affected ecosystem</label><input id="tmx-posture-ecosystem" name="affected_ecosystem" maxlength="255" value="Identity and AI posture" required></div>
+        <div class="tmx-field"><label for="tmx-posture-severity">SSS (0–10)</label><input id="tmx-posture-severity" name="base_severity" type="number" min="0" max="10" step="0.1" required><small>Analyst-assigned base severity. Governance context is applied server-side.</small></div>
         <div class="tmx-field"><label for="tmx-posture-source">Evidence source</label><select id="tmx-posture-source" name="source_tool"><option>Manual Questionnaire</option><option>Connector</option><option>External SIEM</option><option>Independent Monitor</option></select></div>
         ${assetField}
         <div class="tmx-field tmx-field-wide"><label for="tmx-posture-description">Description and evidence context</label><textarea id="tmx-posture-description" name="description" maxlength="2000" rows="4" required></textarea></div>
@@ -1062,6 +1063,7 @@
           class: findingClass, sub_class: subClass, title: data.get('title'),
           description: data.get('description'), affected_ecosystem: data.get('affected_ecosystem'),
           source_tool: data.get('source_tool'), asset_id: data.get('asset_id') || null,
+          base_severity: Number(data.get('base_severity')),
         };
         if (findingClass === 'IDENTITY_POSTURE') Object.assign(payload, {
           token_lifetime_minutes: data.get('token_lifetime_minutes') === '' ? null : Number(data.get('token_lifetime_minutes')),
@@ -2048,7 +2050,7 @@
         const data = new FormData(event.currentTarget);
         const message = host.querySelector('[data-policy-message]');
         try {
-          await api('/api/grc/policies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: data.get('title'), version: data.get('version'), content: data.get('content') }) });
+          await api('/api/grc/policies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: data.get('title'), version: data.get('version'), content: data.get('content'), unmapped: true }) });
           await refresh();
         } catch (error) { message.textContent = error.message; }
       });

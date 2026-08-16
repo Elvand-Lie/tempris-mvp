@@ -19,6 +19,16 @@ def replace_once(source: str, old: str, new: str, label: str) -> str:
     return source.replace(old, new, 1)
 
 
+def replace_once_or_current(source: str, old: str, new: str, label: str) -> str:
+    """Apply a canonical hotfix once, or verify it is already present."""
+    old_count = source.count(old)
+    if old_count == 1:
+        return source.replace(old, new, 1)
+    if old_count == 0 and source.count(new) == 1:
+        return source
+    raise RuntimeError(f"{label}: expected one old or current match, found {old_count}")
+
+
 def replace_between(source: str, start: str, end: str, replacement: str, label: str) -> str:
     start_at = source.find(start)
     if start_at < 0:
@@ -32,7 +42,7 @@ def replace_between(source: str, start: str, end: str, replacement: str, label: 
 def patch(source: str) -> str:
     # Native SPECTRUM is the actionable confirmed-exposure work queue.  An
     # explicit history link may load a past false-positive decision for review.
-    source = replace_once(
+    source = replace_once_or_current(
         source,
         "/api/spectrum/findings?limit=2000",
         "window.location.search.includes('history=1')?'/api/spectrum/findings?limit=2000':'/api/spectrum/findings?limit=2000&scope=confirmed_exposure'",
@@ -40,13 +50,13 @@ def patch(source: str) -> str:
     )
 
     # A missing aggregate is a real state, not zero and not a render error.
-    source = replace_once(
+    source = replace_once_or_current(
         source,
         "children:e.aggregate_tes.toFixed(1)",
         "children:e.aggregate_tes==null?`N/A`:e.aggregate_tes.toFixed(1)",
         "SYNTHESIS null TES",
     )
-    source = replace_once(
+    source = replace_once_or_current(
         source,
         "strokeDashoffset:502-502*(e.aggregate_tes/10)",
         "strokeDashoffset:e.aggregate_tes==null?502:502-502*(e.aggregate_tes/10)",
@@ -241,27 +251,133 @@ def patch_canonical_bundle(source: str) -> str:
     The repository has no editable SPA source.  The canonical release bundle is
     therefore the reproducible compatibility base; do not regress its earlier
     safety and bootstrap patches by starting from an older artifact.
+    source = source.replace("Decision Recorded", "Current decision — revise if new evidence is recorded")
+    return source.replace("✓ Mitigated", "✓ Mitigation planned")
+
     """
-    source = replace_once(
+    source = replace_once_or_current(
         source,
         "$(\u0060/api/spectrum/findings?limit=2000&scope=confirmed_exposure\u0060)",
         "$(window.location.search.includes(\u0060history=1\u0060)?\u0060/api/spectrum/findings?limit=2000\u0060:\u0060/api/spectrum/findings?limit=2000&scope=confirmed_exposure\u0060)",
         "SPECTRUM historical decision access",
     )
-    source = replace_once(
+    source = replace_once_or_current(
+        source,
+        "Mp(`/api/grc/policies`,{...x,content:x.content||`# ${x.title}\\n\\n`})",
+        "Mp(`/api/grc/policies`,{...x,content:x.content||`# ${x.title}\\n\\n`,unmapped:!0})",
+        "GRC explicit unmapped policy state",
+    )
+    source = replace_once_or_current(
+        source,
+        "[y,b]=(0,v.useState)(!1),[x,S]=(0,v.useState)({title:``,category:`Custom`,owner:`CSRO`,review_cycle:`Annual`,content:``}),[C,w]",
+        "[y,b]=(0,v.useState)(!1),[x,S]=(0,v.useState)({title:``,category:`Custom`,owner:`CSRO`,review_cycle:`Annual`,content:``,framework_id:null,control_ids:[],unmapped:!0}),[policyQuery,setPolicyQuery]=(0,v.useState)(``),[policyFramework,setPolicyFramework]=(0,v.useState)(``),[policyControl,setPolicyControl]=(0,v.useState)(``),[policySource,setPolicySource]=(0,v.useState)(``),[policyLifecycle,setPolicyLifecycle]=(0,v.useState)(`active`),[policyPage,setPolicyPage]=(0,v.useState)(1),[policyMeta,setPolicyMeta]=(0,v.useState)({total:0,page:1,page_size:25}),[C,w]",
+        "GRC policy filter state",
+    )
+    source = replace_once_or_current(
+        source,
+        "let ee=(0,v.useCallback)(()=>{$(`/api/grc/policies`).then(e=>{s(e.policies||[])}).catch(()=>{})},[])",
+        "let ee=(0,v.useCallback)(()=>{let e=new URLSearchParams;policyQuery&&e.set(`q`,policyQuery),policyFramework&&e.set(`framework_id`,policyFramework),policyControl&&e.set(`control_id`,policyControl),policySource&&e.set(`source`,policySource),policyLifecycle&&e.set(`lifecycle`,policyLifecycle),e.set(`page`,String(policyPage)),e.set(`page_size`,`25`),$(`/api/grc/policies?${e.toString()}`).then(e=>{s(e.policies||[]),setPolicyMeta({total:e.total||0,page:e.page||1,page_size:e.page_size||25})}).catch(()=>{})},[policyQuery,policyFramework,policyControl,policySource,policyLifecycle,policyPage])",
+        "GRC policy filters request",
+    )
+    source = replace_once_or_current(
+        source,
+        "S({title:``,category:`Custom`,owner:`CSRO`,review_cycle:`Annual`,content:``}),ee(),te(e.id)",
+        "S({title:``,category:`Custom`,owner:`CSRO`,review_cycle:`Annual`,content:``,framework_id:null,control_ids:[],unmapped:!0}),ee(),te(e.id)",
+        "GRC policy form reset",
+    )
+    source = replace_once_or_current(
+        source,
+        "(0,Y.jsx)(`div`,{className:`flex justify-end mb-4`,children:(0,Y.jsxs)(`button`,{onClick:()=>b(!y),className:`text-[11px] font-mono text-primary-400 bg-primary-500/10 border border-primary-500/20 px-3 py-1.5 rounded-lg hover:bg-primary-500/20 transition-colors flex items-center gap-1.5`,children:[(0,Y.jsx)(Nr,{className:`w-3.5 h-3.5`}),` New Policy`]})})",
+        "(0,Y.jsxs)(`div`,{className:`flex flex-wrap items-end justify-between gap-3 mb-4`,children:[(0,Y.jsxs)(`div`,{className:`flex flex-wrap gap-2 flex-1`,children:[(0,Y.jsx)(`input`,{value:policyQuery,onChange:e=>{setPolicyPage(1),setPolicyQuery(e.target.value)},placeholder:`Search policy title`,className:`min-w-44 bg-surface border border-border rounded-lg px-3 py-2 text-xs outline-none focus:border-primary-500/50`}),(0,Y.jsxs)(`select`,{value:policyFramework,onChange:e=>{setPolicyPage(1),setPolicyFramework(e.target.value)},className:`bg-surface border border-border rounded-lg px-3 py-2 text-xs`,children:[(0,Y.jsx)(`option`,{value:``,children:`All frameworks`}),(0,Y.jsx)(`option`,{value:`iso-iec-42001-2023`,children:`ISO/IEC 42001:2023`})]}),(0,Y.jsxs)(`select`,{value:policyControl,onChange:e=>{setPolicyPage(1),setPolicyControl(e.target.value)},className:`bg-surface border border-border rounded-lg px-3 py-2 text-xs`,children:[(0,Y.jsx)(`option`,{value:``,children:`All linked controls`}),...nm.map(e=>(0,Y.jsx)(`option`,{value:e.id,children:e.id},e.id))]}),(0,Y.jsxs)(`select`,{value:policySource,onChange:e=>{setPolicyPage(1),setPolicySource(e.target.value)},className:`bg-surface border border-border rounded-lg px-3 py-2 text-xs`,children:[(0,Y.jsx)(`option`,{value:``,children:`Bundled and custom`}),(0,Y.jsx)(`option`,{value:`bundled`,children:`Bundled`}),(0,Y.jsx)(`option`,{value:`custom`,children:`Custom`})]}),(0,Y.jsxs)(`select`,{value:policyLifecycle,onChange:e=>{setPolicyPage(1),setPolicyLifecycle(e.target.value)},className:`bg-surface border border-border rounded-lg px-3 py-2 text-xs`,children:[(0,Y.jsx)(`option`,{value:`active`,children:`Active`}),(0,Y.jsx)(`option`,{value:`archived`,children:`Archived`}),(0,Y.jsx)(`option`,{value:``,children:`All lifecycle states`})]})]}),(0,Y.jsxs)(`div`,{className:`flex items-center gap-2`,children:[(0,Y.jsx)(`button`,{disabled:policyPage<=1,onClick:()=>setPolicyPage(e=>Math.max(1,e-1)),className:`text-xs text-text-muted disabled:opacity-40`,children:`‹ Prev`}),(0,Y.jsxs)(`span`,{className:`text-[10px] text-text-muted font-mono`,children:[policyMeta.total?`${policyPage} / ${Math.ceil(policyMeta.total/25)}`:`0 / 0`]}),(0,Y.jsx)(`button`,{disabled:policyPage>=Math.ceil(policyMeta.total/25),onClick:()=>setPolicyPage(e=>e+1),className:`text-xs text-text-muted disabled:opacity-40`,children:`Next ›`}),(0,Y.jsxs)(`button`,{onClick:()=>b(!y),className:`text-[11px] font-mono text-primary-400 bg-primary-500/10 border border-primary-500/20 px-3 py-1.5 rounded-lg hover:bg-primary-500/20 transition-colors flex items-center gap-1.5`,children:[(0,Y.jsx)(Nr,{className:`w-3.5 h-3.5`}),` New Policy`]})]})]})",
+        "GRC policy library filters and pagination",
+    )
+    source = replace_once_or_current(
+        source,
+        "(0,Y.jsx)(`textarea`,{value:x.content,onChange:e=>S(t=>({...t,content:e.target.value})),placeholder:`# Policy title\n\nWrite the policy in Markdown...`,className:`w-full min-h-40 bg-surface border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary-500/50 resize-y`}),(0,Y.jsxs)(`div`,{className:`flex justify-end gap-2`",
+        "(0,Y.jsx)(`textarea`,{value:x.content,onChange:e=>S(t=>({...t,content:e.target.value})),placeholder:`# Policy title\n\nWrite the policy in Markdown...`,className:`w-full min-h-40 bg-surface border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary-500/50 resize-y`}),(0,Y.jsxs)(`div`,{className:`grid grid-cols-1 md:grid-cols-2 gap-3`,children:[(0,Y.jsxs)(`div`,{children:[(0,Y.jsx)(`label`,{className:`block text-[10px] text-text-muted font-mono uppercase tracking-wide mb-1`,children:`Controls supported (ISO/IEC 42001:2023)`}),(0,Y.jsx)(`select`,{multiple:!0,disabled:x.unmapped,value:x.control_ids,onChange:e=>S(t=>({...t,framework_id:`iso-iec-42001-2023`,control_ids:Array.from(e.target.selectedOptions,e=>e.value),unmapped:!1})),className:`w-full min-h-28 bg-surface border border-border rounded-lg px-3 py-2 text-xs disabled:opacity-40`,children:nm.map(e=>(0,Y.jsxs)(`option`,{value:e.id,children:[e.id,` · `,e.title]},e.id))})]}),(0,Y.jsxs)(`label`,{className:`flex items-center gap-2 self-end text-xs text-text-muted`,children:[(0,Y.jsx)(`input`,{type:`checkbox`,checked:x.unmapped,onChange:e=>S(t=>({...t,unmapped:e.target.checked,framework_id:e.target.checked?null:`iso-iec-42001-2023`,control_ids:e.target.checked?[]:t.control_ids})),className:`accent-primary-500`}),`Supporting document only — no controls linked; no scoring effect`]})]}),(0,Y.jsxs)(`div`,{className:`flex justify-end gap-2`",
+        "GRC policy explicit control mapping form",
+    )
+    source = replace_once_or_current(
+        source,
+        "(0,Y.jsxs)(`div`,{className:`flex items-center gap-2 mt-2`,children:[e.available?",
+        "(0,Y.jsx)(`div`,{className:`mt-2 text-[10px] text-text-muted font-mono`,children:[`Framework: `,e.framework_id?`ISO/IEC 42001:2023`:`None`,` · Linked controls: `,(e.linked_controls||[]).map(t=>t.control_id).join(`, `)||`None`,` · Scoring effect: None directly — supporting evidence only`]}),(0,Y.jsxs)(`div`,{className:`flex items-center gap-2 mt-2`,children:[e.available?",
+        "GRC policy card mapping disclosure",
+    )
+    # The committed native bundle already includes the SPECTRUM evidence panel.
+    # Do not match a later generic layout container and add it a second time.
+    if "Linked assets and evidence" in source:
+        source = source.replace("Decision Recorded", "Current decision — revise if new evidence is recorded")
+        return source.replace("✓ Mitigated", "✓ Mitigation planned")
+
+    source = replace_once_or_current(
         source,
         "(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[",
         "(0,Y.jsxs)(`section`,{className:`px-6 pb-2`,children:[(0,Y.jsx)(`h3`,{className:`text-sm font-semibold uppercase tracking-wider text-text-muted mb-3`,children:`Linked assets and evidence`}),(n.assets||[]).length?(0,Y.jsx)(`div`,{className:`space-y-2`,children:n.assets.map(e=>(0,Y.jsxs)(`div`,{className:`text-sm border border-border rounded-lg p-3`,children:[(0,Y.jsx)(`strong`,{children:e.name||e.hostname||e.asset_id}),(0,Y.jsx)(`p`,{className:`text-text-muted text-xs mt-1`,children:e.evidence||`No assignment note recorded.`})]},e.asset_id))}):(0,Y.jsx)(`p`,{className:`text-sm text-text-muted`,children:`No confirmed customer asset is linked.`}),(n.evidence_files||[]).length?(0,Y.jsxs)(`div`,{className:`mt-3 text-xs text-text-muted`,children:[`Attached evidence: `,n.evidence_files.map(e=>e.filename).join(`, `)]}):null]}),(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[",
         "SPECTRUM linked assets and evidence",
     )
-    source = replace_once(
+    source = replace_once_or_current(
         source,
         "n.evidence_files.map(e=>e.filename).join(`, `)]}):null]}),(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[",
         "n.evidence_files.map(e=>e.filename).join(`, `)]}):null,(0,Y.jsx)(`a`,{href:`/sss-intake?finding=${encodeURIComponent(n.id)}`,className:`inline-flex mt-3 text-sm text-primary-400 hover:underline`,children:`Edit linked assets & evidence`})]}),(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[",
         "SPECTRUM evidence editor link",
     )
+    """
+    source = replace_once_or_current(
+        source,
+        "n.evidence_files.map(e=>e.filename).join(`, `)]}):null,(0,Y.jsx)(`a`,{href:`/sss-intake?finding=${encodeURIComponent(n.id)}`,className:`inline-flex mt-3 text-sm text-primary-400 hover:underline`,children:`Edit linked assets & evidence`})]}),(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[",
+        "n.evidence_files.map(e=>e.filename).join(`, `)]}):null,(0,Y.jsx)(`a`,{href:`/sss-intake?finding=${encodeURIComponent(n.id)}`,className:`inline-flex mt-3 text-sm text-primary-400 hover:underline`,children:`Edit linked assets & evidence`}),(0,Y.jsxs)(`div`,{className:`mt-3 text-xs text-text-muted`,children:[`Business impact: `,n.business_impact?.assessed?`Analyst assessed (${n.business_impact.value}/10)`:`Unassessed — neutral server context`,(0,Y.jsx)(`button`,{onClick:async()=>{let e=window.prompt(`Business impact (0–10)`,String(n.business_impact?.value??5));if(e===null)return;let t=window.prompt(`Justification (minimum 10 characters)`);if(!t||t.trim().length<10)return alert(`A justification of at least 10 characters is required.`);let r=await fetch(`/api/spectrum/findings/${n.id}/business-impact`,{method:`PATCH`,headers:{"Content-Type":`application/json`,Authorization:`Bearer ${localStorage.getItem(`tempris_token`)||``}`},body:JSON.stringify({value:Number(e),justification:t.trim()})});if(!r.ok)return alert(`Business impact was not saved.`);window.location.reload()},className:`ml-3 text-primary-400 hover:underline`,children:`Assess / update`})]}),(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[",
+        "SPECTRUM business impact action",
+    )
     source = source.replace("Decision Recorded", "Current decision — revise if new evidence is recorded")
     return source.replace("✓ Mitigated", "✓ Mitigation planned")
+
+    """
+    source = source.replace("Decision Recorded", "Current decision — revise if new evidence is recorded")
+    return source.replace("✓ Mitigated", "✓ Mitigation planned")
+
+
+_canonical_bundle_base_patch = patch_canonical_bundle
+
+
+def patch_canonical_bundle(source: str) -> str:
+    """Add the current SPECTRUM business-impact control after base patches."""
+    source = _canonical_bundle_base_patch(source)
+    return replace_once_or_current(
+        source,
+        '''n.evidence_files.map(e=>e.filename).join(`, `)]}):null,(0,Y.jsx)(`a`,{href:`/sss-intake?finding=${encodeURIComponent(n.id)}`,className:`inline-flex mt-3 text-sm text-primary-400 hover:underline`,children:`Edit linked assets & evidence`})]}),(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[''',
+        '''n.evidence_files.map(e=>e.filename).join(`, `)]}):null,(0,Y.jsx)(`a`,{href:`/sss-intake?finding=${encodeURIComponent(n.id)}`,className:`inline-flex mt-3 text-sm text-primary-400 hover:underline`,children:`Edit linked assets & evidence`}),(0,Y.jsxs)(`div`,{className:`mt-3 text-xs text-text-muted`,children:[`Business impact: `,n.business_impact?.assessed?`Analyst assessed (${n.business_impact.value}/10)`:`Unassessed - neutral server context`,(0,Y.jsx)(`button`,{onClick:async()=>{let e=window.prompt(`Business impact (0-10)`,String(n.business_impact?.value??5));if(e===null)return;let t=window.prompt(`Justification (minimum 10 characters)`);if(!t||t.trim().length<10)return alert(`A justification of at least 10 characters is required.`);let r=await fetch(`/api/spectrum/findings/${n.id}/business-impact`,{method:`PATCH`,headers:{"Content-Type":`application/json`,Authorization:`Bearer ${localStorage.getItem(`tempris_token`)||``}`},body:JSON.stringify({value:Number(e),justification:t.trim()})});if(!r.ok)return alert(`Business impact was not saved.`);window.location.reload()},className:`ml-3 text-primary-400 hover:underline`,children:`Assess / update`})]}),(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[''',
+        "SPECTRUM business impact action",
+    )
+
+
+def patch_canonical_bundle(source: str) -> str:
+    """Build a native SPECTRUM business-impact action without an overlay."""
+    source = _canonical_bundle_base_patch(source)
+    old = (
+        "n.evidence_files.map(e=>e.filename).join(`, `)]}):null,"
+        "(0,Y.jsx)(`a`,{href:`/sss-intake?finding=${encodeURIComponent(n.id)}`,"
+        "className:`inline-flex mt-3 text-sm text-primary-400 hover:underline`,"
+        "children:`Edit linked assets & evidence`})]}),(0,Y.jsxs)(`div`,"
+        "{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:["
+    )
+    new = (
+        "n.evidence_files.map(e=>e.filename).join(`, `)]}):null,"
+        "(0,Y.jsx)(`a`,{href:`/sss-intake?finding=${encodeURIComponent(n.id)}`,"
+        "className:`inline-flex mt-3 text-sm text-primary-400 hover:underline`,"
+        "children:`Edit linked assets & evidence`}),(0,Y.jsx)(`button`,{"
+        "onClick:async()=>{let e=window.prompt(`Business impact (0-10)`,"
+        "String(n.business_impact?.value??5));if(e===null)return;let t=window.prompt("
+        "`Justification (minimum 10 characters)`);if(!t||t.trim().length<10)return "
+        "alert(`A justification of at least 10 characters is required.`);let r=await "
+        "jp(`/api/spectrum/findings/${n.id}/business-impact`,{method:`PATCH`,body:"
+        "JSON.stringify({value:Number(e),justification:t.trim()})});if(!r.ok)return "
+        "alert(`Business impact was not saved.`);window.location.reload()},"
+        "className:`inline-flex mt-3 ml-3 text-sm text-primary-400 hover:underline`,"
+        "children:n.business_impact?.assessed?`Update business impact (${n.business_impact.value}/10)`"
+        ":`Assess business impact`})]}),(0,Y.jsxs)(`div`,"
+        "{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:["
+    )
+    return replace_once_or_current(source, old, new, "SPECTRUM business impact action")
 
 
 def main() -> None:

@@ -23,7 +23,7 @@ If it reports the expected Compose configuration and Tempris containers, release
 .\scripts\deploy-vps.ps1 -Deploy
 ```
 
-The script refuses tracked worktree changes, archives only committed Git content, verifies SHA-256 after upload, and creates verified timestamped backups of the application source, PostgreSQL database, and generated report artifacts. It preserves `.env`, mounted runtime data, and Docker volumes. Before replacing source, it applies migrations `006_add_sss_sub_class.py`, `007_create_tenant_registry.py`, and `008_canonical_posture_and_operations.py`. Migration 008 runs against the staged backend models and writes a JSON migration report under `/home/tempris/backups/migrations/`. The release then installs the staged source and product documentation, restarts the Compose stack, checks `/api/health`, runs migration 008 in read-only validation mode, and records the deployed Git commit in `/home/tempris/app/REVISION`.
+The script refuses tracked worktree changes, archives only committed Git content, verifies SHA-256 after upload, and creates verified timestamped backups of the application source, PostgreSQL database, and generated report artifacts. It preserves `.env`, mounted runtime data, and Docker volumes. Before replacing source, it applies migrations `006_add_sss_sub_class.py`, `007_create_tenant_registry.py`, `008_canonical_posture_and_operations.py`, `009_canonical_grc_framework.py`, and `010_live_cve_tes_context.py`. Migration 008 writes a JSON report under `/home/tempris/backups/migrations/`; additive migration 009 seeds the server-managed ISO/IEC 42001 catalogue, while migration 010 adds CVE-context provenance without promoting legacy asset links. The release then installs the staged source and product documentation, restarts the Compose stack, checks `/api/health`, validates migrations 008 through 010 read-only, and records the deployed Git commit in `/home/tempris/app/REVISION`.
 
 Migration 007 is additive and idempotent. It creates the authoritative `tenants` registry, backfills every distinct non-empty `tenant_id` already present in tenant-scoped tables, explicitly registers `tempris` and `bug-bounty`, and adds the `tenant_packages.version` concurrency field. It does not rename tenants, reassign tenant-owned records, or remove data.
 
@@ -34,6 +34,10 @@ Migration 008 adds canonical exposure, posture-snapshot, scan-job, incident, ope
 Before a production release, rehearse migration 008 against a disposable database clone using [the migration runbook](docs/product/TEMPRIS_MIGRATION_008_RUNBOOK.md). For production PostgreSQL, the verified custom-format dump and report-artifact archive are created automatically by the guarded release script. Do not apply migration 008 directly to production without those backups.
 
 The repository does not define a separate remote staging host. Local/database-clone rehearsal proves schema and data preservation, but a remote sandbox deployment still requires the approved VPS connection and credential rotation described below.
+
+## Migration 009 staging rehearsal
+
+After migration 008, rehearse migration 009 using [the migration 009 runbook](docs/product/TEMPRIS_MIGRATION_009_RUNBOOK.md). It creates only canonical GRC catalogue, tenant-assessment, and explicit policy-link tables; it preserves policies and never derives a control link from policy text.
 
 After a tenant-administration release, sign in as the Tempris platform Superadmin and verify:
 

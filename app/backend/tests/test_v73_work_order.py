@@ -59,6 +59,7 @@ def test_v73_subclasses_and_ten_descriptive_fields(client_and_headers):
             "title": "Device-code flow can transfer authentication",
             "description": "Identity posture evidence supplied by the tenant connector.",
             "source_tool": "Connector",
+            "base_severity": 6.5,
             "device_code_flow_enabled": True,
             "oauth_grant_inventory": "partial",
             "app_consent_policy": "restricted",
@@ -79,6 +80,7 @@ def test_v73_subclasses_and_ten_descriptive_fields(client_and_headers):
             "sub_class": "ADVERSARY_AI",
             "title": "Adversary AI activity observed",
             "description": "Descriptive threat posture without client-side scoring inputs.",
+            "base_severity": 6.5,
         },
     )
     assert adversary.status_code == 200
@@ -92,6 +94,7 @@ def test_v73_subclasses_and_ten_descriptive_fields(client_and_headers):
             "title": "Self-reported containment",
             "description": "The assessed workload claims that it monitors its own egress.",
             "source_tool": "Agent self-report",
+            "base_severity": 6.5,
             "egress_monitored_independently": True,
         },
     )
@@ -106,6 +109,7 @@ def test_v73_subclasses_and_ten_descriptive_fields(client_and_headers):
             "title": "Autonomous workload posture",
             "description": "Independent monitoring verifies the workload containment posture.",
             "source_tool": "External SIEM",
+            "base_severity": 6.5,
             "ai_workload_inventory": "complete",
             "workload_credential_scope": "read",
             "egress_monitored_independently": True,
@@ -133,12 +137,12 @@ def test_v73_ordered_decisions_and_tenant_scoped_watch_push(client_and_headers):
             "sub_class": "AUTH_FLOW_ABUSE",
             "title": "Audit authentication before restriction",
             "description": "Initial engine output requires investigation before a control is applied.",
-            "base_severity": 5,
+            "base_severity": 2,
             "patch_available": True,
         },
     )
     assert created.status_code == 200
-    assert created.json()["decision_sequence"] == ["INVESTIGATE"]
+    assert created.json()["decision_sequence"] == ["DEFER"]
 
     tenant_queue, other_queue = Queue(), Queue()
     with _sss_watch_lock:
@@ -153,7 +157,7 @@ def test_v73_ordered_decisions_and_tenant_scoped_watch_push(client_and_headers):
     )
     assert updated.status_code == 200
     body = updated.json()
-    assert body["decision_sequence"] == ["INVESTIGATE", "COMPENSATING_CONTROL"]
+    assert body["decision_sequence"] == ["DEFER", "COMPENSATING_CONTROL"]
     assert body["kev_countdown_state"] == "overdue"
     assert tenant_queue.get_nowait()["finding_id"] == body["id"]
     with pytest.raises(Empty):

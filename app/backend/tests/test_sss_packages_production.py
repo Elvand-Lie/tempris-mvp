@@ -204,8 +204,8 @@ def test_sss_asset_link_is_tenant_scoped_and_returns_human_context():
     rejected = client.post(
         "/api/edip/intake/sss", headers=analyst,
         json={
-            "class": "BLFLAW", "subtype": "IDOR", "title": "Wrong tenant link",
-            "description": "Must not cross tenant boundaries.", "asset_id": "ASSET-OTHER",
+                "class": "BLFLAW", "subtype": "IDOR", "title": "Wrong tenant link",
+                "description": "Must not cross tenant boundaries.", "asset_id": "ASSET-OTHER", "base_severity": 6.0,
         },
     )
     assert rejected.status_code == 422
@@ -213,8 +213,8 @@ def test_sss_asset_link_is_tenant_scoped_and_returns_human_context():
     created = client.post(
         "/api/edip/intake/sss", headers=analyst,
         json={
-            "class": "BLFLAW", "subtype": "IDOR", "title": "Checkout object access",
-            "description": "Verified on the checkout application.", "asset_id": "ASSET-CHECKOUT",
+                "class": "BLFLAW", "subtype": "IDOR", "title": "Checkout object access",
+                "description": "Verified on the checkout application.", "asset_id": "ASSET-CHECKOUT", "base_severity": 6.0,
         },
     )
     assert created.status_code == 200

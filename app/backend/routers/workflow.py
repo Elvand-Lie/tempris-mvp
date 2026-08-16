@@ -476,6 +476,10 @@ def confirm_finding_asset_links(
     confirm_finding_assets(
         db, finding, ordered_assets, auth.user_id, req.evidence,
     )
+    from services.tes_engine import recalculate_open_cve_findings
+    recalculated = recalculate_open_cve_findings(
+        db, auth.tenant_id, actor_id=auth.user_id, reason="confirmed_asset_context_updated",
+    )
     record_operational_event(
         db, tenant_id=auth.tenant_id, event_type="finding.asset_confirmed",
         resource_type="finding", resource_id=finding.id, source_module="INTAKE_TRIAGE",
@@ -498,6 +502,8 @@ def confirm_finding_asset_links(
     )
     db.commit()
     _publish_finding_refresh(auth.tenant_id, finding.id, finding.status or "unmitigated")
+    for refreshed_id in recalculated:
+        _publish_finding_refresh(auth.tenant_id, refreshed_id, finding.status or "unmitigated")
     active_ids = sorted(
         confirmed_asset_ids_by_finding(db, auth.tenant_id).get(finding.id, set())
     )
@@ -621,8 +627,14 @@ def replace_finding_asset_links(
             resource_type="finding", resource_id=finding.id, source_module="INTAKE_TRIAGE",
             actor_id=auth.user_id, metadata={"asset_ids": after},
         )
+    from services.tes_engine import recalculate_open_cve_findings
+    recalculated = recalculate_open_cve_findings(
+        db, auth.tenant_id, actor_id=auth.user_id, reason="confirmed_asset_context_updated",
+    )
     db.commit()
     _publish_finding_refresh(auth.tenant_id, finding.id, finding.status or "unmitigated")
+    for refreshed_id in recalculated:
+        _publish_finding_refresh(auth.tenant_id, refreshed_id, finding.status or "unmitigated")
     return {
         "status": "updated",
         "finding_id": finding.id,
@@ -712,8 +724,14 @@ def reopen_finding(
         user=auth.user_id, action="FINDING_REOPENED", module="SPECTRUM",
         detail=f"Reopened finding {finding.id}", metadata={"finding_id": finding.id},
     ), commit=False)
+    from services.tes_engine import recalculate_open_cve_findings
+    recalculated = recalculate_open_cve_findings(
+        db, auth.tenant_id, actor_id=auth.user_id, reason="finding_reopened",
+    )
     db.commit()
     _publish_finding_refresh(auth.tenant_id, finding.id, "unmitigated")
+    for refreshed_id in recalculated:
+        _publish_finding_refresh(auth.tenant_id, refreshed_id, "unmitigated")
     return {"status": "reopened", "finding_id": finding.id}
 
 

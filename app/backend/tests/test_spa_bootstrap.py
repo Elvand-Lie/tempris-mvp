@@ -89,9 +89,9 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     stylesheet = client.get("/extensions/tempris-modules.css")
     logo = client.get("/brand/tempris-logo-light.png")
 
-    assert 'src="/assets/index-DUrFdX-d.js?v=20260816c"' in index.text
+    assert 'src="/assets/index-DUrFdX-d.js?v=20260816d"' in index.text
     assert 'src="/extensions/tempris-bootstrap.js?v=20260816c"' in index.text
-    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260816c"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260816c"')
+    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260816c"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260816d"')
     assert 'src="/extensions/tempris-sss-ui.js?v=20260816c"' in index.text
     assert 'src="/extensions/tempris-modules.js?v=20260816c"' in index.text
     assert 'href="/extensions/tempris-modules.css?v=20260816c"' in index.text
@@ -176,7 +176,11 @@ def test_native_module_routes_are_not_extension_takeovers_and_keep_primary_contr
         "/scout": ("Launch Scan", "Scan History", "CISA KEV Intelligence", "explicitly authorised for this SCOUT scan"),
         "/strike": ("Authorization", "MITRE ATT&CK", "Check confidence"),
         "/standard": ("STANDARD Compliance", "Assessment coverage", "Compliance among assessed"),
-        "/grc": ("GRC SOP Builder", "Gap Analysis", "Policy Library", "policyArchive", "policySupersede", "policyDelete"),
+        "/grc": (
+            "GRC SOP Builder", "Gap Analysis", "Policy Library", "policyArchive", "policySupersede", "policyDelete",
+            "Search policy title", "All linked controls", "Supporting document only — no controls linked; no scoring effect",
+            "Scoring effect: None directly — supporting evidence only",
+        ),
         "/spotlight": ("Generate Report", "Report History", "Canonical Posture"),
     }
     for route, markers in native_controls.items():
@@ -191,6 +195,8 @@ def test_native_module_routes_are_not_extension_takeovers_and_keep_primary_contr
     assert "Linked assets and evidence" in bundle
     assert "Edit linked assets & evidence" in bundle
     assert "href:`/sss-intake?finding=${encodeURIComponent(n.id)}`" in bundle
+    assert "Assess business impact" in bundle
+    assert "/api/spectrum/findings/${n.id}/business-impact" in bundle
     assert "Current decision — revise if new evidence is recorded" in bundle
     assert "No EDIP decision" in bundle
     assert "const requestedFinding = new URLSearchParams(window.location.search).get('finding');" in extension
@@ -210,3 +216,5 @@ def test_every_retained_bundle_excludes_tes_internals():
     for bundle in bundles:
         source = bundle.read_text(encoding="utf-8")
         assert all(value not in source for value in forbidden), bundle.name
+        assert "combined_modifier" not in source
+        assert "1.40" not in source

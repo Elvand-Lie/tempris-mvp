@@ -8,7 +8,7 @@
 |---|---|---|---|
 | `/api/auth` | `routers/auth.py` | `UserSession`, account security tables | Login/logout/session management |
 | `/api/synthesis` | `routers/synthesis.py` | `PostureSnapshot` plus canonical reads | Dashboard and snapshot capture |
-| `/api/spectrum` | `routers/spectrum.py` | `Finding`, EDIP decisions, relationship/source/control/evidence/history tables | Registry, scoring contract, EDIP context |
+| `/api/spectrum` | `routers/spectrum.py` | `Finding`, EDIP decisions, relationship/source/control/evidence/history tables | Confirmed-exposure analysis, scoring contract, EDIP context, and authorised Business Impact assessment |
 | `/api/scout` | `routers/scout.py` | `Finding`, `ScanFinding`, `ScanJob` reads | Reference and scan statistics |
 | `/api/scanner` | `routers/scanner.py` → `services/scan_normalizer.py` | `ScanJob`, `ScanFinding`, `Finding`, `AssetExposure` | Authorized scanner execution/history/normalization |
 | `/api/strike` | `routers/strike.py` → `services/adversary_engine.py` | `StrikeAuthorization`, `StrikeSimulation` | Authorized validation and explicit outcomes |
@@ -33,7 +33,11 @@ Supporting route groups (`/api/aev`, `/api/blflaw`, `/api/partner`, `/api/ocq`, 
 
 | Object/table | Key fields | Authority and lifecycle |
 |---|---|---|
-| `Finding` / `findings` | tenant, source, status, CVE/SSS data, server score/decision inputs, legacy `asset_id` | Broad tenant registry. `asset_id` is preserved legacy history only. |
+| `Finding` / `findings` | tenant, source, status, CVE/SSS data, `cve_context`, server score/decision inputs, legacy `asset_id` | Broad tenant registry. `asset_id` is preserved legacy history only. `cve_context` records analyst Business Impact and server score provenance; it is not a browser scoring contract. |
+| `FrameworkDefinition` / `framework_definitions` | ISO framework id/version/server-managed metadata | One authoritative GRC framework catalogue. |
+| `FrameworkControl` / `framework_controls` | control identity, requirement, modifier group, order | Server-managed ISO/IEC 42001 controls; customers cannot create controls. |
+| `ControlAssessment` / `control_assessments` | tenant control status, PIC, notes, sign-offs | Canonical SOP Builder state used by Gap Analysis and server-side non-CVE context. |
+| `PolicyControlLink` / `policy_control_links` | explicit policy-to-control support link | Supporting evidence only; no automatic completion or scoring effect. |
 | `Asset` / `assets` | tenant, IP, hostname, tags, owner, criticality, environment, status | Tenant inventory. Decommissioned assets are excluded from current posture. |
 | `AssetExposure` / `asset_exposures` | tenant, finding, asset, status, match method, evidence, metadata | Authoritative many-to-many confirmation. Unique per tenant/finding/asset. |
 | `ScanJob` / `scan_jobs` | tenant, normalized target, engine/type, timestamps, status, count/error, authorization | One scanner run, including zero results/failure. |
@@ -64,6 +68,10 @@ Client Reports form → `POST /api/reports/poc/generate` → `routers/reports.py
 ### Nuclei CVE
 
 SCOUT form → `POST /api/scanner/scan` → scanner engine → `ScanJob`/raw observation → `scan_normalizer.normalize_observation` → reuse/create tenant CVE `Finding` → exact target match → confirmed `AssetExposure` or review queue → watcher and canonical posture consumers.
+
+### Assess CVE Business Impact
+
+Confirmed open CVE in SPECTRUM → `PATCH /api/spectrum/findings/{finding_id}/business-impact` → `routers/spectrum.py::update_business_impact` → validated 0-10 assessment plus justification in `Finding.cve_context` → server-side current CVE recalculation, audit/operational event, and finding refresh. The action is tenant-scoped and does not change CVSS or confirm an asset link.
 
 ### Incident draft
 
