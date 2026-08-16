@@ -1,5 +1,13 @@
 # Canonicalization Changelog
 
+## Native module UI restoration hotfix (2026-08-16)
+
+- Restored the retained native SPECTRUM, SCOUT, STRIKE, STANDARD, GRC, and SPOTLIGHT route experiences after the canonicalization extension incorrectly replaced them with fixed-position overlays.
+- Kept extension hosting only for newer utility/admin pages that do not have native compiled routes.
+- Adapted the restored pages to canonical exposure, corrected STRIKE outcomes, STANDARD coverage/compliance, real-Incident MAS drafts, safe GRC score output, and canonical SPOTLIGHT source metrics.
+- Made SYNTHESIS render an unavailable aggregate TES as `N/A` instead of calling `.toFixed()` on `null` or fabricating zero.
+- Added executable route ownership and native-control regression checks.
+
 ## Canonical exposure v1
 
 - Changed customer-exposure qualification from `Finding.asset_id` to confirmed `AssetExposure` on an active same-tenant asset.

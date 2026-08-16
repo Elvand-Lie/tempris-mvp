@@ -59,7 +59,7 @@ modules:
 
   spectrum:
     display_name: "SPECTRUM"
-    purpose: "Tenant Finding Registry with explicit evidence scope and server EDIP decisions."
+    purpose: "Confirmed-exposure CTEM analysis, TES, lifecycle, and server EDIP decisions."
     classification: commercial_module
     frontend_routes: ["/spectrum"]
     api_routes: ["GET /api/spectrum/findings", "POST /api/spectrum/findings/{finding_id}/edip", "POST /api/spectrum/calculate-tes"]
@@ -79,16 +79,16 @@ modules:
         customer_safe_interpretation: "Finding-level contextual score."
         incorrect_interpretations: [tenant_TES]
       - id: SPC-REG-002
-        label: "Finding Registry"
-        definition: "All tenant finding rows, separated by scope/status."
+        label: "Confirmed exposure queue"
+        definition: "Open confirmed customer exposures presented as the actionable SPECTRUM workload."
         subject: finding_collection
-        scope: tenant_registry
+        scope: confirmed_open_exposure
         time_semantics: current
         source: {api: "GET /api/spectrum/findings", service: "routers.spectrum.list_findings", model_fields: ["Finding.id", "Finding.status"]}
-        inclusion_rules: [same_tenant]
-        exclusion_rules: []
-        customer_safe_interpretation: "Registry volume across lifecycle states."
-        incorrect_interpretations: [confirmed_customer_vulnerabilities]
+        inclusion_rules: [confirmed_asset_exposure, same_tenant, active_asset, open_finding]
+        exclusion_rules: [reference, not_applicable, resolved, suggested, legacy_unverified]
+        customer_safe_interpretation: "Actionable customer exposure volume for CTEM analysis."
+        incorrect_interpretations: [full_finding_registry, catalogue_volume]
     actions:
       - id: SPC-ACT-001
         label: "Generate EDIP Decision"

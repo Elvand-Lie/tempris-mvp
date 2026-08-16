@@ -187,7 +187,7 @@ def test_vdp_is_canonical_and_security_txt_is_rfc_9116_scoped():
 
     policy = client.get("/vdp")
     assert policy.status_code == 200
-    assert "/extensions/tempris-modules.js?v=20260815a" in policy.text
+    assert "/extensions/tempris-modules.js?v=20260816a" in policy.text
 
     security_txt = client.get("/.well-known/security.txt")
     assert security_txt.status_code == 200

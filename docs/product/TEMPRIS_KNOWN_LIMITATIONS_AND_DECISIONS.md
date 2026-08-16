@@ -23,7 +23,7 @@
 - SPEAK answers from current tenant-scoped context and RAG references; it is not an autonomous remediation agent.
 - The full expansion of **SSS** is **UNVERIFIED / PRODUCT CLARIFICATION REQUIRED**.
 - Tenant-type classification is configuration metadata; legacy tenant purpose can be **UNVERIFIED / PRODUCT CLARIFICATION REQUIRED** when no authoritative record exists.
-- The main frontend has no reproducible package/build pipeline in this repository. The five retained compiled bundles and the authoritative extension files therefore require direct syntax/content regression checks; `index.html` currently loads only `assets/index-DUrFdX-d.js` plus the reviewed extensions.
+- The main frontend has no original package/build pipeline in this repository. The deployed native bundle is reproduced from the last native Git artifact through the fail-closed `scripts/ci/patch_native_frontend.py` compatibility transformer. Route tests verify that SPECTRUM, SCOUT, STRIKE, STANDARD, GRC, and SPOTLIGHT remain native pages and are not extension takeovers.
 - The repository defines one guarded VPS target and no independent remote staging host. Migration rehearsal is performed on a disposable database clone; remote staging acceptance requires separately approved infrastructure/access.
 - Live Microsoft Graph verification remains incomplete until approved tenant credentials and administrator consent are supplied. Mocked connector verification is not evidence of live consent.
 - Earlier Git history contains non-placeholder deployment credentials. They must be rotated before production release even though the current operational `.env` is ignored and untracked.

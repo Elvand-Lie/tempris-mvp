@@ -7,7 +7,7 @@ The browser is a single-page application. Core compiled views are supplemented b
 | Area | Classification | Route | Audience | Owns | Consumes |
 |---|---|---|---|---|---|
 | SYNTHESIS | Commercial module | `/` | All entitled users | Comparable posture snapshots | Canonical posture, module health |
-| SPECTRUM | Commercial module | `/spectrum` | Analysts, managers | Finding registry, EDIP decisions/evidence | Intake, SCOUT, reference imports |
+| SPECTRUM | Commercial module | `/spectrum` | Analysts, managers | Confirmed-exposure analysis, TES, CTEM lifecycle, EDIP decisions/evidence | Intake confirmations, SCOUT normalization |
 | SCOUT | Commercial module | `/scout` | Analysts/operators | Scan jobs and scan observations | Assets, scanner engines, reference catalogue |
 | STRIKE | Commercial module | `/strike` | Authorized validation staff | Authorizations, simulations, results | Signed rules of engagement |
 | STANDARD | Commercial module | `/standard` | Compliance/security staff | Control assessments/evidence, MAS drafts | Incidents, canonical exposure |
@@ -35,9 +35,9 @@ DOMINATE’s nine-module count refers only to the nine commercial modules from S
 
 ## SPECTRUM
 
-- **Purpose:** broad tenant Finding Registry and server EDIP decision view.
+- **Purpose:** CTEM analysis and prioritization of confirmed customer exposure, including finding TES, lifecycle, and server EDIP decisions.
 - **Trace:** `/spectrum` → `GET /api/spectrum/findings?scope=` → `routers/spectrum.py::list_findings` → `Finding`, `AssetExposure`, EDIP history/evidence models.
-- **Scopes:** confirmed exposure, unmapped intake, suggested match, reference intelligence, not applicable, resolved, catalogue, and legacy-unverified.
+- **Default scope:** open confirmed exposure only. Secondary scope filters may expose history/debug records, but Intake & Triage owns the broad Finding Registry and classification queue.
 - **Actions:** Generate EDIP Decision posts to `/api/spectrum/findings/{id}/edip`; relationship/source/control/evidence APIs preserve analytical context.
 - **Authority:** it displays server decisions and finding TES; it does not score in the browser.
 
@@ -113,7 +113,7 @@ DOMINATE’s nine-module count refers only to the nine commercial modules from S
 
 ## Intake & Triage
 
-- **Purpose:** create and classify tenant finding records, then confirm affected assets at the human evidence boundary.
+- **Purpose:** own the tenant Finding Registry, create/classify records, and confirm affected assets at the human evidence boundary.
 - **Trace:** forms/connectors → `/api/edip/intake/*` → `Finding`; queue → `/api/workflow/overview`; Assign Assets → `/api/workflow/findings/{id}/assets` → `AssetExposure` → refresh event and canonical posture.
 - **Registry contents:** mapped, unmapped, resolved, reference, not-applicable, connector, scanner, catalogue, and manual records.
 - **Queue:** only records needing classification. A record may remain in registry while leaving the queue.

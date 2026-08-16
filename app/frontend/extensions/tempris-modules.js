@@ -3,7 +3,7 @@
 
   const TOKEN_KEY = 'tempris_token';
   const USER_KEY = 'tempris_user';
-  const EXTENSION_ROUTES = new Set(['/ciso', '/reports', '/packages', '/sss-intake', '/vdp-queue', '/grc', '/spectrum', '/scout', '/strike', '/standard', '/spotlight']);
+  const EXTENSION_ROUTES = new Set(['/ciso', '/reports', '/packages', '/sss-intake', '/vdp-queue']);
   const EXTENSION_HOST_ID = 'tempris-extension-host';
   const RETRY_DELAYS = [1000, 3000, 8000];
   const sssUi = window.TemprisSssUi;
@@ -2213,13 +2213,6 @@
     if (path === '/sss-intake') renderSssRoute(host);
     if (path === '/packages') renderPackagesRoute(host);
     if (path === '/vdp-queue') renderVdpQueueRoute(host);
-    if (path === '/grc') renderGrcRoute(host);
-    if (path === '/spectrum') renderSpectrumRoute(host);
-    if (path === '/scout') renderScoutRoute(host);
-    if (path === '/strike') renderStrikeRoute(host);
-    if (path === '/standard') renderStandardRoute(host);
-    if (path === '/spotlight') renderSpotlightRoute(host);
-
   }
 
   function reconcile() {

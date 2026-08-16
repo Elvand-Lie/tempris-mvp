@@ -89,12 +89,12 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     stylesheet = client.get("/extensions/tempris-modules.css")
     logo = client.get("/brand/tempris-logo-light.png")
 
-    assert 'src="/assets/index-DUrFdX-d.js?v=20260815a"' in index.text
-    assert 'src="/extensions/tempris-bootstrap.js?v=20260815a"' in index.text
-    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260815a"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260815a"')
-    assert 'src="/extensions/tempris-sss-ui.js?v=20260815a"' in index.text
-    assert 'src="/extensions/tempris-modules.js?v=20260815a"' in index.text
-    assert 'href="/extensions/tempris-modules.css?v=20260815a"' in index.text
+    assert 'src="/assets/index-DUrFdX-d.js?v=20260816a"' in index.text
+    assert 'src="/extensions/tempris-bootstrap.js?v=20260816a"' in index.text
+    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260816a"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260816a"')
+    assert 'src="/extensions/tempris-sss-ui.js?v=20260816a"' in index.text
+    assert 'src="/extensions/tempris-modules.js?v=20260816a"' in index.text
+    assert 'href="/extensions/tempris-modules.css?v=20260816a"' in index.text
     assert script.status_code == 200
     assert script.headers["cache-control"] == "no-store, max-age=0"
     assert bootstrap.headers["cache-control"] == "no-store, max-age=0"
@@ -149,6 +149,34 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     assert ".tmx-page" in stylesheet.text
     assert logo.status_code == 200
     assert logo.headers["content-type"] == "image/png"
+
+
+def test_native_module_routes_are_not_extension_takeovers_and_keep_primary_controls():
+    frontend = Path(__file__).resolve().parents[2] / "frontend"
+    extension = (frontend / "extensions" / "tempris-modules.js").read_text(encoding="utf-8")
+    bundle = (frontend / "assets" / "index-DUrFdX-d.js").read_text(encoding="utf-8")
+
+    extension_route_line = next(line for line in extension.splitlines() if "const EXTENSION_ROUTES" in line)
+    native_routes = ("/spectrum", "/scout", "/strike", "/standard", "/grc", "/spotlight")
+    assert all(route not in extension_route_line for route in native_routes)
+    assert all(f"if (path === '{route}')" not in extension for route in native_routes)
+
+    native_controls = {
+        "/spectrum": ("SPECTRUM Analysis", "CTEM Lifecycle", "EDIP Engine Recommendation"),
+        "/scout": ("Launch Scan", "Scan History", "CISA KEV Intelligence", "explicitly authorised for this SCOUT scan"),
+        "/strike": ("Authorization", "MITRE ATT&CK", "Check confidence"),
+        "/standard": ("STANDARD Compliance", "Assessment coverage", "Compliance among assessed"),
+        "/grc": ("GRC SOP Builder", "Gap Analysis", "Policy Library", "policyArchive", "policySupersede", "policyDelete"),
+        "/spotlight": ("Generate Report", "Report History", "Canonical Posture"),
+    }
+    for route, markers in native_controls.items():
+        assert all(marker in bundle for marker in markers), route
+
+    assert "children:e.aggregate_tes==null?`N/A`:e.aggregate_tes.toFixed(1)" in bundle
+    assert "strokeDashoffset:e.aggregate_tes==null?502" in bundle
+    assert "No confirmed scoreable exposure" in bundle
+    assert "scope=confirmed_exposure" in bundle
+    assert "No EDIP decision" in bundle
 
 
 def test_every_retained_bundle_excludes_tes_internals():

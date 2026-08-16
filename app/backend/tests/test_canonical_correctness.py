@@ -29,6 +29,7 @@ from models import (  # noqa: E402
     StrikeSimulation,
 )
 from routers.scanner import get_scan_findings, get_scan_history, get_scan_summary  # noqa: E402
+from routers.spectrum import get_findings as get_spectrum_findings  # noqa: E402
 from routers.strike import (  # noqa: E402
     _normalise_results,
     get_authorizations,
@@ -140,6 +141,16 @@ def test_canonical_exposure_rejects_legacy_suggestions_reference_resolved_and_in
     assert posture["not_applicable_count"] == 1
     assert posture["resolved_finding_count"] == 1
     assert posture["suggested_match_count"] == 1
+
+    spectrum = get_spectrum_findings(
+        page=1, limit=50, scope="confirmed_exposure", db=db,
+        user={"sub": "analyst@example.test", "role": "Analyst", "tenant_id": "tenant-a"},
+    )
+    assert [row["id"] for row in spectrum["data"]] == ["F-CONF"]
+    assert spectrum["data"][0]["asset"]["asset_id"] == "A-ACT"
+    assert spectrum["data"][0]["asset"]["name"] == "Active"
+    assert spectrum["data"][0]["assets"][0]["source"] == "nuclei"
+    assert "raw_inputs" not in spectrum["data"][0]
 
     with pytest.raises(ValueError, match="active assets from the finding tenant"):
         confirm_finding_assets(db, confirmed, [other], "analyst", evidence="invalid")

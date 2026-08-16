@@ -13,7 +13,7 @@ from middleware.rate_limit import detect_probe_attempt
 from typing import Any
 
 from services.entitlements import require_module
-from services.customer_posture import build_customer_posture
+from services.customer_posture import build_customer_posture, canonical_exposure_rows
 
 router = APIRouter(dependencies=[Depends(require_module("SPECTRUM"))])
 
@@ -94,6 +94,21 @@ def get_findings(
     posture = build_customer_posture(db, auth_ctx.tenant_id)
     confirmed_ids = set(posture["confirmed_finding_ids"])
     legacy_ids = set(posture["legacy_unverified_finding_ids"])
+    confirmed_assets: dict[str, list[dict[str, Any]]] = {}
+    for finding, asset, link in canonical_exposure_rows(db, auth_ctx.tenant_id):
+        confirmed_assets.setdefault(finding.id, []).append({
+            "id": asset.id,
+            "name": asset.name,
+            "ip_address": asset.ip_address,
+            "asset_id": asset.id,
+            "asset_name": asset.name,
+            "asset_ip": asset.ip_address,
+            "hostname": asset.hostname,
+            "criticality": asset.criticality,
+            "environment": asset.environment,
+            "evidence": link.evidence,
+            "source": link.match_method,
+        })
 
     allowed_scopes = {
         "all", "confirmed_exposure", "unmapped_intake", "suggested_match",
@@ -153,8 +168,12 @@ def get_findings(
         f_copy["tes_priority"] = priority_from_tes(f_copy["tes_score"])
         f_copy["severity"] = public_severity(f)
         
-        # Build asset context for context-bound output
-        asset_data = f.get("asset")
+        # Native SPECTRUM receives canonical confirmed assets, never the legacy
+        # Finding.asset_id convenience field.
+        assets = confirmed_assets.get(f["id"], [])
+        f_copy["assets"] = assets
+        f_copy["asset"] = assets[0] if assets else None
+        asset_data = assets[0] if assets else None
         asset_ctx = None
         if asset_data:
             asset_ctx = {
@@ -166,7 +185,7 @@ def get_findings(
         # Run automated EDIP classification with context binding
         f_copy["auto_classification"] = auto_classify(
             cvss=f_copy["severity"]["score"],
-            asset_criticality="high",
+            asset_criticality=(asset_data or {}).get("criticality", "high"),
             cisa_kev=f.get("cisa", False),
             ransomware_linked=f.get("ransomware", False),
             asset_context=asset_ctx,
