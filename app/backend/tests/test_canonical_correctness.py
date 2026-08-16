@@ -150,6 +150,7 @@ def test_canonical_exposure_rejects_legacy_suggestions_reference_resolved_and_in
     assert spectrum["data"][0]["asset"]["asset_id"] == "A-ACT"
     assert spectrum["data"][0]["asset"]["name"] == "Active"
     assert spectrum["data"][0]["assets"][0]["source"] == "nuclei"
+    assert spectrum["data"][0]["assets"][0]["evidence"] == "scanner"
     assert "raw_inputs" not in spectrum["data"][0]
 
     with pytest.raises(ValueError, match="active assets from the finding tenant"):

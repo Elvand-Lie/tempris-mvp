@@ -439,7 +439,7 @@ def confirm_finding_asset_links(
     if is_catalog_finding(finding) and len((req.evidence or '').strip()) < 10:
         raise HTTPException(
             status_code=422,
-            detail="Catalogue vulnerability links require recorded scanner, inventory, SBOM, or analyst evidence",
+            detail="Catalogue vulnerability links require at least 10 characters explaining why the selected asset is affected",
         )
     rows = db.query(Asset).filter(
         Asset.tenant_id == auth.tenant_id,
@@ -539,7 +539,7 @@ def replace_finding_asset_links(
     if added_ids and is_catalog_finding(finding) and len(evidence) < 10:
         raise HTTPException(
             status_code=422,
-            detail="New catalogue vulnerability links require recorded scanner, inventory, SBOM, or analyst evidence",
+            detail="New catalogue vulnerability links require at least 10 characters explaining why the selected asset is affected",
         )
 
     ordered_assets = [by_id[asset_id] for asset_id in req.asset_ids]

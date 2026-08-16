@@ -129,6 +129,9 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     assert "exposure-classification" in script.text
     assert "data-recent-toggle" in script.text
     assert "method: 'PUT'" in script.text
+    assert "Evidence note (required when confirming a catalogue vulnerability)" in script.text
+    assert "Describe how you verified that the selected asset is affected (at least 10 characters)." in script.text
+    assert "window.addEventListener('focus'" not in script.text
     assert script.text.index("[data-asset-picker-options]').addEventListener('change'") < script.text.index("[data-asset-picker-confirm]').addEventListener('click'")
     assert "Select at least one affected customer asset" not in script.text
     assert "data-report-format" in script.text
