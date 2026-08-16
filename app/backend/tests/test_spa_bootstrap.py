@@ -89,12 +89,12 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     stylesheet = client.get("/extensions/tempris-modules.css")
     logo = client.get("/brand/tempris-logo-light.png")
 
-    assert 'src="/assets/index-DUrFdX-d.js?v=20260816a"' in index.text
-    assert 'src="/extensions/tempris-bootstrap.js?v=20260816a"' in index.text
-    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260816a"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260816a"')
-    assert 'src="/extensions/tempris-sss-ui.js?v=20260816a"' in index.text
-    assert 'src="/extensions/tempris-modules.js?v=20260816a"' in index.text
-    assert 'href="/extensions/tempris-modules.css?v=20260816a"' in index.text
+    assert 'src="/assets/index-DUrFdX-d.js?v=20260816b"' in index.text
+    assert 'src="/extensions/tempris-bootstrap.js?v=20260816b"' in index.text
+    assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260816b"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260816b"')
+    assert 'src="/extensions/tempris-sss-ui.js?v=20260816b"' in index.text
+    assert 'src="/extensions/tempris-modules.js?v=20260816b"' in index.text
+    assert 'href="/extensions/tempris-modules.css?v=20260816b"' in index.text
     assert script.status_code == 200
     assert script.headers["cache-control"] == "no-store, max-age=0"
     assert bootstrap.headers["cache-control"] == "no-store, max-age=0"
