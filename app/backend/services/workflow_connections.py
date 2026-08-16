@@ -39,14 +39,7 @@ from services.exposure_links import (
 )
 from services.kev_loader import _finding_to_dict
 from services.tes_engine import calculate_finding_tes
-from services.customer_posture import build_customer_posture
-
-
-RESOLVED_STATUSES = {"resolved", "mitigated", "closed"}
-
-
-def _is_open(finding: Finding) -> bool:
-    return (finding.status or "").strip().lower() not in RESOLVED_STATUSES
+from services.customer_posture import build_customer_posture, is_open
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -132,7 +125,7 @@ def build_deadline_summary(db: Session, tenant_id: str, now: datetime | None = N
     items: list[dict] = []
     findings = db.query(Finding).filter(Finding.tenant_id == tenant_id).all()
     for finding in findings:
-        if not _is_open(finding):
+        if not is_open(finding):
             continue
         created_at = _as_utc(finding.created_at)
         if created_at and finding.sla:
@@ -171,7 +164,7 @@ def build_workflow_readiness(db: Session, tenant_id: str) -> dict:
         ).all()
     }
     findings = db.query(Finding).filter(Finding.tenant_id == tenant_id).all()
-    open_findings = [row for row in findings if _is_open(row)]
+    open_findings = [row for row in findings if is_open(row)]
     decisions = {
         row.finding_id: row
         for row in db.query(EdipDecision).filter(EdipDecision.tenant_id == tenant_id).all()

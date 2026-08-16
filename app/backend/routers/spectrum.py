@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from services.tes_engine import calculate_tes, TESInputs, calculate_finding_tes, decision_from_tes, priority_from_tes, public_severity, public_decision_for_finding
@@ -7,10 +8,12 @@ from routers.audit import append_to_audit_log, AuditEntry
 from routers.auth import get_current_user, require_role
 from services.kev_loader import get_findings_paginated, get_finding_by_id
 from services.database import get_db
-from models import EdipDecision
+from models import EdipDecision, FindingEvidence
 from services.edip_engine import auto_classify
 from middleware.rate_limit import detect_probe_attempt
 from typing import Any
+from pathlib import Path
+from uuid import uuid4
 
 from services.entitlements import require_module
 from services.customer_posture import build_customer_posture, canonical_exposure_rows
@@ -95,7 +98,10 @@ def get_findings(
     confirmed_ids = set(posture["confirmed_finding_ids"])
     legacy_ids = set(posture["legacy_unverified_finding_ids"])
     confirmed_assets: dict[str, list[dict[str, Any]]] = {}
-    for finding, asset, link in canonical_exposure_rows(db, auth_ctx.tenant_id):
+    # Include historical confirmed links in a finding's detail view too.  Open
+    # posture still comes solely from ``confirmed_ids`` above, so resolving or
+    # marking a finding false-positive cannot keep it in the main queue.
+    for finding, asset, link in canonical_exposure_rows(db, auth_ctx.tenant_id, open_only=False):
         confirmed_assets.setdefault(finding.id, []).append({
             "id": asset.id,
             "name": asset.name,
@@ -128,13 +134,24 @@ def get_findings(
         user_tenant_id=auth_ctx.tenant_id,
         is_superadmin=auth_ctx.is_superadmin,
     )
+    finding_ids = [row.get("id") for row in page_findings if row.get("id")]
+    evidence_by_finding: dict[str, list[dict[str, Any]]] = {}
+    if finding_ids:
+        for evidence in db.query(FindingEvidence).filter(FindingEvidence.finding_id.in_(finding_ids)).all():
+            evidence_by_finding.setdefault(evidence.finding_id, []).append({
+                "id": evidence.id,
+                "filename": evidence.filename,
+                "uploaded_by": evidence.uploaded_by,
+                "uploaded_at": evidence.uploaded_at.isoformat() if evidence.uploaded_at else None,
+                "verification_state": evidence.verification_state,
+            })
 
     def record_scope(record: dict) -> str:
         status = str(record.get("status") or "").lower()
         record_id = record.get("id")
         if record_id in confirmed_ids:
             return "confirmed_exposure"
-        if status in {"resolved", "closed", "mitigated"}:
+        if status in {"resolved", "closed", "mitigated", "ignore", "false_positive", "false-positive"}:
             return "resolved"
         if status in {"not_applicable", "not-applicable"}:
             return "not_applicable"
@@ -173,6 +190,7 @@ def get_findings(
         assets = confirmed_assets.get(f["id"], [])
         f_copy["assets"] = assets
         f_copy["asset"] = assets[0] if assets else None
+        f_copy["evidence_files"] = evidence_by_finding.get(f["id"], [])
         asset_data = assets[0] if assets else None
         asset_ctx = None
         if asset_data:
@@ -365,18 +383,9 @@ async def record_edip_decision(
         EdipDecision.tenant_id == auth_ctx.tenant_id,
     ).first()
 
-    # 4. Transition legality check
+    # 4. An analyst may revise any decision. The prior decision is retained
+    # in the decision row, audit record, and operational event.
     current_decision = existing.decision if existing else None
-    if current_decision == "ignore" and cleaned_decision != "ignore":
-        return JSONResponse(
-            status_code=409,
-            content={
-                "error": {
-                    "code": "INVALID_STATE_TRANSITION",
-                    "message": "Cannot transition out of terminal state 'ignore'."
-                }
-            }
-        )
 
     # 5. Idempotency Check
     if existing and existing.decision == cleaned_decision and existing.rationale == rationale:
@@ -400,6 +409,9 @@ async def record_edip_decision(
             else "decision.updated" if existing else "decision.created"
         )
         if existing:
+            if existing.decision != cleaned_decision:
+                existing.original_decision = existing.decision
+                existing.override_reason = rationale
             existing.decision = cleaned_decision
             existing.rationale = rationale
             existing.decided_by = user_email
@@ -420,7 +432,8 @@ async def record_edip_decision(
             user=user_email,
             action="EDIP_DECISION",
             module="SPECTRUM",
-            detail=f"Applied '{cleaned_decision}' to {finding_id} ({finding.cve or ''}). Rationale: {rationale or 'None provided'}"
+            detail=f"Applied '{cleaned_decision}' to {finding_id} ({finding.cve or ''}). Rationale: {rationale or 'None provided'}",
+            metadata={"finding_id": finding_id, "previous_decision": current_decision, "decision": cleaned_decision},
         ), commit=False)
         from services.operational_events import record_operational_event
         record_operational_event(
@@ -431,7 +444,7 @@ async def record_edip_decision(
             resource_id=finding_id,
             source_module="SPECTRUM",
             actor_id=user_email,
-            metadata={"decision": cleaned_decision},
+            metadata={"previous_decision": current_decision, "decision": cleaned_decision},
         )
 
         db.commit()
@@ -446,6 +459,12 @@ async def record_edip_decision(
                 }
             }
         )
+
+    try:
+        from routers.edip import _publish_sss_event
+        _publish_sss_event(auth_ctx.tenant_id, {"type": "finding.refresh", "finding_id": finding_id, "status": cleaned_decision})
+    except Exception:
+        pass
 
     return {
         "status": "success",
@@ -476,7 +495,7 @@ def calculate_custom_tes(
     return PublicTESResponse(tes_score=score, decision=decision_from_tes(score))
 
 
-from models import FindingRelationship, FindingSource, FindingDisputedClaim, FindingControl, FindingEvidence, FindingStatusHistory, Finding
+from models import FindingRelationship, FindingSource, FindingDisputedClaim, FindingControl, FindingStatusHistory, Finding
 
 
 def _tenant_finding(db: Session, finding_id: str, user: dict) -> Finding:
@@ -674,5 +693,120 @@ def get_finding_history(
     _tenant_finding(db, finding_id, user)
         
     return db.query(FindingStatusHistory).filter(FindingStatusHistory.finding_id == finding_id).all()
+
+
+_FINDING_EVIDENCE_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".docx", ".xlsx", ".txt", ".md"}
+_FINDING_EVIDENCE_MAX_BYTES = 10 * 1024 * 1024
+
+
+def _finding_evidence_payload(evidence: FindingEvidence) -> dict:
+    return {
+        "id": evidence.id,
+        "filename": evidence.filename,
+        "uploaded_by": evidence.uploaded_by,
+        "uploaded_at": evidence.uploaded_at.isoformat() if evidence.uploaded_at else None,
+        "verification_state": evidence.verification_state,
+    }
+
+
+@router.get("/findings/{finding_id}/evidence")
+def list_finding_evidence(
+    finding_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    _tenant_finding(db, finding_id, user)
+    return [_finding_evidence_payload(row) for row in db.query(FindingEvidence).filter(
+        FindingEvidence.finding_id == finding_id
+    ).order_by(FindingEvidence.id.desc()).all()]
+
+
+@router.post("/findings/{finding_id}/evidence")
+async def upload_finding_evidence(
+    finding_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user=Depends(require_role("Superadmin", "Admin", "Analyst")),
+):
+    """Attach analyst-supplied evidence to a tenant finding without inventing proof."""
+    from routers.auth import get_auth_context
+    from routers.audit import append_to_audit_log_db, AuditEntry
+    from routers.standard import get_evidence_storage_root, sanitize_filename, validate_storage_path
+    from services.operational_events import record_operational_event
+
+    finding = _tenant_finding(db, finding_id, user)
+    auth = get_auth_context(user)
+    clean_name = sanitize_filename(file.filename or "evidence_file.dat")
+    suffix = Path(clean_name).suffix.lower()
+    if suffix not in _FINDING_EVIDENCE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Unsupported evidence file type")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Evidence file is empty")
+    if len(content) > _FINDING_EVIDENCE_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Evidence file exceeds 10 MB")
+
+    root = Path(get_evidence_storage_root()).resolve()
+    destination_dir = root / "spectrum" / auth.tenant_id / finding.id
+    if any(part.is_symlink() for part in (root / "spectrum", root / "spectrum" / auth.tenant_id, destination_dir) if part.exists()):
+        raise HTTPException(status_code=400, detail="Invalid evidence storage path")
+    try:
+        destination_dir.resolve(strict=False).relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid evidence storage path")
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination = destination_dir / f"{uuid4().hex}{suffix}"
+    validate_storage_path(str(destination), strict=False)
+    try:
+        destination.write_bytes(content)
+        evidence = FindingEvidence(
+            finding_id=finding.id,
+            filename=clean_name,
+            file_path=str(destination),
+            uploaded_by=auth.user_id,
+        )
+        db.add(evidence)
+        db.flush()
+        record_operational_event(
+            db, tenant_id=auth.tenant_id, event_type="finding.evidence_attached",
+            resource_type="finding", resource_id=finding.id, source_module="INTAKE_TRIAGE",
+            actor_id=auth.user_id, metadata={"evidence_id": evidence.id, "filename": clean_name},
+        )
+        append_to_audit_log_db(db, AuditEntry(
+            user=auth.user_id, action="FINDING_EVIDENCE_UPLOADED", module="SPECTRUM",
+            detail=f"Attached evidence to {finding.id}",
+            metadata={"finding_id": finding.id, "evidence_id": evidence.id, "filename": clean_name},
+        ), commit=False)
+        db.commit()
+        db.refresh(evidence)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        if destination.exists():
+            destination.unlink()
+        raise HTTPException(status_code=500, detail="Evidence upload could not be stored")
+    return {"status": "uploaded", "evidence": _finding_evidence_payload(evidence)}
+
+
+@router.get("/findings/{finding_id}/evidence/{evidence_id}/download")
+def download_finding_evidence(
+    finding_id: str,
+    evidence_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    from routers.standard import sanitize_filename, validate_storage_path
+
+    _tenant_finding(db, finding_id, user)
+    evidence = db.query(FindingEvidence).filter(
+        FindingEvidence.id == evidence_id,
+        FindingEvidence.finding_id == finding_id,
+    ).first()
+    if not evidence:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    validate_storage_path(evidence.file_path)
+    return FileResponse(evidence.file_path, filename=sanitize_filename(evidence.filename))
 
 

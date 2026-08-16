@@ -118,8 +118,9 @@ def test_canonical_exposure_rejects_legacy_suggestions_reference_resolved_and_in
     reference = _finding("F-REF", status="reference_only")
     not_applicable = _finding("F-NA", status="not_applicable")
     resolved = _finding("F-RES", status="resolved")
+    ignored = _finding("F-IGNORE", status="ignore")
     on_retired = _finding("F-OLD")
-    db.add_all([active, retired, other, confirmed, legacy, suggested, reference, not_applicable, resolved, on_retired])
+    db.add_all([active, retired, other, confirmed, legacy, suggested, reference, not_applicable, resolved, ignored, on_retired])
     db.flush()
     db.add_all([
         AssetExposure(id="EXP-1", tenant_id="tenant-a", finding_id="F-CONF", asset_id="A-ACT", status="confirmed", evidence="scanner", match_method="nuclei"),
@@ -127,6 +128,7 @@ def test_canonical_exposure_rejects_legacy_suggestions_reference_resolved_and_in
         AssetExposure(id="EXP-2", tenant_id="tenant-a", finding_id="F-REF", asset_id="A-ACT", status="confirmed", evidence="old", match_method="manual"),
         AssetExposure(id="EXP-3", tenant_id="tenant-a", finding_id="F-NA", asset_id="A-ACT", status="confirmed", evidence="old", match_method="manual"),
         AssetExposure(id="EXP-4", tenant_id="tenant-a", finding_id="F-RES", asset_id="A-ACT", status="confirmed", evidence="old", match_method="manual"),
+        AssetExposure(id="EXP-IGNORE", tenant_id="tenant-a", finding_id="F-IGNORE", asset_id="A-ACT", status="confirmed", evidence="analyst evidence", match_method="manual"),
         AssetExposure(id="EXP-5", tenant_id="tenant-a", finding_id="F-OLD", asset_id="A-OLD", status="confirmed", evidence="old", match_method="manual"),
     ])
     db.commit()
@@ -139,7 +141,7 @@ def test_canonical_exposure_rejects_legacy_suggestions_reference_resolved_and_in
     assert posture["legacy_unverified_finding_ids"] == ["F-LEG"]
     assert posture["reference_intelligence_count"] >= 1
     assert posture["not_applicable_count"] == 1
-    assert posture["resolved_finding_count"] == 1
+    assert posture["resolved_finding_count"] == 2
     assert posture["suggested_match_count"] == 1
 
     spectrum = get_spectrum_findings(
@@ -152,6 +154,16 @@ def test_canonical_exposure_rejects_legacy_suggestions_reference_resolved_and_in
     assert spectrum["data"][0]["assets"][0]["source"] == "nuclei"
     assert spectrum["data"][0]["assets"][0]["evidence"] == "scanner"
     assert "raw_inputs" not in spectrum["data"][0]
+
+    # A false-positive is excluded from open posture but its confirmed link and
+    # analyst evidence remain visible in the SPECTRUM history view.
+    historical = get_spectrum_findings(
+        page=1, limit=50, scope="resolved", db=db,
+        user={"sub": "analyst@example.test", "role": "Analyst", "tenant_id": "tenant-a"},
+    )
+    ignored_record = next(row for row in historical["data"] if row["id"] == "F-IGNORE")
+    assert ignored_record["assets"][0]["asset_id"] == "A-ACT"
+    assert ignored_record["assets"][0]["evidence"] == "analyst evidence"
 
     with pytest.raises(ValueError, match="active assets from the finding tenant"):
         confirm_finding_assets(db, confirmed, [other], "analyst", evidence="invalid")

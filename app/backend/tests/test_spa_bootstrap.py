@@ -130,6 +130,11 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     assert "data-recent-toggle" in script.text
     assert "method: 'PUT'" in script.text
     assert "Evidence note (required when confirming a catalogue vulnerability)" in script.text
+    assert "Optional evidence file" in script.text
+    assert "data-asset-picker-file" in script.text
+    assert "data-exposure-prev" in script.text
+    assert "const data = await loadCiso(true);" in script.text
+    assert "Already linked — uncheck to remove this asset from the finding." in script.text
     assert "Describe how you verified that the selected asset is affected (at least 10 characters)." in script.text
     assert "window.addEventListener('focus'" not in script.text
     assert script.text.index("[data-asset-picker-options]').addEventListener('change'") < script.text.index("[data-asset-picker-confirm]').addEventListener('click'")
@@ -179,6 +184,9 @@ def test_native_module_routes_are_not_extension_takeovers_and_keep_primary_contr
     assert "strokeDashoffset:e.aggregate_tes==null?502" in bundle
     assert "No confirmed scoreable exposure" in bundle
     assert "scope=confirmed_exposure" in bundle
+    assert "history=1" in bundle
+    assert "Linked assets and evidence" in bundle
+    assert "Current decision — revise if new evidence is recorded" in bundle
     assert "No EDIP decision" in bundle
 
 

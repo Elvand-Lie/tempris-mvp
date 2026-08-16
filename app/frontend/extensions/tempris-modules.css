@@ -511,6 +511,21 @@ body.tmx-extension-active #root main {
   letter-spacing: .06em;
 }
 
+.tmx-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 14px;
+  color: #a1a1aa;
+  font-size: 12px;
+}
+
+.tmx-asset-option-linked {
+  border-color: rgb(16 185 129 / 45%);
+  background: rgb(16 185 129 / 7%);
+}
+
 @keyframes tmx-enter {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }

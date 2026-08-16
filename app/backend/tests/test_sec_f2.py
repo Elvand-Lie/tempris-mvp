@@ -14,7 +14,7 @@ os.environ["AUDIT_HMAC_KEY"] = "test_audit_hmac_secret_key_12345678"
 
 from services.database import Base, get_db
 import services.database
-from models import Finding, EdipDecision, AuditLog
+from models import Finding, EdipDecision, AuditLog, FindingEvidence
 from routers.auth import create_access_token
 from index import app
 
@@ -278,11 +278,11 @@ def test_case_and_whitespace_behavior():
     assert response.json()["decision"] == "mitigate"
 
 # ── 9. A valid decision in an illegal state returns 409
-def test_valid_decision_in_illegal_state_returns_409():
+def test_false_positive_decision_can_be_revised_with_history():
     token = get_token("analyst@tempris.com", "Analyst", "tenantA")
     headers = {"Authorization": f"Bearer {token}"}
     
-    # 1. Transition to terminal state 'ignore'
+    # 1. Mark the finding false positive.
     res1 = client.post(
         "/api/spectrum/findings/F-1234/edip",
         headers=headers,
@@ -290,14 +290,18 @@ def test_valid_decision_in_illegal_state_returns_409():
     )
     assert res1.status_code == 200
 
-    # 2. Try transitioning from 'ignore' to 'mitigate'
+    # 2. New evidence permits a revised decision.
     res2 = client.post(
         "/api/spectrum/findings/F-1234/edip",
         headers=headers,
         json={"decision": "mitigate", "rationale": "Reopen attempts"}
     )
-    assert res2.status_code == 409
-    assert res2.json()["error"]["code"] == "INVALID_STATE_TRANSITION"
+    assert res2.status_code == 200
+    assert res2.json()["decision"] == "mitigate"
+    db = TestingSessionLocal()
+    decision = db.query(EdipDecision).filter(EdipDecision.finding_id == "F-1234").one()
+    assert decision.original_decision == "ignore"
+    db.close()
 
 # ── 10. Invalid input causes no database mutation
 def test_invalid_input_causes_no_mutation():
@@ -322,11 +326,11 @@ def test_invalid_input_causes_no_mutation():
     db.close()
 
 # ── 11. Illegal transitions cause no database mutation
-def test_illegal_transitions_cause_no_mutation():
+def test_revised_decision_updates_current_state():
     token = get_token("analyst@tempris.com", "Analyst", "tenantA")
     headers = {"Authorization": f"Bearer {token}"}
     
-    # Set to terminal ignore
+    # Set a false-positive decision, then revise it.
     client.post(
         "/api/spectrum/findings/F-1234/edip",
         headers=headers,
@@ -334,20 +338,20 @@ def test_illegal_transitions_cause_no_mutation():
     )
 
     db = TestingSessionLocal()
-    orig_status = db.query(Finding).filter(Finding.id == "F-1234").first().status
-    orig_dec = db.query(EdipDecision).filter(EdipDecision.finding_id == "F-1234").first().decision
     db.close()
 
     response = client.post(
         "/api/spectrum/findings/F-1234/edip",
         headers=headers,
-        json={"decision": "mitigate", "rationale": "Illegal"}
+        json={"decision": "mitigate", "rationale": "New scanner evidence"}
     )
-    assert response.status_code == 409
+    assert response.status_code == 200
 
     db = TestingSessionLocal()
-    assert db.query(Finding).filter(Finding.id == "F-1234").first().status == orig_status
-    assert db.query(EdipDecision).filter(EdipDecision.finding_id == "F-1234").first().decision == orig_dec
+    assert db.query(Finding).filter(Finding.id == "F-1234").first().status == "mitigate"
+    decision = db.query(EdipDecision).filter(EdipDecision.finding_id == "F-1234").first()
+    assert decision.decision == "mitigate"
+    assert decision.original_decision == "ignore"
     db.close()
 
 # ── 12. Forced flush failure rolls back all related changes
@@ -413,11 +417,11 @@ def test_forced_commit_failure_rolls_back(monkeypatch):
     db_check.close()
 
 # ── 14. A failed operation creates no success audit event
-def test_failed_operation_creates_no_success_audit():
+def test_revised_false_positive_records_override_audit():
     token = get_token("analyst@tempris.com", "Analyst", "tenantA")
     headers = {"Authorization": f"Bearer {token}"}
 
-    # Transition failure (409)
+    # Record then revise a false-positive decision.
     client.post("/api/spectrum/findings/F-1234/edip", headers=headers, json={"decision": "ignore", "rationale": "Terminal"})
     
     db = TestingSessionLocal()
@@ -427,12 +431,42 @@ def test_failed_operation_creates_no_success_audit():
     res = client.post(
         "/api/spectrum/findings/F-1234/edip",
         headers=headers,
-        json={"decision": "mitigate", "rationale": "Illegal reopen"}
+        json={"decision": "mitigate", "rationale": "New verification evidence"}
     )
-    assert res.status_code == 409
+    assert res.status_code == 200
 
     db = TestingSessionLocal()
-    assert db.query(AuditLog).filter(AuditLog.action == "EDIP_DECISION").count() == orig_audit_count
+    audit = db.query(AuditLog).filter(AuditLog.action == "EDIP_DECISION").order_by(AuditLog.id.desc()).first()
+    assert db.query(AuditLog).filter(AuditLog.action == "EDIP_DECISION").count() == orig_audit_count + 1
+    assert audit.metadata_["previous_decision"] == "ignore"
+    assert audit.metadata_["decision"] == "mitigate"
+    db.close()
+
+
+def test_finding_evidence_upload_is_tenant_scoped_and_listed(tmp_path, monkeypatch):
+    monkeypatch.setenv("EVIDENCE_STORAGE_ROOT", str(tmp_path / "evidence"))
+    token = get_token("analyst@tempris.com", "Analyst", "tenantA")
+    headers = {"Authorization": f"Bearer {token}"}
+    response = client.post(
+        "/api/spectrum/findings/F-1234/evidence",
+        headers=headers,
+        files={"file": ("scanner-output.txt", b"verified scanner observation", "text/plain")},
+    )
+    assert response.status_code == 200
+    evidence_id = response.json()["evidence"]["id"]
+    listed = client.get("/api/spectrum/findings/F-1234/evidence", headers=headers)
+    assert listed.status_code == 200
+    assert listed.json()[0]["id"] == evidence_id
+    assert listed.json()[0]["filename"] == "scanner-output.txt"
+
+    other_token = get_token("analystB@tempris.com", "Analyst", "tenantB")
+    denied = client.get(
+        f"/api/spectrum/findings/F-1234/evidence/{evidence_id}/download",
+        headers={"Authorization": f"Bearer {other_token}"},
+    )
+    assert denied.status_code == 404
+    db = TestingSessionLocal()
+    assert db.query(FindingEvidence).filter(FindingEvidence.id == evidence_id).one().finding_id == "F-1234"
     db.close()
 
 # ── 15. A successful operation records the correct actor, tenant, target and outcome

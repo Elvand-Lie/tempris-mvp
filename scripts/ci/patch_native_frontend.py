@@ -30,11 +30,12 @@ def replace_between(source: str, start: str, end: str, replacement: str, label: 
 
 
 def patch(source: str) -> str:
-    # Native SPECTRUM is the actionable confirmed-exposure work queue.
+    # Native SPECTRUM is the actionable confirmed-exposure work queue.  An
+    # explicit history link may load a past false-positive decision for review.
     source = replace_once(
         source,
         "/api/spectrum/findings?limit=2000",
-        "/api/spectrum/findings?limit=2000&scope=confirmed_exposure",
+        "window.location.search.includes('history=1')?'/api/spectrum/findings?limit=2000':'/api/spectrum/findings?limit=2000&scope=confirmed_exposure'",
         "SPECTRUM canonical scope",
     )
 
@@ -98,6 +99,13 @@ def patch(source: str) -> str:
         "children:n.asset?.name||n.asset?.hostname||`Confirmed asset`",
         "SPECTRUM canonical asset presentation",
     )
+    source = replace_once(
+        source,
+        "(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[",
+        "(0,Y.jsxs)(`section`,{className:`px-6 pb-2`,children:[(0,Y.jsx)(`h3`,{className:`text-sm font-semibold uppercase tracking-wider text-text-muted mb-3`,children:`Linked assets and evidence`}),(n.assets||[]).length?(0,Y.jsx)(`div`,{className:`space-y-2`,children:n.assets.map(e=>(0,Y.jsxs)(`div`,{className:`text-sm border border-border rounded-lg p-3`,children:[(0,Y.jsx)(`strong`,{children:e.name||e.hostname||e.asset_id}),(0,Y.jsx)(`p`,{className:`text-text-muted text-xs mt-1`,children:e.evidence||`No assignment note recorded.`})]},e.asset_id))}):(0,Y.jsx)(`p`,{className:`text-sm text-text-muted`,children:`No confirmed customer asset is linked.`}),(n.evidence_files||[]).length?(0,Y.jsxs)(`div`,{className:`mt-3 text-xs text-text-muted`,children:[`Attached evidence: `,n.evidence_files.map(e=>e.filename).join(`, `)]}):null]}),(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[",
+        "SPECTRUM linked assets and evidence",
+    )
+    source = source.replace("Decision Recorded", "Current decision — revise if new evidence is recorded")
 
     # Remove the old client-side GRC scoring implementation while retaining
     # the native SOP, gap, evidence, and policy workflows.
@@ -221,6 +229,29 @@ def patch(source: str) -> str:
     return source
 
 
+def patch_canonical_bundle(source: str) -> str:
+    """Apply this hotfix to the last validated canonical native bundle.
+
+    The repository has no editable SPA source.  The canonical release bundle is
+    therefore the reproducible compatibility base; do not regress its earlier
+    safety and bootstrap patches by starting from an older artifact.
+    """
+    source = replace_once(
+        source,
+        "/api/spectrum/findings?limit=2000&scope=confirmed_exposure",
+        "window.location.search.includes('history=1')?'/api/spectrum/findings?limit=2000':'/api/spectrum/findings?limit=2000&scope=confirmed_exposure'",
+        "SPECTRUM historical decision access",
+    )
+    source = replace_once(
+        source,
+        "(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[",
+        "(0,Y.jsxs)(`section`,{className:`px-6 pb-2`,children:[(0,Y.jsx)(`h3`,{className:`text-sm font-semibold uppercase tracking-wider text-text-muted mb-3`,children:`Linked assets and evidence`}),(n.assets||[]).length?(0,Y.jsx)(`div`,{className:`space-y-2`,children:n.assets.map(e=>(0,Y.jsxs)(`div`,{className:`text-sm border border-border rounded-lg p-3`,children:[(0,Y.jsx)(`strong`,{children:e.name||e.hostname||e.asset_id}),(0,Y.jsx)(`p`,{className:`text-text-muted text-xs mt-1`,children:e.evidence||`No assignment note recorded.`})]},e.asset_id))}):(0,Y.jsx)(`p`,{className:`text-sm text-text-muted`,children:`No confirmed customer asset is linked.`}),(n.evidence_files||[]).length?(0,Y.jsxs)(`div`,{className:`mt-3 text-xs text-text-muted`,children:[`Attached evidence: `,n.evidence_files.map(e=>e.filename).join(`, `)]}):null]}),(0,Y.jsxs)(`div`,{className:`p-6 grid grid-cols-1 md:grid-cols-2 gap-8`,children:[",
+        "SPECTRUM linked assets and evidence",
+    )
+    source = source.replace("Decision Recorded", "Current decision — revise if new evidence is recorded")
+    return source.replace("✓ Mitigated", "✓ Mitigation planned")
+
+
 def main() -> None:
     if len(sys.argv) not in {2, 4} or (len(sys.argv) == 4 and sys.argv[2] != "--git-ref"):
         raise SystemExit("usage: patch_native_frontend.py <bundle.js> [--git-ref <revision>]")
@@ -232,7 +263,7 @@ def main() -> None:
         ).stdout.decode("utf-8")
     else:
         original = path.read_text(encoding="utf-8")
-    updated = patch(original)
+    updated = patch_canonical_bundle(original) if "scope=confirmed_exposure" in original else patch(original)
     path.write_text(updated, encoding="utf-8", newline="")
     print(f"patched {path} ({len(original)} -> {len(updated)} bytes)")
 

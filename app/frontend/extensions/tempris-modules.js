@@ -824,7 +824,9 @@
     host.dataset.temprisExtensionRoute = '/ciso';
     host.innerHTML = '<div data-tempris-extension-root class="tmx-panel tmx-loading">Loading CISO dashboard...</div>';
     try {
-      const data = await loadCiso(force);
+      // CISO is a live executive posture view. Re-fetch on entry so a recent
+      // asset assignment, resolution, or false-positive decision is reflected.
+      const data = await loadCiso(true);
       if (window.location.pathname === '/ciso') renderCiso(host, data);
     } catch (error) {
       if (window.location.pathname !== '/ciso') return;
@@ -880,6 +882,7 @@
         ? `<span class="tmx-deadline">Server escalation ${escapeHtml(escalationData.date)}${escalationData.severity ? ` · ${escapeHtml(escalationData.severity)}` : ''}</span>`
         : '';
       const resolved = finding.status === 'resolved';
+      const falsePositive = finding.status === 'ignore';
       const linkedAssets = Array.isArray(finding.assets) ? finding.assets : [];
       const linkedLabels = linkedAssets.map((asset) => assetLabel(asset)).filter(Boolean);
       const exposureState = linkedAssets.length
@@ -906,7 +909,7 @@
         <div class="tmx-finding-meta"><span>${escapeHtml(finding.cve)}</span><span>SSS ${escapeHtml(finding.sss)}</span><span>TES ${escapeHtml(finding.tes)}</span><span>${escapeHtml(finding.source_tool || 'Connector')}</span></div>
         <div class="tmx-chip-row">${deadline}${revalidation}${escalation}</div>
         ${finding.required_control ? `<div class="tmx-control-callout"><strong>Required control</strong><span>${escapeHtml(finding.required_control)}</span></div>` : ''}
-        ${canManage && !resolved ? `<div class="tmx-card-actions"><button type="button" class="tmx-button tmx-button-secondary" data-sss-patch="${escapeHtml(finding.id)}" data-patch-state="${Boolean(finding.patch_available)}">${finding.patch_available ? 'Mark patch unavailable' : 'Mark patch available'}</button><button type="button" class="tmx-button" data-sss-resolve>Resolve</button></div><div class="tmx-resolution-form" data-sss-resolution-form hidden><label>Resolution notes<textarea rows="3" maxlength="2000" required aria-label="Resolution notes for ${escapeHtml(finding.title)}"></textarea></label><div class="tmx-card-actions"><button type="button" class="tmx-button tmx-button-secondary" data-sss-resolve-cancel>Cancel</button><button type="button" class="tmx-button" data-sss-resolve-confirm="${escapeHtml(finding.id)}">Confirm resolution</button></div></div>` : ''}
+        ${falsePositive ? `<div class="tmx-control-callout"><strong>False positive / ignored</strong><span>This is retained in history and excluded from open customer posture. New evidence can reopen it for a revised EDIP decision.</span><a class="tmx-button tmx-button-secondary" href="/spectrum?history=1&amp;id=${encodeURIComponent(finding.id)}">Review or change EDIP decision</a></div>` : canManage && !resolved ? `<div class="tmx-card-actions"><button type="button" class="tmx-button tmx-button-secondary" data-sss-patch="${escapeHtml(finding.id)}" data-patch-state="${Boolean(finding.patch_available)}">${finding.patch_available ? 'Mark patch unavailable' : 'Mark patch available'}</button><button type="button" class="tmx-button" data-sss-resolve>Resolve</button></div><div class="tmx-resolution-form" data-sss-resolution-form hidden><label>Resolution notes<textarea rows="3" maxlength="2000" required aria-label="Resolution notes for ${escapeHtml(finding.title)}"></textarea></label><div class="tmx-card-actions"><button type="button" class="tmx-button tmx-button-secondary" data-sss-resolve-cancel>Cancel</button><button type="button" class="tmx-button" data-sss-resolve-confirm="${escapeHtml(finding.id)}">Confirm resolution</button></div></div>` : ''}
       </article>`;
     }).join('') : '<div class="tmx-empty">No SSS decision records are available for this tenant.</div>';
 
@@ -1007,9 +1010,9 @@
       <div class="tmx-exposure-summary"><div><strong>${escapeHtml(candidateCount)}</strong><span>suggested matches</span></div><div><strong>${escapeHtml(unclassifiedCount)}</strong><span>unclassified intake</span></div><div><strong>${escapeHtml(catalogCount)}</strong><span>reference intelligence</span></div></div>
       <div class="tmx-recent-changes" data-recent-changes hidden><div class="tmx-recent-heading"><strong>Five most recent exposure-review changes</strong><span>Asset assignments and classifications are retained in the tamper-evident Audit Log.</span></div>${recentRows}</div>
       <div class="tmx-exposure-tools"><label><span>Search vulnerability records</span><input class="tmx-search" type="search" data-exposure-search placeholder="CVE, finding ID, title, vendor, or product"></label><label><span>Review state</span><select data-exposure-filter><option value="needs_review">Needs classification</option><option value="suggested">Suggested asset matches</option><option value="unclassified">Unclassified intake</option><option value="reference">Reference intelligence</option><option value="asset_linked">Asset-linked records</option><option value="not_applicable">Not applicable</option><option value="all">All records</option></select></label><span data-exposure-count>${escapeHtml(exposureRecords.total || 0)} records</span></div>
-      <div class="tmx-panel-body"><div class="tmx-list" data-exposure-results>${exposureRowsHtml(exposureRecords.data || [])}</div></div>
+      <div class="tmx-panel-body"><div class="tmx-list" data-exposure-results>${exposureRowsHtml(exposureRecords.data || [])}</div><div class="tmx-pagination"><button type="button" class="tmx-button tmx-button-secondary" data-exposure-prev disabled>‹ Previous</button><span data-exposure-page>Showing ${escapeHtml((exposureRecords.data || []).length ? `1–${(exposureRecords.data || []).length}` : '0')} of ${escapeHtml(exposureRecords.total || 0)}</span><button type="button" class="tmx-button tmx-button-secondary" data-exposure-next ${(exposureRecords.total || 0) > (exposureRecords.data || []).length ? '' : 'disabled'}>Next ›</button></div></div>
     </section>` : '';
-    const assetPicker = canManage ? `<div class="tmx-asset-picker-backdrop" data-asset-picker hidden><section class="tmx-asset-picker" role="dialog" aria-modal="true" aria-labelledby="tmx-asset-picker-title"><header><div><h2 id="tmx-asset-picker-title">Manage affected assets</h2><p data-asset-picker-context></p></div><button type="button" class="tmx-icon-button" data-asset-picker-close aria-label="Close asset picker">x</button></header><div class="tmx-asset-picker-body"><label class="tmx-field"><span>Evidence note (required when confirming a catalogue vulnerability)</span><textarea rows="3" maxlength="2000" data-asset-picker-evidence placeholder="Describe how you verified that the selected asset is affected, such as a scanner result, inventory record, service version, or analyst observation."></textarea></label><label class="tmx-field"><span>Search customer inventory</span><input type="search" data-asset-picker-search placeholder="Asset name, hostname, IP, owner, or environment"></label><div class="tmx-asset-options" data-asset-picker-options></div><div class="tmx-form-message" data-asset-picker-message></div></div><footer><button type="button" class="tmx-button tmx-button-danger" data-asset-picker-clear>Clear all</button><span class="tmx-picker-spacer"></span><button type="button" class="tmx-button tmx-button-secondary" data-asset-picker-close>Cancel</button><button type="button" class="tmx-button" data-asset-picker-confirm>Save assignment</button></footer></section></div>` : '';
+    const assetPicker = canManage ? `<div class="tmx-asset-picker-backdrop" data-asset-picker hidden><section class="tmx-asset-picker" role="dialog" aria-modal="true" aria-labelledby="tmx-asset-picker-title"><header><div><h2 id="tmx-asset-picker-title">Manage affected assets</h2><p data-asset-picker-context></p></div><button type="button" class="tmx-icon-button" data-asset-picker-close aria-label="Close asset picker">x</button></header><div class="tmx-asset-picker-body"><label class="tmx-field"><span>Evidence note (required when confirming a catalogue vulnerability)</span><textarea rows="3" maxlength="2000" data-asset-picker-evidence placeholder="Describe the scanner result, inventory record, SBOM entry, service version, or analyst observation that supports this link."></textarea><small>Enter a note here; Tempris does not imply it generated this evidence.</small></label><label class="tmx-field"><span>Optional evidence file</span><input type="file" data-asset-picker-file accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx,.txt,.md"><small>Attach an analyst-supplied scanner output, inventory/SBOM extract, or verification note (10 MB maximum).</small></label><label class="tmx-field"><span>Search customer inventory</span><input type="search" data-asset-picker-search placeholder="Asset name, hostname, IP, owner, or environment"></label><div class="tmx-asset-options" data-asset-picker-options></div><div class="tmx-form-message" data-asset-picker-message></div></div><footer><button type="button" class="tmx-button tmx-button-danger" data-asset-picker-clear>Clear all</button><span class="tmx-picker-spacer"></span><button type="button" class="tmx-button tmx-button-secondary" data-asset-picker-close>Cancel</button><button type="button" class="tmx-button" data-asset-picker-confirm>Save assignment</button></footer></section></div>` : '';
     const classificationDialog = canManage ? `<div class="tmx-asset-picker-backdrop" data-classification-dialog hidden><section class="tmx-asset-picker" role="dialog" aria-modal="true" aria-labelledby="tmx-classification-title"><header><div><h2 id="tmx-classification-title" data-classification-title>Classify vulnerability record</h2><p data-classification-context></p></div><button type="button" class="tmx-icon-button" data-classification-close aria-label="Close classification dialog">x</button></header><div class="tmx-asset-picker-body"><div class="tmx-notice"><strong data-classification-label>Classification</strong><span data-classification-help></span></div><label class="tmx-field"><span>Analyst rationale</span><textarea rows="5" minlength="10" maxlength="2000" data-classification-rationale placeholder="Record the evidence or reasoning for this classification."></textarea></label><div class="tmx-form-message" data-classification-message></div></div><footer><span class="tmx-picker-spacer"></span><button type="button" class="tmx-button tmx-button-secondary" data-classification-close>Cancel</button><button type="button" class="tmx-button" data-classification-confirm>Save classification</button></footer></section></div>` : '';
     host.innerHTML = `<div class="tmx-page" data-tempris-extension-root data-tempris-page="sss-intake">
       <header class="tmx-heading"><div><h1>Intake &amp; Triage</h1><p>Create tenant-scoped vulnerability records and decide whether they affect customer assets. Every submitted intake is stored in the shared findings database and is searchable in SPECTRUM; it affects CISO exposure only after an active asset is linked.</p></div><button type="button" class="tmx-button tmx-button-secondary" data-sss-refresh>Refresh</button></header>
@@ -1149,6 +1152,8 @@
     let activeClassificationId = null;
     let activeClassification = null;
     let exposureSearchTimer = null;
+    let exposureOffset = 0;
+    const exposurePageSize = 25;
     const pickerSelection = new Set();
     const closeAssetPicker = () => {
       if (!picker) return;
@@ -1197,7 +1202,8 @@
       }).filter((asset) => !normalizedQuery || assetLabel(asset).toLowerCase().includes(normalizedQuery));
       options.innerHTML = ordered.length ? ordered.map((asset) => {
         const candidate = candidateMap.get(asset.id);
-        return `<label class="tmx-asset-option ${candidate ? 'tmx-asset-option-candidate' : ''}"><input type="checkbox" value="${escapeHtml(asset.id)}" ${pickerSelection.has(asset.id) ? 'checked' : ''}><span><strong>${escapeHtml(asset.name)}</strong><small>${escapeHtml([asset.hostname || asset.ip_address, asset.environment, asset.owner].filter(Boolean).join(' - ') || asset.id)}</small>${candidate ? `<em>Suggested only ${Math.round(candidate.confidence * 100)}% - ${escapeHtml(candidate.evidence)}</em>` : ''}</span></label>`;
+        const linked = pickerSelection.has(asset.id);
+        return `<label class="tmx-asset-option ${candidate ? 'tmx-asset-option-candidate' : ''} ${linked ? 'tmx-asset-option-linked' : ''}"><input type="checkbox" value="${escapeHtml(asset.id)}" ${linked ? 'checked' : ''}><span><strong>${escapeHtml(asset.name)}</strong><small>${escapeHtml([asset.hostname || asset.ip_address, asset.environment, asset.owner].filter(Boolean).join(' - ') || asset.id)}</small>${linked ? '<em>Already linked — uncheck to remove this asset from the finding.</em>' : ''}${candidate && !linked ? `<em>Suggested only ${Math.round(candidate.confidence * 100)}% - ${escapeHtml(candidate.evidence)}</em>` : ''}</span></label>`;
       }).join('') : '<div class="tmx-empty">No active asset matches this search.</div>';
     };
     const fetchMappingItem = async (findingId) => {
@@ -1219,8 +1225,9 @@
       picker.querySelector('[data-asset-picker-context]').textContent = `${item.cve || item.source}: ${item.title}`;
       picker.querySelector('[data-asset-picker-search]').value = '';
       picker.querySelector('[data-asset-picker-evidence]').value = '';
+      picker.querySelector('[data-asset-picker-file]').value = '';
       picker.querySelector('[data-asset-picker-message]').textContent = item.confirmed_asset_ids?.length
-        ? 'Checked assets are currently assigned. Uncheck, add, replace, or clear them, then save.'
+        ? 'Checked assets are already linked. Saving the same selection makes no duplicate; uncheck, add, replace, or clear assets as needed.'
         : 'Suggestions are not proof and are not preselected. Check only assets supported by evidence.';
       renderAssetPickerOptions(item);
       picker.querySelector('[data-asset-picker-search]').focus();
@@ -1233,11 +1240,16 @@
       if (!search || !filter || !results) return;
       results.innerHTML = '<div class="tmx-empty">Searching tenant findings...</div>';
       try {
-        const payload = await api(`/api/workflow/exposures?q=${encodeURIComponent(search.value.trim())}&view=${encodeURIComponent(filter.value)}&limit=50`);
+        const payload = await api(`/api/workflow/exposures?q=${encodeURIComponent(search.value.trim())}&view=${encodeURIComponent(filter.value)}&limit=${exposurePageSize}&offset=${exposureOffset}`);
         mappingById.clear();
         (payload.data || []).forEach((item) => mappingById.set(item.finding_id, item));
         results.innerHTML = exposureRowsHtml(payload.data || []);
         count.textContent = `${payload.total || 0} records`;
+        const start = payload.total ? payload.offset + 1 : 0;
+        const end = Math.min(payload.offset + (payload.data || []).length, payload.total || 0);
+        host.querySelector('[data-exposure-page]').textContent = `Showing ${start}–${end} of ${payload.total || 0}`;
+        host.querySelector('[data-exposure-prev]').disabled = !payload.offset;
+        host.querySelector('[data-exposure-next]').disabled = payload.offset + (payload.data || []).length >= (payload.total || 0);
       } catch (error) {
         results.innerHTML = `<div class="tmx-error">${escapeHtml(error.message || 'Exposure search failed.')}</div>`;
       }
@@ -1251,11 +1263,14 @@
     });
     const exposureSearch = host.querySelector('[data-exposure-search]');
     if (exposureSearch) exposureSearch.addEventListener('input', () => {
+      exposureOffset = 0;
       window.clearTimeout(exposureSearchTimer);
       exposureSearchTimer = window.setTimeout(refreshExposureResults, 250);
     });
     const exposureFilter = host.querySelector('[data-exposure-filter]');
-    if (exposureFilter) exposureFilter.addEventListener('change', refreshExposureResults);
+    if (exposureFilter) exposureFilter.addEventListener('change', () => { exposureOffset = 0; refreshExposureResults(); });
+    host.querySelector('[data-exposure-prev]')?.addEventListener('click', () => { exposureOffset = Math.max(0, exposureOffset - exposurePageSize); refreshExposureResults(); });
+    host.querySelector('[data-exposure-next]')?.addEventListener('click', () => { exposureOffset += exposurePageSize; refreshExposureResults(); });
     host.addEventListener('click', (event) => {
       const button = event.target.closest('[data-map-finding]');
       if (button) openAssetPicker(button.dataset.mapFinding).catch((error) => window.alert(error.message || 'Unable to load the finding.'));
@@ -1272,6 +1287,8 @@
         if (!event.target.matches('input[type="checkbox"]')) return;
         if (event.target.checked) pickerSelection.add(event.target.value);
         else pickerSelection.delete(event.target.value);
+        const item = mappingById.get(activeMappingId);
+        if (item) renderAssetPickerOptions(item, picker.querySelector('[data-asset-picker-search]').value);
       });
       picker.querySelector('[data-asset-picker-search]').addEventListener('input', (event) => {
         const item = mappingById.get(activeMappingId);
@@ -1288,6 +1305,7 @@
         const message = picker.querySelector('[data-asset-picker-message]');
         const assetIds = [...pickerSelection];
         const evidence = picker.querySelector('[data-asset-picker-evidence]').value.trim();
+        const evidenceFile = picker.querySelector('[data-asset-picker-file]').files[0];
         const currentIds = new Set(item?.confirmed_asset_ids || []);
         const addsCatalogueExposure = item?.is_catalog && assetIds.some((assetId) => !currentIds.has(assetId));
         if (addsCatalogueExposure && evidence.length < 10) {
@@ -1303,6 +1321,17 @@
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ asset_ids: assetIds, evidence: evidence || null }),
           });
+          if (evidenceFile) {
+            const form = new FormData();
+            form.append('file', evidenceFile);
+            try {
+              await api(`/api/spectrum/findings/${encodeURIComponent(activeMappingId)}/evidence`, { method: 'POST', body: form });
+            } catch (error) {
+              button.disabled = false;
+              message.textContent = `Assignment saved, but the evidence file could not be uploaded: ${error.message || 'upload failed.'}`;
+              return;
+            }
+          }
           closeAssetPicker();
           sssFindings = null;
           workflowOverview = null;
@@ -1387,7 +1416,7 @@
       const [assets, overview, exposureRecords, exposureActivity] = await Promise.all([
         staff ? loadTenantAssets(force).catch(() => []) : Promise.resolve([]),
         staff ? loadWorkflowOverview(force).catch(() => ({})) : Promise.resolve({}),
-        staff ? api('/api/workflow/exposures?view=needs_review&limit=50').catch(() => ({ data: [], total: 0 })) : Promise.resolve({ data: [], total: 0 }),
+        staff ? api('/api/workflow/exposures?view=needs_review&limit=25').catch(() => ({ data: [], total: 0 })) : Promise.resolve({ data: [], total: 0 }),
         staff ? api('/api/workflow/exposure-activity?limit=5').catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
       ]);
       if (window.location.pathname === '/sss-intake') renderSssIntake(host, findings, config, assets, overview, exposureRecords, exposureActivity);

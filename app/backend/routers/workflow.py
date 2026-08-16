@@ -27,7 +27,9 @@ from services.operational_events import record_operational_event
 router = APIRouter(dependencies=[Depends(require_module("SYNTHESIS"))])
 
 EXPOSURE_CLASSIFICATION_STATUSES = {"reference_only", "not_applicable"}
-RESOLVED_FINDING_STATUSES = {"resolved", "mitigated", "closed"}
+# ``ignore`` is a false-positive EDIP disposition. It stays in history but is
+# not open posture; analysts can reopen it when new evidence arrives.
+RESOLVED_FINDING_STATUSES = {"resolved", "mitigated", "closed", "ignore", "false_positive", "false-positive"}
 
 
 class FindingWorkflowUpdate(BaseModel):
@@ -665,7 +667,7 @@ def reopen_finding(
         raise HTTPException(status_code=404, detail="Finding not found")
     old_status = (finding.status or "").strip().lower()
     if old_status not in RESOLVED_FINDING_STATUSES:
-        raise HTTPException(status_code=409, detail="Only a resolved or closed finding can be reopened")
+        raise HTTPException(status_code=409, detail="Only a resolved, closed, or false-positive finding can be reopened")
     finding.status = "unmitigated"
     db.add(FindingStatusHistory(
         finding_id=finding.id, old_status=old_status, new_status="unmitigated",

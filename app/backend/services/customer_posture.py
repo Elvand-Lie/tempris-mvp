@@ -23,7 +23,9 @@ from services.tes_engine import calculate_finding_tes
 
 
 SCOPE_VERSION = "canonical-customer-exposure-v1"
-RESOLVED_STATUSES = {"resolved", "mitigated", "closed"}
+# ``ignore`` is the persisted EDIP false-positive decision.  It remains in the
+# finding/audit history, but it is no longer an open customer exposure.
+RESOLVED_STATUSES = {"resolved", "mitigated", "closed", "ignore", "false_positive", "false-positive"}
 REFERENCE_STATUSES = {"reference", "reference_only", "catalogue", "catalog"}
 NOT_APPLICABLE_STATUSES = {"not_applicable", "not-applicable"}
 

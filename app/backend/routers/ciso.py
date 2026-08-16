@@ -31,11 +31,11 @@ from services.customer_posture import (
     SCOPE_VERSION,
     build_customer_posture,
     canonical_exposure_rows,
+    is_open,
 )
 
 router = APIRouter(dependencies=[Depends(require_module("CISO"))])
 EXECUTIVE_ROLES = ('Superadmin', 'Admin')
-RESOLVED_STATUSES = {'resolved', 'mitigated', 'closed'}
 SEVERITY_ORDER = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'unknown': 4}
 
 
@@ -67,10 +67,6 @@ def _severity(finding: Finding) -> str:
     if value >= 4:
         return 'medium'
     return 'low'
-
-
-def _is_open(finding: Finding) -> bool:
-    return (finding.status or '').strip().lower() not in RESOLVED_STATUSES
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -125,7 +121,7 @@ def _highest_risk_assets(
         'highest_severity': 'unknown',
     })
     for finding, asset_id in exposures:
-        if asset_id not in asset_map or not _is_open(finding):
+        if asset_id not in asset_map or not is_open(finding):
             continue
         severity = _severity(finding)
         summary = aggregates[asset_id]
