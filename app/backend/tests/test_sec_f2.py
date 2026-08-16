@@ -14,7 +14,7 @@ os.environ["AUDIT_HMAC_KEY"] = "test_audit_hmac_secret_key_12345678"
 
 from services.database import Base, get_db
 import services.database
-from models import Finding, EdipDecision, AuditLog, FindingEvidence
+from models import Asset, AssetExposure, Finding, EdipDecision, AuditLog, FindingEvidence
 from routers.auth import create_access_token
 from index import app
 
@@ -50,6 +50,8 @@ def setup_db(monkeypatch):
     db = TestingSessionLocal()
     
     # Clean tables
+    db.query(AssetExposure).delete()
+    db.query(Asset).delete()
     db.query(Finding).delete()
     db.query(EdipDecision).delete()
     db.query(AuditLog).delete()
@@ -95,6 +97,7 @@ def setup_db(monkeypatch):
             "threat_actor_activity": 4.0
         }
     )
+    db.add(Asset(id="A-1234", tenant_id="tenantA", name="Test server", status="active"))
     db.add(finding1)
     db.add(finding2)
     db.commit()
@@ -467,6 +470,27 @@ def test_finding_evidence_upload_is_tenant_scoped_and_listed(tmp_path, monkeypat
     assert denied.status_code == 404
     db = TestingSessionLocal()
     assert db.query(FindingEvidence).filter(FindingEvidence.id == evidence_id).one().finding_id == "F-1234"
+    db.close()
+
+
+def test_existing_asset_evidence_note_can_be_revised():
+    token = get_token("analyst@tempris.com", "Analyst", "tenantA")
+    headers = {"Authorization": f"Bearer {token}"}
+    first = client.put(
+        "/api/workflow/findings/F-1234/assets", headers=headers,
+        json={"asset_ids": ["A-1234"], "evidence": "Scanner identified the vulnerable service on this server."},
+    )
+    assert first.status_code == 200
+
+    revised = client.put(
+        "/api/workflow/findings/F-1234/assets", headers=headers,
+        json={"asset_ids": ["A-1234"], "evidence": "Analyst verified the service version after the scanner result."},
+    )
+    assert revised.status_code == 200
+    assert revised.json()["evidence_updated"] is True
+    db = TestingSessionLocal()
+    link = db.query(AssetExposure).filter(AssetExposure.finding_id == "F-1234").one()
+    assert link.evidence == "Analyst verified the service version after the scanner result."
     db.close()
 
 # ── 15. A successful operation records the correct actor, tenant, target and outcome

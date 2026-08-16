@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
-from models import Asset, AuditLog, Finding, FindingStatusHistory
+from models import Asset, AssetExposure, AuditLog, Finding, FindingStatusHistory
 from routers.audit import AuditEntry, append_to_audit_log_db
 from routers.auth import get_auth_context, require_role
 from services.database import get_db
@@ -16,6 +16,7 @@ from services.workflow_connections import build_workflow_overview
 from services.exposure_links import (
     active_asset_map,
     candidate_assets,
+    CONFIRMED_STATUSES,
     confirmed_asset_ids_by_finding,
     confirm_finding_assets,
     is_catalog_finding,
@@ -188,6 +189,13 @@ def list_exposure_records(
 
     assets = active_asset_map(db, auth.tenant_id)
     links = confirmed_asset_ids_by_finding(db, auth.tenant_id, assets)
+    link_evidence = {
+        (row.finding_id, row.asset_id): row.evidence
+        for row in db.query(AssetExposure).filter(
+            AssetExposure.tenant_id == auth.tenant_id,
+            AssetExposure.status.in_(CONFIRMED_STATUSES),
+        ).all()
+    }
     rows = query.all()
     classified_rows = []
     for row in rows:
@@ -234,7 +242,10 @@ def list_exposure_records(
             "mapping_reason": mapping_reason,
             "is_catalog": is_catalog_finding(finding),
             "confirmed_asset_ids": asset_ids,
-            "confirmed_assets": [_asset_summary(assets[asset_id]) for asset_id in asset_ids],
+            "confirmed_assets": [
+                {**_asset_summary(assets[asset_id]), "evidence": link_evidence.get((finding.id, asset_id))}
+                for asset_id in asset_ids
+            ],
             "candidate_assets": candidates,
         })
     return {"data": data, "total": total, "limit": limit, "offset": offset, "view": view}
@@ -538,6 +549,17 @@ def replace_finding_asset_links(
     requested_ids = set(req.asset_ids)
     added_ids = requested_ids - current_ids
     evidence = (req.evidence or "").strip()
+    current_evidence = {
+        row.asset_id: (row.evidence or "")
+        for row in db.query(AssetExposure).filter(
+            AssetExposure.tenant_id == auth.tenant_id,
+            AssetExposure.finding_id == finding.id,
+            AssetExposure.status.in_(CONFIRMED_STATUSES),
+        ).all()
+    }
+    evidence_updated = bool(evidence) and any(
+        current_evidence.get(asset_id) != evidence for asset_id in requested_ids
+    )
     if added_ids and is_catalog_finding(finding) and len(evidence) < 10:
         raise HTTPException(
             status_code=422,
@@ -555,7 +577,7 @@ def replace_finding_asset_links(
     before, after, added, removed = set_finding_assets(
         db, finding, ordered_assets, auth.user_id, evidence or None,
     )
-    if before == after:
+    if before == after and not evidence_updated:
         db.rollback()
         return {
             "status": "unchanged",
@@ -582,6 +604,7 @@ def replace_finding_asset_links(
                 "added_asset_ids": added,
                 "removed_asset_ids": removed,
                 "evidence_recorded": bool(evidence),
+                "evidence_updated": evidence_updated,
             },
         ),
         commit=False,
@@ -592,6 +615,12 @@ def replace_finding_asset_links(
             resource_type="finding", resource_id=finding.id, source_module="INTAKE_TRIAGE",
             actor_id=auth.user_id, metadata={"asset_ids": added},
         )
+    elif evidence_updated:
+        record_operational_event(
+            db, tenant_id=auth.tenant_id, event_type="finding.asset_evidence_updated",
+            resource_type="finding", resource_id=finding.id, source_module="INTAKE_TRIAGE",
+            actor_id=auth.user_id, metadata={"asset_ids": after},
+        )
     db.commit()
     _publish_finding_refresh(auth.tenant_id, finding.id, finding.status or "unmitigated")
     return {
@@ -600,6 +629,7 @@ def replace_finding_asset_links(
         "confirmed_asset_ids": after,
         "added_asset_ids": added,
         "removed_asset_ids": removed,
+        "evidence_updated": evidence_updated,
     }
 
 

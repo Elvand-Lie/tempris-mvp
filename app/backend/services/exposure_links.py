@@ -105,7 +105,12 @@ def confirm_finding_assets(
         row.status = "confirmed"
         row.match_method = match_method
         row.confidence = 1.0
-        row.evidence = evidence or "Explicit analyst confirmation"
+        # Keep recorded proof when an analyst changes the asset selection
+        # without replacing its note. A non-empty edit updates the note.
+        if evidence is not None:
+            row.evidence = evidence
+        elif not row.evidence:
+            row.evidence = "Explicit analyst confirmation"
         row.recorded_by = recorded_by
         confirmed.append(row)
 

@@ -1224,10 +1224,11 @@
       document.body.classList.add('tmx-modal-open');
       picker.querySelector('[data-asset-picker-context]').textContent = `${item.cve || item.source}: ${item.title}`;
       picker.querySelector('[data-asset-picker-search]').value = '';
-      picker.querySelector('[data-asset-picker-evidence]').value = '';
+      const recordedEvidence = (item.confirmed_assets || []).map((asset) => asset.evidence).find(Boolean) || '';
+      picker.querySelector('[data-asset-picker-evidence]').value = recordedEvidence;
       picker.querySelector('[data-asset-picker-file]').value = '';
       picker.querySelector('[data-asset-picker-message]').textContent = item.confirmed_asset_ids?.length
-        ? 'Checked assets are already linked. Saving the same selection makes no duplicate; uncheck, add, replace, or clear assets as needed.'
+        ? 'Checked assets are already linked. Edit the evidence note below to update it, or uncheck, add, replace, or clear assets as needed. Saving does not create duplicates.'
         : 'Suggestions are not proof and are not preselected. Check only assets supported by evidence.';
       renderAssetPickerOptions(item);
       picker.querySelector('[data-asset-picker-search]').focus();

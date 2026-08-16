@@ -132,6 +132,8 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     assert "Evidence note (required when confirming a catalogue vulnerability)" in script.text
     assert "Optional evidence file" in script.text
     assert "data-asset-picker-file" in script.text
+    assert "const recordedEvidence = (item.confirmed_assets || []).map((asset) => asset.evidence).find(Boolean) || '';" in script.text
+    assert "Edit the evidence note below to update it" in script.text
     assert "data-exposure-prev" in script.text
     assert "const data = await loadCiso(true);" in script.text
     assert "Already linked — uncheck to remove this asset from the finding." in script.text
