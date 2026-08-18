@@ -325,14 +325,25 @@ def public_severity(finding: dict | Any, *, db=None) -> dict:
     sss = f_dict.get("sss_data") or {}
     scoring = sss.get("scoring") or {}
     is_sss = not _is_cve_finding(finding)
+    cvss_version = None
+    cvss_source = None
+    cvss_vector = None
+    provenance = None
     if is_sss:
         raw_score = scoring.get("base_severity")
+        source = "SSS"
     elif db is not None:
         from services.cve_intelligence import resolve_vulnerability_intelligence
         intel = resolve_vulnerability_intelligence(finding, db)
         raw_score = intel.cvss_score
+        source = "CVSS"
+        cvss_version = intel.cvss_version
+        cvss_source = intel.cvss_source
+        cvss_vector = intel.cvss_vector
+        provenance = intel.provenance_classification
     else:
         raw_score = f_dict.get("cvss")
+        source = "CVSS"
 
     try:
         score = float(raw_score) if raw_score is not None else 0.0
@@ -341,6 +352,10 @@ def public_severity(finding: dict | Any, *, db=None) -> dict:
     return {
         "score": round(score, 2),
         "label": severity_from_score(score),
-        "source": "SSS" if is_sss else "CVSS",
+        "source": source,
+        "version": cvss_version,
+        "source_authority": cvss_source,
+        "vector": cvss_vector,
+        "provenance": provenance,
     }
 

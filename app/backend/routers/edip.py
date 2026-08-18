@@ -500,7 +500,7 @@ def _public(f: Finding, db: Session | None = None) -> dict:
     data["tes"] = score
     data["tes_decision"] = public_decision_for_finding({"sss_data": sss, "source": f.source}, score)
     data["edip_decision"] = data["tes_decision"]
-    data["severity"] = public_severity({"sss_data": sss, "source": f.source, "cve": f.cve, "cvss": f.cvss})
+    data["severity"] = public_severity({"sss_data": sss, "source": f.source, "cve": f.cve, "cvss": f.cvss}, db=db)
     return data
 
 

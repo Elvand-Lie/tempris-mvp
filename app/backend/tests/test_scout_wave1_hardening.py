@@ -471,6 +471,26 @@ def test_scan_normalizer_drift_and_trust_boundary(db_session):
     assert res_nmap["finding"] is None
 
 
+def test_scanner_subprocess_streaming_bounded_memory():
+    """Verify that _read_stream_bounded truncates stream without memory accumulation."""
+    import asyncio
+    from routers.scanner import _read_stream_bounded
+
+    async def _run():
+        reader = asyncio.StreamReader()
+        data_chunk = b"A" * 50000
+        for _ in range(10):
+            reader.feed_data(data_chunk)
+        reader.feed_eof()
+
+        limit = 100 * 1024  # 100 KB limit
+        captured = await _read_stream_bounded(reader, limit)
+        assert len(captured) == limit
+        assert captured == b"A" * limit
+
+    asyncio.run(_run())
+
+
 # ── 5. Superadmin Raw Diagnostic Scan Route Tests ─────────────────────────────
 
 def test_superadmin_raw_diagnostic_scan(client, db_session, monkeypatch):

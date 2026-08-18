@@ -90,41 +90,52 @@ SEVERITY_MAP = {
 MAX_CAPTURE_BYTES = 10 * 1024 * 1024  # 10 MB limit
 
 
+async def _read_stream_bounded(stream: asyncio.StreamReader | None, limit: int) -> bytes:
+    """Read from an asyncio StreamReader up to `limit` bytes without unbounded memory growth."""
+    if stream is None:
+        return b""
+    buffer = bytearray()
+    while True:
+        chunk = await stream.read(64 * 1024)
+        if not chunk:
+            break
+        if len(buffer) < limit:
+            remaining = limit - len(buffer)
+            buffer.extend(chunk[:remaining])
+        # Discard data beyond limit to prevent memory bloat during execution
+    return bytes(buffer)
+
+
 async def _execute_subprocess_safely(
     cmd: list[str],
     timeout_seconds: int,
     max_output_bytes: int = MAX_CAPTURE_BYTES,
 ) -> tuple[int, bytes, bytes]:
-    """Executes a subprocess with hard timeout, forced kill fallback, and bounded capture."""
+    """Executes a subprocess with hard timeout, forced kill fallback, and true streaming bounded capture."""
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
+    stdout_task = asyncio.create_task(_read_stream_bounded(proc.stdout, max_output_bytes))
+    stderr_task = asyncio.create_task(_read_stream_bounded(proc.stderr, max_output_bytes))
+
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(),
+        await asyncio.wait_for(
+            asyncio.gather(stdout_task, stderr_task, proc.wait()),
             timeout=timeout_seconds,
         )
-    except asyncio.TimeoutError:
+        stdout = stdout_task.result()
+        stderr = stderr_task.result()
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        stdout_task.cancel()
+        stderr_task.cancel()
         try:
             proc.kill()
             await proc.wait()
         except Exception:
             pass
         raise
-    except asyncio.CancelledError:
-        try:
-            proc.kill()
-            await proc.wait()
-        except Exception:
-            pass
-        raise
-
-    if len(stdout) > max_output_bytes:
-        stdout = stdout[:max_output_bytes]
-    if len(stderr) > max_output_bytes:
-        stderr = stderr[:max_output_bytes]
 
     return (proc.returncode or 0, stdout, stderr)
 

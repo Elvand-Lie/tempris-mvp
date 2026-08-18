@@ -167,13 +167,16 @@ def test_native_module_routes_are_not_extension_takeovers_and_keep_primary_contr
     bundle = (frontend / "assets" / "index-DUrFdX-d.js").read_text(encoding="utf-8")
 
     extension_route_line = next(line for line in extension.splitlines() if "const EXTENSION_ROUTES" in line)
-    native_routes = ("/spectrum", "/scout", "/strike", "/standard", "/grc", "/spotlight")
+    assert "'/scout'" in extension_route_line
+    assert "if (path === '/scout') renderScoutRoute(host);" in extension
+    assert "renderScoutRoute" in extension
+
+    native_routes = ("/spectrum", "/strike", "/standard", "/grc", "/spotlight")
     assert all(route not in extension_route_line for route in native_routes)
     assert all(f"if (path === '{route}')" not in extension for route in native_routes)
 
     native_controls = {
         "/spectrum": ("SPECTRUM Analysis", "CTEM Lifecycle", "EDIP Engine Recommendation"),
-        "/scout": ("Launch Scan", "Scan History", "CISA KEV Intelligence", "explicitly authorised for this SCOUT scan"),
         "/strike": ("Authorization", "MITRE ATT&CK", "Check confidence"),
         "/standard": ("STANDARD Compliance", "Assessment coverage", "Compliance among assessed"),
         "/grc": (

@@ -186,16 +186,30 @@ def get_findings(
         f_copy = f.copy()
         f_copy["record_scope"] = scope_label
         f_copy["record_scope_label"] = scope_label.replace("_", " ").title()
+
+        # Authoritative canonical intelligence resolution
+        is_cve = str(f.get("cve") or f.get("cve_id") or "").upper().startswith("CVE-")
+        intel = None
+        if is_cve:
+            from services.cve_intelligence import resolve_vulnerability_intelligence
+            intel = resolve_vulnerability_intelligence(f, db)
+            f_copy["vulnerability_intelligence"] = intel.to_dict()
+            if intel.cvss_score is not None:
+                f_copy["cvss"] = intel.cvss_score
+            f_copy["cisa_kev"] = intel.is_cisa_kev
+            f_copy["cisa"] = intel.is_cisa_kev
+            f_copy["ransomware"] = intel.is_ransomware
+
         try:
             f_copy["tes_score"] = _public_tes_score(f, db, auth_ctx.tenant_id)
         except (KeyError, TypeError, ValueError):
             f_copy["tes_score"] = None
         f_copy["tes_decision"] = public_decision_for_finding(f, f_copy["tes_score"] or 0.0)
         f_copy["tes_priority"] = priority_from_tes(f_copy["tes_score"] or 0.0)
-        f_copy["severity"] = public_severity(f)
-        if str(f.get("cve") or "").upper().startswith("CVE-") and f_copy["tes_score"] is not None:
+        f_copy["severity"] = public_severity(f, db=db)
+        if is_cve and f_copy["tes_score"] is not None:
             f_copy["business_impact"] = public_cve_context(f, db=db, tenant_id=auth_ctx.tenant_id)["business_impact"]
-        
+
         # Native SPECTRUM receives canonical confirmed assets, never the legacy
         # Finding.asset_id convenience field.
         assets = confirmed_assets.get(f["id"], [])
@@ -211,16 +225,18 @@ def get_findings(
                 "asset_id": asset_data.get("asset_id", ""),
             }
 
-        # Run automated EDIP classification with context binding
+        # Run automated EDIP classification with context binding using authoritative intel
+        cisa_flag = intel.is_cisa_kev if intel else bool(f.get("cisa", False))
+        ransomware_flag = intel.is_ransomware if intel else bool(f.get("ransomware", False))
         f_copy["auto_classification"] = auto_classify(
             cvss=f_copy["severity"]["score"],
             asset_criticality=(asset_data or {}).get("criticality", "high"),
-            cisa_kev=f.get("cisa", False),
-            ransomware_linked=f.get("ransomware", False),
+            cisa_kev=cisa_flag,
+            ransomware_linked=ransomware_flag,
             asset_context=asset_ctx,
             severity_source=f_copy["severity"]["source"],
         )
-        
+
         # Overlay persisted EDIP decision + rationale
         if f["id"] in edip_map:
             edip_data = edip_map[f["id"]]
