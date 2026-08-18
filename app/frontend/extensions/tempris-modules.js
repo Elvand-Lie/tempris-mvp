@@ -3,7 +3,7 @@
 
   const TOKEN_KEY = 'tempris_token';
   const USER_KEY = 'tempris_user';
-  const EXTENSION_ROUTES = new Set(['/ciso', '/reports', '/packages', '/sss-intake', '/vdp-queue']);
+  const EXTENSION_ROUTES = new Set(['/ciso', '/reports', '/packages', '/sss-intake', '/vdp-queue', '/assets']);
   const EXTENSION_HOST_ID = 'tempris-extension-host';
   const RETRY_DELAYS = [1000, 3000, 8000];
   const sssUi = window.TemprisSssUi;
@@ -2011,222 +2011,410 @@
       }
     });
   }
-  async function renderGrcRoute(host) {
-    host.dataset.temprisExtensionRoute = '/grc';
-    host.innerHTML = '<div class="tmx-loading">Loading server-authoritative governance data…</div>';
+  async function renderAssetsRoute(host) {
+    host.dataset.temprisExtensionRoute = '/assets';
+    host.innerHTML = '<div class="tmx-loading">Loading tenant asset inventory&hellip;</div>';
     try {
-      const [risk, policyResponse, controls] = await Promise.all([
-        api('/api/grc/tes-score'),
-        api('/api/grc/policies'),
-        api('/api/grc/controls'),
-      ]);
-      if (window.location.pathname !== '/grc') return;
-      const policies = policyResponse.policies || [];
-      const canManage = ['Superadmin', 'Admin'].includes(currentUserRole());
-      const isSuperadmin = currentUserRole() === 'Superadmin';
-      const drivers = (risk.drivers || []).map((driver) => `<li>${escapeHtml(driver)}</li>`).join('');
-      const policyRows = policies.map((policy) => {
-        const custom = policy.source === 'custom';
-        const archiveLabel = policy.archived ? 'Restore' : 'Archive';
-        return `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(policy.title)}</div><div class="tmx-list-detail">${escapeHtml(policy.source === 'bundled' ? 'Bundled / immutable' : 'Custom database policy')} · v${escapeHtml(policy.version)} · ${escapeHtml(policy.status)}</div></div><div class="tmx-form-actions">${custom && canManage ? `<button type="button" class="tmx-button tmx-button-secondary" data-policy-archive="${escapeHtml(policy.id)}" data-policy-archived="${policy.archived ? 'true' : 'false'}">${archiveLabel}</button><button type="button" class="tmx-button tmx-button-secondary" data-policy-supersede="${escapeHtml(policy.id)}">Supersede</button>` : ''}${custom && isSuperadmin ? `<button type="button" class="tmx-button tmx-button-danger" data-policy-delete="${escapeHtml(policy.id)}">Delete</button>` : ''}</div></div>`;
+      const response = await api('/api/assets?limit=200');
+      if (window.location.pathname !== '/assets') return;
+
+      const assets = response.data || [];
+      const userRole = currentUserRole();
+      const isSuperadmin = userRole === 'Superadmin';
+      const isAdminOrSuper = ['Superadmin', 'Admin'].includes(userRole);
+
+      let publicCount = 0;
+      let internalCount = 0;
+      let approvedCount = 0;
+      let pendingCount = 0;
+
+      assets.forEach((a) => {
+        const classification = a.target_classification || {};
+        const auth = a.scan_authorization || {};
+        if (classification.is_public_scannable) publicCount += 1;
+        else internalCount += 1;
+
+        if (auth.status === 'approved' && !auth.is_expired) approvedCount += 1;
+        else if (auth.status === 'pending') pendingCount += 1;
+      });
+
+      const assetRows = assets.map((a) => {
+        const classification = a.target_classification || {};
+        const auth = a.scan_authorization || {};
+        const isScannable = classification.is_public_scannable;
+        const authStatus = auth.status || 'unauthorized';
+        const target = classification.target || a.hostname || a.ip_address || a.name;
+
+        let authAction = '';
+        if (authStatus === 'pending') {
+          if (isSuperadmin) {
+            authAction = `<button type="button" class="tmx-button tmx-button-small" data-asset-approve="${escapeHtml(a.id)}" data-asset-name="${escapeHtml(a.name)}">Approve Scan</button>`;
+          } else {
+            authAction = `<span style="font-size:0.85rem;color:#f59e0b;">Pending Superadmin</span>`;
+          }
+        } else if (authStatus === 'approved' && !auth.is_expired) {
+          if (isAdminOrSuper) {
+            authAction = `<button type="button" class="tmx-button tmx-button-secondary tmx-button-small" data-asset-revoke="${escapeHtml(a.id)}" data-asset-name="${escapeHtml(a.name)}">Revoke Auth</button>`;
+          } else {
+            authAction = `<span style="font-size:0.85rem;color:#10b981;">Authorized</span>`;
+          }
+        } else if (isScannable) {
+          authAction = `<button type="button" class="tmx-button tmx-button-small" data-asset-request="${escapeHtml(a.id)}" data-asset-name="${escapeHtml(a.name)}">Request Scan Auth</button>`;
+        } else {
+          authAction = `<span style="font-size:0.85rem;color:#6b7280;">Not scannable</span>`;
+        }
+
+        const scanLink = (authStatus === 'approved' && !auth.is_expired && isScannable)
+          ? `<a href="/scout" class="tmx-button tmx-button-secondary tmx-button-small" style="text-decoration:none;margin-left:0.5rem;">Scan in SCOUT</a>`
+          : '';
+
+        return `
+          <tr data-asset-id="${escapeHtml(a.id)}">
+            <td>
+              <strong>${escapeHtml(a.name)}</strong>
+              <div style="font-size:0.8rem;opacity:0.7;">${escapeHtml(a.id)} &middot; ${escapeHtml(a.asset_type || 'server')}</div>
+            </td>
+            <td><code>${escapeHtml(target)}</code></td>
+            <td>
+              <span class="tmx-status ${isScannable ? 'tmx-status-available' : 'tmx-status-high'}">
+                ${escapeHtml(titleCase(classification.target_kind || 'unknown'))}
+              </span>
+              ${!isScannable ? `<div style="font-size:0.75rem;color:#ef4444;margin-top:2px;">RFC 1918 / Internal</div>` : ''}
+            </td>
+            <td>
+              <span class="tmx-status ${authStatus === 'approved' && !auth.is_expired ? 'tmx-status-available' : (authStatus === 'pending' ? 'tmx-status-high' : 'tmx-status-critical')}">
+                ${escapeHtml(titleCase(authStatus === 'approved' && auth.is_expired ? 'expired' : authStatus))}
+              </span>
+              ${auth.expires_at ? `<div style="font-size:0.75rem;opacity:0.7;margin-top:2px;">Exp: ${escapeHtml(formatDate(auth.expires_at))}</div>` : ''}
+            </td>
+            <td>
+              <div style="display:flex;align-items:center;gap:0.5rem;">
+                ${authAction}
+                ${scanLink}
+              </div>
+            </td>
+          </tr>`;
       }).join('');
-      const controlRows = (controls || []).map((control) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(control.id)} · ${escapeHtml(control.title)}</div><div class="tmx-list-detail">${escapeHtml(control.domain)} · ${escapeHtml(control.sg_ref)}</div></div></div>`).join('');
+
       host.innerHTML = `
-        <header class="tmx-heading"><div><h1>GRC · AI Governance</h1><p>AI-governance policy, SOP, evidence, and sign-off workflow. This is separate from STANDARD regulatory control assessment and from tenant TES.</p></div></header>
+        <header class="tmx-heading">
+          <div>
+            <h1>Asset Inventory &middot; Scan Authorizations</h1>
+            <p>Authoritative inventory of customer infrastructure. Central SCOUT scans require explicit platform scan authorization for each public target.</p>
+          </div>
+        </header>
+
         <section class="tmx-metrics">
-          <div class="tmx-metric"><div class="tmx-metric-label">AI-system risk score</div><div class="tmx-metric-value ${metricTone(risk.band)}">${escapeHtml(risk.score ?? 'Unavailable')}</div></div>
-          <div class="tmx-metric"><div class="tmx-metric-label">Score band</div><div class="tmx-metric-value ${metricTone(risk.band)}">${escapeHtml(risk.band || 'Unavailable')}</div></div>
-          <div class="tmx-metric"><div class="tmx-metric-label">Score scope</div><div class="tmx-metric-value tmx-tone-neutral">${escapeHtml(risk.scope || 'AI_SYSTEM')}</div></div>
+          <div class="tmx-metric"><div class="tmx-metric-label">Total Assets</div><div class="tmx-metric-value">${escapeHtml(assets.length)}</div></div>
+          <div class="tmx-metric"><div class="tmx-metric-label">Public Scannable</div><div class="tmx-metric-value tmx-tone-success">${escapeHtml(publicCount)}</div></div>
+          <div class="tmx-metric"><div class="tmx-metric-label">Approved Authorizations</div><div class="tmx-metric-value tmx-tone-success">${escapeHtml(approvedCount)}</div></div>
+          <div class="tmx-metric"><div class="tmx-metric-label">Pending Authorizations</div><div class="tmx-metric-value tmx-tone-high">${escapeHtml(pendingCount)}</div></div>
+          <div class="tmx-metric"><div class="tmx-metric-label">Internal (Unsupported)</div><div class="tmx-metric-value">${escapeHtml(internalCount)}</div></div>
         </section>
-        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Qualitative risk drivers</h2><span class="tmx-status">Server-generated</span></div><div class="tmx-panel-body"><ul>${drivers || '<li>No driver is recorded.</li>'}</ul><p class="tmx-list-detail">Exact scoring factors, weights, ranges, and formulas are deliberately not sent to the browser.</p></div></section>
-        ${canManage ? `<section class="tmx-panel"><div class="tmx-panel-header"><h2>Create custom policy</h2></div><form class="tmx-panel-body tmx-form-grid" data-policy-create><label>Title<input required name="title" maxlength="255"></label><label>Version<input required name="version" value="1.0" maxlength="20"></label><label class="tmx-field-wide">Content<textarea required name="content" rows="6" maxlength="204800"></textarea></label><div class="tmx-form-actions tmx-field-wide"><button class="tmx-button" type="submit">Create policy</button><span data-policy-message></span></div></form></section>` : ''}
-        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Policy library</h2><span class="tmx-status">${escapeHtml(policies.length)} documents</span></div><div class="tmx-panel-body">${policyRows || '<div class="tmx-empty">No policies are available.</div>'}</div></section>
-        <section class="tmx-panel"><div class="tmx-panel-header"><h2>ISO/IEC 42001 governance controls</h2><span class="tmx-status">${escapeHtml((controls || []).length)} controls</span></div><div class="tmx-panel-body">${controlRows}</div></section>
-        <dialog class="tmx-dialog" data-policy-supersede-dialog><form class="tmx-form-grid" data-policy-supersede-form><h2 class="tmx-field-wide">Supersede custom policy</h2><p class="tmx-field-wide">Create an immutable successor version. The current policy remains in history.</p><label>New version<input required name="version" maxlength="20" placeholder="2.0"></label><label class="tmx-field-wide">New policy content<textarea required name="content" rows="10" maxlength="204800"></textarea></label><div class="tmx-form-message tmx-field-wide" data-policy-supersede-message></div><div class="tmx-dialog-actions tmx-field-wide"><button type="button" class="tmx-button tmx-button-secondary" data-policy-supersede-cancel>Cancel</button><button type="submit" class="tmx-button">Create successor</button></div></form></dialog>`;
 
-      const refresh = () => renderGrcRoute(host);
-      host.querySelector('[data-policy-create]')?.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const data = new FormData(event.currentTarget);
-        const message = host.querySelector('[data-policy-message]');
-        try {
-          await api('/api/grc/policies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: data.get('title'), version: data.get('version'), content: data.get('content'), unmapped: true }) });
-          await refresh();
-        } catch (error) { message.textContent = error.message; }
+        <section class="tmx-panel">
+          <div class="tmx-panel-header">
+            <h2>Inventory Assets</h2>
+            <span data-asset-action-msg></span>
+          </div>
+          <div class="tmx-table-wrap">
+            <table class="tmx-table">
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Target Endpoint</th>
+                  <th>Classification</th>
+                  <th>Scan Authorization</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${assetRows || '<tr><td colspan="5" class="tmx-empty">No assets registered in inventory.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <dialog class="tmx-dialog" data-asset-request-dialog>
+          <form class="tmx-form-grid" data-asset-request-form>
+            <h2 class="tmx-field-wide">Request Scan Authorization</h2>
+            <p class="tmx-field-wide">Submit an authorization request for target scanning. Requires platform Superadmin review and sign-off.</p>
+            <div class="tmx-field-wide"><strong data-asset-dialog-target></strong></div>
+            <label class="tmx-field-wide">Authorization Rationale / Engagement Reference
+              <textarea required name="evidence" rows="4" maxlength="2000" placeholder="e.g. SOW-2026-001, AWS Customer Pentest Approval, or RFC compliance mandate"></textarea>
+            </label>
+            <div class="tmx-form-message tmx-field-wide" data-asset-request-message></div>
+            <div class="tmx-dialog-actions tmx-field-wide">
+              <button type="button" class="tmx-button tmx-button-secondary" data-asset-request-cancel>Cancel</button>
+              <button type="submit" class="tmx-button">Submit Request</button>
+            </div>
+          </form>
+        </dialog>
+
+        <dialog class="tmx-dialog" data-asset-approve-dialog>
+          <form class="tmx-form-grid" data-asset-approve-form>
+            <h2 class="tmx-field-wide">Approve Scan Authorization</h2>
+            <p class="tmx-field-wide">Platform Superadmin Approval: Confirm ownership verification and authorization for central VPS scanning.</p>
+            <div class="tmx-field-wide"><strong data-asset-approve-target></strong></div>
+            <label>Validity (Days)
+              <input type="number" name="expires_in_days" value="90" min="1" max="365" required>
+            </label>
+            <label class="tmx-field-wide">Verification Method / Superadmin Notes
+              <textarea name="notes" rows="3" maxlength="2000" placeholder="e.g. Verified DNS TXT record / Contract SOW signed"></textarea>
+            </label>
+            <div class="tmx-form-message tmx-field-wide" data-asset-approve-message></div>
+            <div class="tmx-dialog-actions tmx-field-wide">
+              <button type="button" class="tmx-button tmx-button-secondary" data-asset-approve-cancel>Cancel</button>
+              <button type="submit" class="tmx-button">Approve Authorization</button>
+            </div>
+          </form>
+        </dialog>
+
+        <dialog class="tmx-dialog" data-asset-revoke-dialog>
+          <form class="tmx-form-grid" data-asset-revoke-form>
+            <h2 class="tmx-field-wide">Revoke Scan Authorization</h2>
+            <p class="tmx-field-wide">Revoke active scan authorization for this asset. Subsequent scans will be rejected.</p>
+            <div class="tmx-field-wide"><strong data-asset-revoke-target></strong></div>
+            <label class="tmx-field-wide">Revocation Reason
+              <textarea required name="reason" rows="3" maxlength="1000" placeholder="e.g. Scope expired, asset decommissioned, or target IP changed"></textarea>
+            </label>
+            <div class="tmx-form-message tmx-field-wide" data-asset-revoke-message></div>
+            <div class="tmx-dialog-actions tmx-field-wide">
+              <button type="button" class="tmx-button tmx-button-secondary" data-asset-revoke-cancel>Cancel</button>
+              <button type="submit" class="tmx-button tmx-button-danger">Revoke Authorization</button>
+            </div>
+          </form>
+        </dialog>`;
+
+      const requestDialog = host.querySelector('[data-asset-request-dialog]');
+      const requestForm = host.querySelector('[data-asset-request-form]');
+      const approveDialog = host.querySelector('[data-asset-approve-dialog]');
+      const approveForm = host.querySelector('[data-asset-approve-form]');
+      const revokeDialog = host.querySelector('[data-asset-revoke-dialog]');
+      const revokeForm = host.querySelector('[data-asset-revoke-form]');
+
+      // Request Dialog Handler
+      host.querySelectorAll('[data-asset-request]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          requestForm.reset();
+          requestForm.dataset.assetId = btn.dataset.assetRequest;
+          host.querySelector('[data-asset-dialog-target]').textContent = `Asset: ${btn.dataset.assetName || btn.dataset.assetRequest}`;
+          host.querySelector('[data-asset-request-message]').textContent = '';
+          requestDialog.showModal();
+        });
       });
-      host.querySelectorAll('[data-policy-archive]').forEach((button) => button.addEventListener('click', async () => {
-        await api(`/api/grc/policies/${encodeURIComponent(button.dataset.policyArchive)}/archive`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ archived: button.dataset.policyArchived !== 'true' }) });
-        await refresh();
-      }));
-      host.querySelectorAll('[data-policy-delete]').forEach((button) => button.addEventListener('click', async () => {
-        if (!window.confirm(`Delete custom policy ${button.dataset.policyDelete}? Referenced policies will be archived instead.`)) return;
-        await api(`/api/grc/policies/${encodeURIComponent(button.dataset.policyDelete)}`, { method: 'DELETE' });
-        await refresh();
-      }));
-      const supersedeDialog = host.querySelector('[data-policy-supersede-dialog]');
-      const supersedeForm = host.querySelector('[data-policy-supersede-form]');
-      host.querySelectorAll('[data-policy-supersede]').forEach((button) => button.addEventListener('click', () => {
-        supersedeForm.reset();
-        supersedeForm.dataset.policyId = button.dataset.policySupersede;
-        host.querySelector('[data-policy-supersede-message]').textContent = '';
-        supersedeDialog.showModal();
-      }));
-      host.querySelector('[data-policy-supersede-cancel]')?.addEventListener('click', () => supersedeDialog.close());
-      supersedeForm?.addEventListener('submit', async (event) => {
+      host.querySelector('[data-asset-request-cancel]')?.addEventListener('click', () => requestDialog.close());
+      requestForm?.addEventListener('submit', async (event) => {
         event.preventDefault();
-        const data = new FormData(supersedeForm);
-        const message = host.querySelector('[data-policy-supersede-message]');
+        const data = new FormData(requestForm);
+        const assetId = requestForm.dataset.assetId;
+        const msg = host.querySelector('[data-asset-request-message]');
         try {
-          await api(`/api/grc/policies/${encodeURIComponent(supersedeForm.dataset.policyId)}/supersede`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: data.get('version'), content: data.get('content') }) });
-          supersedeDialog.close();
-          await refresh();
-        } catch (error) { message.textContent = error.message; }
+          await api(`/api/assets/${encodeURIComponent(assetId)}/scan-authorization/request`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ evidence: data.get('evidence') }),
+          });
+          requestDialog.close();
+          await renderAssetsRoute(host);
+        } catch (err) {
+          if (msg) msg.textContent = err.message;
+        }
       });
+
+      // Approve Dialog Handler
+      host.querySelectorAll('[data-asset-approve]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          approveForm.reset();
+          approveForm.dataset.assetId = btn.dataset.assetApprove;
+          host.querySelector('[data-asset-approve-target]').textContent = `Asset: ${btn.dataset.assetName || btn.dataset.assetApprove}`;
+          host.querySelector('[data-asset-approve-message]').textContent = '';
+          approveDialog.showModal();
+        });
+      });
+      host.querySelector('[data-asset-approve-cancel]')?.addEventListener('click', () => approveDialog.close());
+      approveForm?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const data = new FormData(approveForm);
+        const assetId = approveForm.dataset.assetId;
+        const msg = host.querySelector('[data-asset-approve-message]');
+        try {
+          await api(`/api/assets/${encodeURIComponent(assetId)}/scan-authorization/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              notes: data.get('notes') || undefined,
+              expires_in_days: parseInt(data.get('expires_in_days'), 10) || 90,
+            }),
+          });
+          approveDialog.close();
+          await renderAssetsRoute(host);
+        } catch (err) {
+          if (msg) msg.textContent = err.message;
+        }
+      });
+
+      // Revoke Dialog Handler
+      host.querySelectorAll('[data-asset-revoke]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          revokeForm.reset();
+          revokeForm.dataset.assetId = btn.dataset.assetRevoke;
+          host.querySelector('[data-asset-revoke-target]').textContent = `Asset: ${btn.dataset.assetName || btn.dataset.assetRevoke}`;
+          host.querySelector('[data-asset-revoke-message]').textContent = '';
+          revokeDialog.showModal();
+        });
+      });
+      host.querySelector('[data-asset-revoke-cancel]')?.addEventListener('click', () => revokeDialog.close());
+      revokeForm?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const data = new FormData(revokeForm);
+        const assetId = revokeForm.dataset.assetId;
+        const msg = host.querySelector('[data-asset-revoke-message]');
+        try {
+          await api(`/api/assets/${encodeURIComponent(assetId)}/scan-authorization/revoke`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: data.get('reason') }),
+          });
+          revokeDialog.close();
+          await renderAssetsRoute(host);
+        } catch (err) {
+          if (msg) msg.textContent = err.message;
+        }
+      });
+
     } catch (error) {
-      host.innerHTML = `<div class="tmx-error"><h2>GRC could not be loaded</h2><p>${escapeHtml(error.message)}</p></div>`;
+      host.innerHTML = `<div class="tmx-error"><h2>Assets could not be loaded</h2><p>${escapeHtml(error.message)}</p></div>`;
     }
   }
 
-  async function renderSpectrumRoute(host, options = {}) {
-    host.dataset.temprisExtensionRoute = '/spectrum';
-    const scope = options.scope || host.dataset.scope || 'all';
-    const search = options.search ?? host.dataset.search ?? '';
-    host.dataset.scope = scope;
-    host.dataset.search = search;
-    host.innerHTML = '<div class="tmx-loading">Loading the tenant finding registry&hellip;</div>';
-    try {
-      const params = new URLSearchParams({ page: '1', limit: '50', scope });
-      if (search) params.set('search', search);
-      const response = await api(`/api/spectrum/findings?${params}`);
-      if (window.location.pathname !== '/spectrum') return;
-      const scopes = [
-        ['all', 'All records'], ['confirmed_exposure', 'Confirmed customer exposure'],
-        ['unmapped_intake', 'Unmapped intake'], ['suggested_match', 'Suggested match'],
-        ['reference_intelligence', 'Reference intelligence'], ['catalogue_record', 'Catalogue record'],
-        ['legacy_unverified', 'Legacy unverified'], ['not_applicable', 'Not applicable'], ['resolved', 'Resolved'],
-      ];
-      const rows = (response.data || []).map((finding) => `
-        <article class="tmx-list-row tmx-registry-row">
-          <div><div class="tmx-list-title">${escapeHtml(finding.cve || finding.id)} &middot; ${escapeHtml(finding.title)}</div>
-          <div class="tmx-list-detail">${escapeHtml(finding.record_scope_label)} &middot; ${escapeHtml(finding.priority || 'No priority')} &middot; Finding TES ${escapeHtml(finding.tes_score ?? 'Unavailable')} &middot; ${escapeHtml(finding.edip_decision || finding.edip_state || 'No EDIP decision')}</div></div>
-          <span class="tmx-status ${statusClass(finding.record_scope)}">${escapeHtml(finding.record_scope_label)}</span>
-        </article>`).join('');
-      host.innerHTML = `
-        <header class="tmx-heading"><div><h1>SPECTRUM &middot; Finding Registry</h1><p>All tenant finding records remain visible. Only the records labelled Confirmed customer exposure affect canonical customer posture.</p></div></header>
-        <section class="tmx-panel"><div class="tmx-exposure-tools"><label>Search findings<input data-spectrum-search value="${escapeHtml(search)}" placeholder="CVE, title, vendor, or finding ID"></label><label>Record scope<select data-spectrum-scope>${scopes.map(([value, label]) => `<option value="${value}" ${scope === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label><div data-exposure-count>${escapeHtml(response.meta?.total ?? 0)} record(s)</div></div><div class="tmx-panel-body">${rows || '<div class="tmx-empty">No records match this scope.</div>'}</div></section>`;
-      const refresh = () => renderSpectrumRoute(host, { scope: host.querySelector('[data-spectrum-scope]').value, search: host.querySelector('[data-spectrum-search]').value.trim() });
-      host.querySelector('[data-spectrum-scope]')?.addEventListener('change', refresh);
-      host.querySelector('[data-spectrum-search]')?.addEventListener('keydown', (event) => { if (event.key === 'Enter') refresh(); });
-    } catch (error) {
-      host.innerHTML = `<div class="tmx-error"><h2>SPECTRUM could not be loaded</h2><p>${escapeHtml(error.message)}</p></div>`;
+  let scoutEnginesCache = null;
+  async function decorateScout() {
+    if (window.location.pathname !== '/scout' || !localStorage.getItem(TOKEN_KEY)) return;
+    const root = document.getElementById('root');
+    if (!root) return;
+
+    // Find launch scan button or target input
+    const launchBtn = [...root.querySelectorAll('button')].find((b) => b.textContent.includes('Launch Scan') || b.textContent.includes('Run Scan'));
+    const targetInput = root.querySelector('input[placeholder*="domain"], input[placeholder*="IP"], input[placeholder*="host"], input[placeholder*="scanme"], input[name="target"]');
+    if (!targetInput) return;
+
+    const form = targetInput.closest('form') || targetInput.closest('.glass-panel') || targetInput.parentElement;
+    if (!form) return;
+
+    if (!scoutEnginesCache) {
+      try {
+        scoutEnginesCache = await api('/api/scanner/engines');
+      } catch {
+        scoutEnginesCache = { active_scanning_enabled: false };
+      }
     }
-  }
 
-  async function renderScoutRoute(host) {
-    host.dataset.temprisExtensionRoute = '/scout';
-    host.innerHTML = '<div class="tmx-loading">Loading catalogue and scanner activity&hellip;</div>';
-    try {
-      const [stats, catalogue, observations, history] = await Promise.all([
-        api('/api/scout/stats'), api('/api/scout/findings?page=1&limit=25'),
-        api('/api/scanner/findings'), api('/api/scanner/history'),
-      ]);
-      if (window.location.pathname !== '/scout') return;
-      const ref = stats.reference_catalogue || {};
-      const scan = stats.customer_scan_activity || {};
-      const catalogueRows = (catalogue.data || []).map((row) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(row.cve || row.id)} &middot; ${escapeHtml(row.title)}</div><div class="tmx-list-detail">Reference/registry record &middot; ${escapeHtml(row.priority || 'No priority')} &middot; ${escapeHtml(row.edip_state || row.edip_decision || 'No EDIP decision')}</div></div></div>`).join('');
-      const observationRows = (observations || []).slice(0, 30).map((row) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(row.target)}${row.port ? `:${escapeHtml(row.port)}` : ''} &middot; ${escapeHtml(row.service || row.risk || 'Observation')}</div><div class="tmx-list-detail">${escapeHtml(titleCase(row.observation_type))}${row.normalized_finding_id ? ` &middot; Finding ${escapeHtml(row.normalized_finding_id)}` : ' &middot; SCOUT-only observation'}${row.asset_id ? ` &middot; Asset ${escapeHtml(row.asset_id)}` : ''}</div></div></div>`).join('');
-      const historyRows = (history || []).map((row) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(row.scan_id)} &middot; ${escapeHtml(row.target)}</div><div class="tmx-list-detail">${escapeHtml(titleCase(row.status))} &middot; ${escapeHtml(row.findings_count)} observation(s) &middot; ${escapeHtml((row.engines || []).join(', '))} &middot; ${escapeHtml(formatDate(row.completed_at || row.started_at))}</div></div></div>`).join('');
-      host.innerHTML = `
-        <header class="tmx-heading"><div><h1>SCOUT &middot; Discovery</h1><p>Reference intelligence and customer scan activity are separate. Catalogue rows do not prove customer exposure.</p></div></header>
-        <section class="tmx-metrics"><div class="tmx-metric"><div class="tmx-metric-label">Reference records</div><div class="tmx-metric-value">${escapeHtml(ref.total_records ?? 0)}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Scan runs</div><div class="tmx-metric-value">${escapeHtml(scan.scan_runs ?? 0)}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Scan observations</div><div class="tmx-metric-value">${escapeHtml(scan.scan_observations ?? 0)}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Normalized candidate findings</div><div class="tmx-metric-value">${escapeHtml(scan.normalized_candidate_findings ?? 0)}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Confirmed customer exposures</div><div class="tmx-metric-value">${escapeHtml(scan.confirmed_customer_exposures ?? 0)}</div></div></section>
-        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Run an authorised scan</h2><span class="tmx-status">Targets are policy-validated server-side</span></div><form class="tmx-panel-body tmx-form-grid" data-scout-scan><label>Authorised target<input name="target" required placeholder="Approved hostname or IP"></label><label>Scan type<select name="scan_type"><option value="quick">Quick</option><option value="ports">Ports</option><option value="full">Full</option></select></label><label class="tmx-field-wide tmx-vdp-check"><input name="authorized" type="checkbox" required><span>I confirm this target is explicitly authorised for testing.</span></label><div class="tmx-form-actions tmx-field-wide"><button class="tmx-button" type="submit">Run SCOUT Scan</button><span data-scout-message></span></div></form></section>
-        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Customer scan observations</h2><span class="tmx-status">Not automatically vulnerabilities</span></div><div class="tmx-panel-body">${observationRows || '<div class="tmx-empty">No scan observations recorded.</div>'}</div></section>
-        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Scanner run history</h2></div><div class="tmx-panel-body">${historyRows || '<div class="tmx-empty">No scanner runs recorded, including zero-result runs.</div>'}</div></section>
-        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Reference and finding registry</h2><span class="tmx-status">Not proof of exposure</span></div><div class="tmx-panel-body">${catalogueRows || '<div class="tmx-empty">No registry records available.</div>'}</div></section>`;
-      host.querySelector('[data-scout-scan]')?.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const data = new FormData(event.currentTarget);
-        const message = host.querySelector('[data-scout-message]');
-        message.textContent = 'Running the authorised scan&hellip;';
-        try {
-          const result = await api('/api/scanner/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target: data.get('target'), scan_type: data.get('scan_type') }) });
-          message.textContent = `${result.scan_id}: ${result.findings_count} observation(s), ${result.confirmed_exposures} confirmed exposure link(s).`;
-          window.setTimeout(() => renderScoutRoute(host), 700);
-        } catch (error) { message.textContent = error.message; }
+    const activeScanningEnabled = scoutEnginesCache?.active_scanning_enabled === true;
+
+    // 1. Kill Switch Banner
+    let banner = form.querySelector('[data-scout-killswitch-banner]');
+    if (!activeScanningEnabled) {
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.dataset.scoutKillswitchBanner = 'true';
+        banner.className = 'tmx-notice tmx-notice-warning';
+        banner.style.cssText = 'margin-bottom:1rem;padding:0.75rem 1rem;background:rgba(234,179,8,0.1);border:1px solid rgba(234,179,8,0.3);border-radius:6px;color:#eab308;font-size:0.875rem;';
+        banner.innerHTML = '<strong>Central Active Scanning is Disabled:</strong> Active network probing from central Tempris VPS is disabled globally (<code>SCOUT_ACTIVE_SCANNING_ENABLED=false</code>).';
+        form.prepend(banner);
+      }
+      if (launchBtn) launchBtn.disabled = true;
+    } else if (banner) {
+      banner.remove();
+    }
+
+    // 2. Asset Selector Decorator
+    let assetPickerRow = form.querySelector('[data-scout-asset-picker-row]');
+    if (!assetPickerRow) {
+      assetPickerRow = document.createElement('div');
+      assetPickerRow.dataset.scoutAssetPickerRow = 'true';
+      assetPickerRow.className = 'tmx-field tmx-field-wide';
+      assetPickerRow.style.cssText = 'margin-bottom:1rem;';
+      assetPickerRow.innerHTML = `
+        <label style="display:block;font-weight:600;margin-bottom:0.35rem;font-size:0.875rem;">Select Inventory Asset (Required for Scan Authorization)</label>
+        <select data-scout-asset-select style="width:100%;padding:0.5rem;background:#1e293b;border:1px solid #334155;border-radius:4px;color:#f8fafc;font-size:0.875rem;">
+          <option value="">-- Choose an active asset --</option>
+        </select>
+        <div data-scout-asset-info style="margin-top:0.5rem;font-size:0.85rem;display:none;padding:0.5rem 0.75rem;border-radius:4px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);">
+          <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;">
+            <span>Target: <strong data-scout-target-label>-</strong></span>
+            <span>Classification: <span class="tmx-status" data-scout-kind-badge>-</span></span>
+            <span>Scan Authorization: <span class="tmx-status" data-scout-auth-badge>-</span></span>
+          </div>
+          <div data-scout-warn-msg style="color:#ef4444;margin-top:0.35rem;display:none;"></div>
+        </div>
+      `;
+      targetInput.parentElement.insertAdjacentElement('beforebegin', assetPickerRow);
+
+      const select = assetPickerRow.querySelector('[data-scout-asset-select]');
+      loadTenantAssets().then((assets) => {
+        if (!assets || !assets.length) {
+          select.innerHTML = '<option value="">No active assets found in inventory</option>';
+          return;
+        }
+        select.innerHTML = '<option value="">-- Select an authorized asset to scan --</option>' + assets.map((a) => {
+          const classification = a.target_classification || {};
+          const auth = a.scan_authorization || {};
+          const isScannable = classification.is_public_scannable;
+          const authStatus = auth.status || 'unauthorized';
+          const targetDisplay = classification.target || a.hostname || a.ip_address || a.name;
+          const tag = isScannable ? (authStatus === 'approved' ? ' [Authorized]' : ` [${titleCase(authStatus)}]`) : ' [Internal/RFC1918 - Not Scannable]';
+          return `<option value="${escapeHtml(a.id)}" data-target="${escapeHtml(targetDisplay)}" data-kind="${escapeHtml(classification.target_kind || '')}" data-scannable="${isScannable ? 'true' : 'false'}" data-auth="${escapeHtml(authStatus)}">${escapeHtml(a.name)} — ${escapeHtml(targetDisplay)}${tag}</option>`;
+        }).join('');
+      }).catch(() => {});
+
+      select.addEventListener('change', () => {
+        const opt = select.selectedOptions?.[0];
+        const info = assetPickerRow.querySelector('[data-scout-asset-info]');
+        const targetLabel = assetPickerRow.querySelector('[data-scout-target-label]');
+        const kindBadge = assetPickerRow.querySelector('[data-scout-kind-badge]');
+        const authBadge = assetPickerRow.querySelector('[data-scout-auth-badge]');
+        const warnMsg = assetPickerRow.querySelector('[data-scout-warn-msg]');
+
+        if (!opt || !opt.value) {
+          if (info) info.style.display = 'none';
+          return;
+        }
+        if (info) info.style.display = 'block';
+        const target = opt.dataset.target || '';
+        const kind = opt.dataset.kind || '';
+        const scannable = opt.dataset.scannable === 'true';
+        const authStatus = opt.dataset.auth || 'unauthorized';
+
+        targetInput.value = target;
+        targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+        if (targetLabel) targetLabel.textContent = target;
+        if (kindBadge) {
+          kindBadge.textContent = titleCase(kind);
+          kindBadge.className = `tmx-status ${scannable ? 'tmx-status-available' : 'tmx-status-high'}`;
+        }
+        if (authBadge) {
+          authBadge.textContent = titleCase(authStatus);
+          authBadge.className = `tmx-status ${authStatus === 'approved' ? 'tmx-status-available' : (authStatus === 'pending' ? 'tmx-status-high' : 'tmx-status-critical')}`;
+        }
+
+        let err = '';
+        if (!scannable) {
+          err = 'Target is internal RFC 1918. Central scanning is unsupported.';
+        } else if (authStatus !== 'approved') {
+          err = `Asset scan authorization is ${authStatus}. Platform Superadmin approval required.`;
+        }
+
+        if (err) {
+          if (warnMsg) { warnMsg.textContent = err; warnMsg.style.display = 'block'; }
+          if (launchBtn) launchBtn.disabled = true;
+        } else {
+          if (warnMsg) warnMsg.style.display = 'none';
+          if (launchBtn && activeScanningEnabled) launchBtn.disabled = false;
+        }
       });
-    } catch (error) { host.innerHTML = `<div class="tmx-error"><h2>SCOUT could not be loaded</h2><p>${escapeHtml(error.message)}</p></div>`; }
-  }
-
-  async function renderStrikeRoute(host) {
-    host.dataset.temprisExtensionRoute = '/strike';
-    host.innerHTML = '<div class="tmx-loading">Loading authorised validation results&hellip;</div>';
-    try {
-      const [authorizations, simulations] = await Promise.all([api('/api/strike/authorizations'), api('/api/strike/simulations')]);
-      if (window.location.pathname !== '/strike') return;
-      const latestResults = (simulations || []).flatMap((simulation) => (simulation.results || []).map((result) => ({ ...result, simulation_id: simulation.id })));
-      const count = (outcome) => latestResults.filter((row) => row.result === outcome).length;
-      const resultRows = latestResults.slice(0, 40).map((row) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(row.technique_id || 'Unknown technique')} &middot; ${escapeHtml(row.technique_name || '')}</div><div class="tmx-list-detail">${escapeHtml(titleCase(row.result))} &middot; Check confidence ${escapeHtml(Math.round(Number(row.confidence || 0) * 100))}% &middot; ${escapeHtml(row.evidence || 'No evidence detail recorded')}</div></div><span class="tmx-status ${statusClass(row.result)}">${escapeHtml(titleCase(row.result))}</span></div>`).join('');
-      const authRows = (authorizations || []).map((row) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(row.target_name)} &middot; ${escapeHtml(row.id)}</div><div class="tmx-list-detail">${escapeHtml(titleCase(row.status))} &middot; ${escapeHtml(row.rules_of_engagement)} &middot; ${(row.techniques || []).length} technique(s)</div></div>${row.status === 'signed' && ['Superadmin', 'Admin'].includes(currentUserRole()) ? `<button class="tmx-button" type="button" data-strike-run="${escapeHtml(row.id)}">Generate STRIKE Simulation</button>` : ''}</div>`).join('');
-      host.innerHTML = `<header class="tmx-heading"><div><h1>STRIKE &middot; Authorised Security Validation</h1><p>No exposure observed means the check did not observe the exposed condition. It is not a verified defensive block.</p></div></header>
-        <section class="tmx-metrics"><div class="tmx-metric"><div class="tmx-metric-label">Exploitable observed</div><div class="tmx-metric-value tmx-tone-critical">${count('EXPLOITABLE_OBSERVED')}</div></div><div class="tmx-metric"><div class="tmx-metric-label">No exposure observed</div><div class="tmx-metric-value">${count('NO_EXPOSURE_OBSERVED')}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Defensive block verified</div><div class="tmx-metric-value tmx-tone-success">${count('DEFENSIVE_BLOCK_VERIFIED')}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Untested / error</div><div class="tmx-metric-value">${count('UNTESTED') + count('ERROR')}</div></div></section>
-        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Authorisations</h2><span data-strike-message></span></div><div class="tmx-panel-body">${authRows || '<div class="tmx-empty">No authorisations recorded.</div>'}</div></section>
-        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Technique check results</h2><span class="tmx-status">Confidence is check confidence</span></div><div class="tmx-panel-body">${resultRows || '<div class="tmx-empty">No simulation results recorded.</div>'}</div></section>`;
-      host.querySelectorAll('[data-strike-run]').forEach((button) => button.addEventListener('click', async () => {
-        const message = host.querySelector('[data-strike-message]');
-        message.textContent = 'Running authorised validation&hellip;';
-        try { await api('/api/strike/simulations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ authorization_id: button.dataset.strikeRun }) }); await renderStrikeRoute(host); }
-        catch (error) { message.textContent = error.message; }
-      }));
-    } catch (error) { host.innerHTML = `<div class="tmx-error"><h2>STRIKE could not be loaded</h2><p>${escapeHtml(error.message)}</p></div>`; }
-  }
-
-  async function renderStandardRoute(host) {
-    host.dataset.temprisExtensionRoute = '/standard';
-    host.innerHTML = '<div class="tmx-loading">Loading regulatory control assessments&hellip;</div>';
-    try {
-      const frameworks = await api('/api/standard/frameworks');
-      if (window.location.pathname !== '/standard') return;
-      const cards = (frameworks || []).map((framework) => `<article class="tmx-panel" data-standard-framework="${escapeHtml(framework.id)}"><div class="tmx-panel-header"><div><h2>${escapeHtml(framework.name)}</h2><p>${escapeHtml(framework.assessed_controls)} of ${escapeHtml(framework.total_controls)} controls assessed</p></div><button type="button" class="tmx-button tmx-button-secondary" data-standard-open="${escapeHtml(framework.id)}">Open controls</button></div><div class="tmx-metrics"><div class="tmx-metric"><div class="tmx-metric-label">Assessment coverage</div><div class="tmx-metric-value">${escapeHtml(framework.assessment_coverage_label)} (${escapeHtml(framework.assessment_coverage_pct)}%)</div></div><div class="tmx-metric"><div class="tmx-metric-label">Compliance among assessed</div><div class="tmx-metric-value">${escapeHtml(framework.compliance_among_assessed_label)}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Not assessed</div><div class="tmx-metric-value">${escapeHtml(framework.not_assessed)}</div></div></div><div class="tmx-panel-body" data-standard-controls hidden></div></article>`).join('');
-      host.innerHTML = `<header class="tmx-heading"><div><h1>STANDARD &middot; Regulatory Control Assessment</h1><p>Assessment coverage and compliance among assessed controls are separate. No assessment is shown as N/A, not 0% compliant.</p></div></header>${cards}`;
-      host.querySelectorAll('[data-standard-open]').forEach((button) => button.addEventListener('click', async () => {
-        const panel = button.closest('[data-standard-framework]');
-        const body = panel.querySelector('[data-standard-controls]');
-        if (!body.hidden) { body.hidden = true; button.textContent = 'Open controls'; return; }
-        body.hidden = false; body.innerHTML = '<div class="tmx-loading">Loading controls&hellip;</div>';
-        try {
-          const response = await api(`/api/standard/frameworks/${encodeURIComponent(button.dataset.standardOpen)}/controls`);
-          body.innerHTML = (response.controls || []).map((control) => `<div class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(control.id)} &middot; ${escapeHtml(control.title)}</div><div class="tmx-list-detail">${escapeHtml(control.description)} &middot; ${escapeHtml(control.evidence_count)} evidence record(s)</div></div><div class="tmx-form-actions"><select data-control-status="${escapeHtml(control.id)}"><option value="not_assessed" ${control.status === 'not_assessed' ? 'selected' : ''}>Not assessed</option><option value="compliant" ${control.status === 'compliant' ? 'selected' : ''}>Compliant</option><option value="partial" ${control.status === 'partial' ? 'selected' : ''}>Partial</option><option value="non_compliant" ${control.status === 'non_compliant' ? 'selected' : ''}>Non-compliant</option></select><button type="button" class="tmx-button tmx-button-secondary" data-control-evidence="${escapeHtml(control.id)}">Attach evidence marker</button></div></div>`).join('');
-          body.querySelectorAll('[data-control-status]').forEach((select) => select.addEventListener('change', async () => { await api(`/api/standard/frameworks/${encodeURIComponent(button.dataset.standardOpen)}/controls/${encodeURIComponent(select.dataset.controlStatus)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: select.value }) }); await renderStandardRoute(host); }));
-          body.querySelectorAll('[data-control-evidence]').forEach((evidence) => evidence.addEventListener('click', async () => { await api(`/api/standard/frameworks/${encodeURIComponent(button.dataset.standardOpen)}/controls/${encodeURIComponent(evidence.dataset.controlEvidence)}/evidence`, { method: 'POST' }); await renderStandardRoute(host); }));
-          button.textContent = 'Close controls';
-        } catch (error) { body.innerHTML = `<div class="tmx-error">${escapeHtml(error.message)}</div>`; }
-      }));
-    } catch (error) { host.innerHTML = `<div class="tmx-error"><h2>STANDARD could not be loaded</h2><p>${escapeHtml(error.message)}</p></div>`; }
-  }
-
-  async function renderSpotlightRoute(host) {
-    host.dataset.temprisExtensionRoute = '/spotlight';
-    host.innerHTML = '<div class="tmx-loading">Loading current posture and historical briefs&hellip;</div>';
-    try {
-      const [current, history] = await Promise.all([api('/api/synthesis/dashboard'), api('/api/spotlight/history')]);
-      if (window.location.pathname !== '/spotlight') return;
-      const exposure = current.exposure_coverage || {};
-      const historyRows = (history || []).map((report) => `<article class="tmx-list-row"><div><div class="tmx-list-title">${escapeHtml(titleCase(report.report_type))} brief &middot; ${escapeHtml(formatDate(report.generated_at))}</div><div class="tmx-list-detail">Historical report snapshot${report.tes_score == null ? ' &middot; Tenant TES was not included' : ` &middot; Stored Tenant TES ${escapeHtml(report.tes_score)}`} &middot; Generated by ${escapeHtml(report.generated_by || 'Unknown')}</div><p>${escapeHtml(report.narrative || '')}</p></div></article>`).join('');
-      host.innerHTML = `<header class="tmx-heading"><div><h1>SPOTLIGHT &middot; Executive Narrative</h1><p>Current facts come from the canonical tenant posture. Previous briefs are historical snapshots and are never presented as live values.</p></div></header>
-        <section class="tmx-metrics"><div class="tmx-metric"><div class="tmx-metric-label">Current Tenant TES</div><div class="tmx-metric-value">${escapeHtml(current.aggregate_tes ?? 'Unavailable')}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Confirmed open exposures</div><div class="tmx-metric-value">${escapeHtml(exposure.asset_linked_count ?? 0)}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Needs classification</div><div class="tmx-metric-value">${escapeHtml(exposure.mapping_required_count ?? 0)}</div></div><div class="tmx-metric"><div class="tmx-metric-label">Reference intelligence</div><div class="tmx-metric-value">${escapeHtml(exposure.catalog_intelligence_count ?? 0)}</div></div></section>
-        <section class="tmx-panel"><div class="tmx-panel-header"><div><h2>Generate a current executive brief</h2><p>The generated narrative records its generation time and current tenant-scoped source facts.</p></div></div><form class="tmx-panel-body tmx-form-grid" data-spotlight-generate><label>Brief type<select name="report_type"><option value="executive">Executive</option><option value="ciso">CISO</option><option value="compliance">Compliance</option><option value="insurance">Insurance context</option></select></label><label class="tmx-field-wide">Optional focus<input name="custom_focus" maxlength="500" placeholder="A customer-safe topic to emphasize"></label><div class="tmx-form-actions tmx-field-wide"><button class="tmx-button" type="submit">Generate SPOTLIGHT Brief</button><span data-spotlight-message></span></div></form></section>
-        <section class="tmx-panel"><div class="tmx-panel-header"><h2>Historical briefs</h2><span class="tmx-status">Generated snapshots</span></div><div class="tmx-panel-body">${historyRows || '<div class="tmx-empty">No historical briefs recorded.</div>'}</div></section>`;
-      host.querySelector('[data-spotlight-generate]')?.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const values = new FormData(event.currentTarget);
-        const message = host.querySelector('[data-spotlight-message]');
-        message.textContent = 'Generating from current canonical posture&hellip;';
-        try {
-          await api('/api/spotlight/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report_type: values.get('report_type'), custom_focus: values.get('custom_focus') }) });
-          await renderSpotlightRoute(host);
-        } catch (error) { message.textContent = error.message; }
-      });
-    } catch (error) { host.innerHTML = `<div class="tmx-error"><h2>SPOTLIGHT could not be loaded</h2><p>${escapeHtml(error.message)}</p></div>`; }
+    }
   }
 
   function renderCurrentRoute() {
@@ -2251,6 +2439,7 @@
     if (path === '/sss-intake') renderSssRoute(host);
     if (path === '/packages') renderPackagesRoute(host);
     if (path === '/vdp-queue') renderVdpQueueRoute(host);
+    if (path === '/assets') renderAssetsRoute(host);
   }
 
   function reconcile() {
@@ -2259,6 +2448,7 @@
     ensureNavigation();
     decorateSynthesisPanel();
     decorateVdp();
+    decorateScout();
     renderCurrentRoute();
   }
 

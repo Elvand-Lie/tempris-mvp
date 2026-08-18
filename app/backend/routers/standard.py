@@ -256,12 +256,12 @@ def _get_live_advisories(db: Session, tenant_id: str) -> dict:
             f"{p0_count} confirmed critical customer exposures require remediation review. "
             f"{ransomware_count} confirmed exposures are ransomware-linked."
         )
-        advisories["MAS-TRM-11.1.1"] = {"level": "critical", "message": patch_msg}
-        advisories["IM8A-AM-3"] = {"level": "critical", "message": patch_msg}
-        advisories["NIST-PR.PS-1"] = {"level": "warning", "message": patch_msg}
-        advisories["PCI-6.3.3"] = {"level": "warning", "message": f"{p0_count} critical CVEs may exceed PCI patching SLA."}
-        advisories["ISO-A.8.8"] = {"level": "warning", "message": f"{p0_count} critical vulnerabilities require management attention."}
-        advisories["CT-PRO-3"] = {"level": "warning", "message": f"{p0_count} tracked P0 findings require review."}
+        advisories["MAS-TRM-11.1.1"] = {"level": "critical", "message": patch_msg, "type": "confirmed_customer_exposure", "confirmed_count": p0_count}
+        advisories["IM8A-AM-3"] = {"level": "critical", "message": patch_msg, "type": "confirmed_customer_exposure", "confirmed_count": p0_count}
+        advisories["NIST-PR.PS-1"] = {"level": "warning", "message": patch_msg, "type": "confirmed_customer_exposure", "confirmed_count": p0_count}
+        advisories["PCI-6.3.3"] = {"level": "warning", "message": f"{p0_count} confirmed critical CVEs may exceed PCI patching SLA.", "type": "confirmed_customer_exposure", "confirmed_count": p0_count}
+        advisories["ISO-A.8.8"] = {"level": "warning", "message": f"{p0_count} confirmed critical vulnerabilities require management attention.", "type": "confirmed_customer_exposure", "confirmed_count": p0_count}
+        advisories["CT-PRO-3"] = {"level": "warning", "message": f"{p0_count} confirmed tracked P0 findings require review.", "type": "confirmed_customer_exposure", "confirmed_count": p0_count}
 
     # ── Vulnerability Scanning Controls ──
     if has_recent_scan:
@@ -962,12 +962,23 @@ def generate_incident_report(
     ]
     confirmed_by_finding = {}
     for finding, asset, link in confirmed_rows:
+        intel = None
+        try:
+            from services.cve_intelligence import resolve_vulnerability_intelligence
+            intel = resolve_vulnerability_intelligence(finding, db)
+        except Exception:
+            pass
+        is_rw = bool(finding.ransomware or (intel and intel.is_ransomware))
+        is_kev = bool(finding.cisa_kev or (intel and intel.is_cisa_kev))
+        cve_val = (intel and intel.cve_id) or finding.cve or finding.cve_id
         entry = confirmed_by_finding.setdefault(finding.id, {
             "finding_id": finding.id,
-            "cve": finding.cve or finding.cve_id,
+            "cve": cve_val,
+            "canonical_cve_id": (intel and intel.cve_id) or getattr(finding, "canonical_cve_id", None),
             "title": finding.title,
             "priority": finding.priority,
-            "ransomware_linked": bool(finding.ransomware),
+            "ransomware_linked": is_rw,
+            "cisa_kev": is_kev,
             "affected_assets": [],
         })
         entry["affected_assets"].append({

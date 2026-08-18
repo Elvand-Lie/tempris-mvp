@@ -55,3 +55,12 @@ artifacts/
 backups/
 *.db.bak_*
 *.migration-004-*.bak
+tmp/
+.tmp/
+.claude/
+.codex/
+CLAUDE.md
+AGENTS.md
+workDocs/
+
+

@@ -135,6 +135,7 @@ def build_customer_posture(db: Session, tenant_id: str) -> dict:
 
     score_rows: list[tuple[Finding, float]] = []
     unscoreable_ids: list[str] = []
+    resolved_intel = {}
     for finding in confirmed_findings:
         try:
             score_rows.append((finding, float(calculate_finding_tes(
@@ -142,6 +143,12 @@ def build_customer_posture(db: Session, tenant_id: str) -> dict:
             ))))
         except (KeyError, TypeError, ValueError):
             unscoreable_ids.append(finding.id)
+
+        try:
+            from services.cve_intelligence import resolve_vulnerability_intelligence
+            resolved_intel[finding.id] = resolve_vulnerability_intelligence(finding, db)
+        except Exception:
+            pass
     aggregate_tes = (
         round(sum(score for _, score in score_rows) / len(score_rows), 2)
         if score_rows else None
@@ -160,6 +167,18 @@ def build_customer_posture(db: Session, tenant_id: str) -> dict:
     ]
     severities = {row.id: _severity(row) for row in confirmed_findings}
 
+    def _is_finding_ransomware(row: Finding) -> bool:
+        if bool(row.ransomware):
+            return True
+        intel = resolved_intel.get(row.id)
+        return bool(intel and intel.is_ransomware)
+
+    def _is_finding_cisa_kev(row: Finding) -> bool:
+        if bool(row.cisa_kev):
+            return True
+        intel = resolved_intel.get(row.id)
+        return bool(intel and intel.is_cisa_kev)
+
     def queue_item(row: Finding) -> dict:
         suggested = candidates.get(row.id, [])
         return {
@@ -174,6 +193,8 @@ def build_customer_posture(db: Session, tenant_id: str) -> dict:
             "candidate_assets": suggested,
         }
 
+    cisa_kev_finding_ids = sorted(row.id for row in confirmed_findings if _is_finding_cisa_kev(row))
+
     return {
         "scope_version": SCOPE_VERSION,
         "scope": "tenant_confirmed_customer_exposure",
@@ -185,7 +206,7 @@ def build_customer_posture(db: Session, tenant_id: str) -> dict:
         "confirmed_asset_count": len({asset.id for _, asset, _ in canonical_rows}),
         "confirmed_critical_count": sum(severities[row.id] == "critical" for row in confirmed_findings),
         "confirmed_high_count": sum(severities[row.id] == "high" for row in confirmed_findings),
-        "confirmed_ransomware_linked_count": sum(bool(row.ransomware) for row in confirmed_findings),
+        "confirmed_ransomware_linked_count": sum(_is_finding_ransomware(row) for row in confirmed_findings),
         "needs_classification_count": len(needs_classification),
         "suggested_match_count": sum(bool(candidates.get(row.id)) for row in needs_classification),
         "unclassified_intake_count": sum(not candidates.get(row.id) for row in needs_classification),
@@ -204,6 +225,6 @@ def build_customer_posture(db: Session, tenant_id: str) -> dict:
         "mapping_queue_total": len(needs_classification),
         "confirmed_finding_ids": sorted(row.id for row in confirmed_findings),
         "confirmed_link_pairs": sorted([list(pair) for pair in confirmed_pairs]),
-        "asset_linked_cisa_kev_ids": sorted(row.id for row in confirmed_findings if row.cisa_kev),
-        "asset_linked_cisa_kev_count": sum(bool(row.cisa_kev) for row in confirmed_findings),
+        "asset_linked_cisa_kev_ids": cisa_kev_finding_ids,
+        "asset_linked_cisa_kev_count": len(cisa_kev_finding_ids),
     }

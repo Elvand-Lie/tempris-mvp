@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -70,8 +73,32 @@ def _number_0_to_10(value: object) -> float | None:
     return number if 0.0 <= number <= 10.0 else None
 
 
-def _is_cve_finding(finding: dict) -> bool:
-    return str(finding.get("cve") or finding.get("cve_id") or "").upper().startswith("CVE-")
+def _finding_dict(finding: dict | Any) -> dict:
+    if isinstance(finding, dict):
+        return finding
+    return {
+        "id": getattr(finding, "id", None),
+        "canonical_cve_id": getattr(finding, "canonical_cve_id", None),
+        "cve": getattr(finding, "cve", None),
+        "cve_id": getattr(finding, "cve_id", None),
+        "title": getattr(finding, "title", None),
+        "vendor": getattr(finding, "vendor", None),
+        "product": getattr(finding, "product", None),
+        "cvss": getattr(finding, "cvss", None),
+        "priority": getattr(finding, "priority", None),
+        "status": getattr(finding, "status", None),
+        "cisa_kev": getattr(finding, "cisa_kev", None),
+        "ransomware": getattr(finding, "ransomware", None),
+        "cve_context": getattr(finding, "cve_context", None),
+        "raw_inputs": getattr(finding, "raw_inputs", None),
+        "sss_data": getattr(finding, "sss_data", None),
+        "asset_data": getattr(finding, "asset_data", None),
+    }
+
+
+def _is_cve_finding(finding: dict | Any) -> bool:
+    f_dict = _finding_dict(finding)
+    return str(f_dict.get("cve") or f_dict.get("cve_id") or "").upper().startswith("CVE-")
 
 
 def _context_score(context: dict, key: str) -> tuple[float | None, dict]:
@@ -88,13 +115,14 @@ def _context_score(context: dict, key: str) -> tuple[float | None, dict]:
     }
 
 
-def _nuclei_evidence_present(db, tenant_id: str, finding: dict) -> bool:
+def _nuclei_evidence_present(db, tenant_id: str, finding: dict | Any) -> bool:
     """Use only a recorded successful Nuclei match, never port/banner observations."""
     from models import ScanFinding
     from sqlalchemy import func, or_
 
-    clauses = [ScanFinding.normalized_finding_id == finding.get("id")]
-    cve = str(finding.get("cve") or finding.get("cve_id") or "").upper()
+    f_dict = _finding_dict(finding)
+    clauses = [ScanFinding.normalized_finding_id == f_dict.get("id")]
+    cve = str(f_dict.get("cve") or f_dict.get("cve_id") or "").upper()
     if cve:
         clauses.append(func.upper(ScanFinding.cve_id) == cve)
     rows = db.query(ScanFinding).filter(
@@ -108,24 +136,29 @@ def _nuclei_evidence_present(db, tenant_id: str, finding: dict) -> bool:
     )
 
 
-def get_live_cve_tes_context(finding: dict, *, db, tenant_id: str) -> tuple[TESInputs, dict]:
+def get_live_cve_tes_context(finding: dict | Any, *, db, tenant_id: str) -> tuple[TESInputs, dict]:
     """Build CVE TES inputs from current tenant-owned data, never seed inputs."""
     if not _is_cve_finding(finding):
         raise ValueError("CVE TES context requires an exact CVE finding")
-    cvss = _number_0_to_10(finding.get("cvss"))
+
+    f_dict = _finding_dict(finding)
+    from services.cve_intelligence import resolve_vulnerability_intelligence
+
+    intel = resolve_vulnerability_intelligence(finding, db)
+    cvss = _number_0_to_10(intel.cvss_score)
     if cvss is None:
         raise ValueError("CVE finding has no valid stored CVSS metadata")
 
     from services.exposure_links import active_asset_map, confirmed_asset_ids_by_finding
 
     assets = active_asset_map(db, tenant_id)
-    confirmed_ids = confirmed_asset_ids_by_finding(db, tenant_id, assets).get(finding.get("id"), set())
+    confirmed_ids = confirmed_asset_ids_by_finding(db, tenant_id, assets).get(f_dict.get("id"), set())
     linked_assets = [assets[asset_id] for asset_id in confirmed_ids if asset_id in assets]
     if not linked_assets:
         raise ValueError("CVE finding has no confirmed active customer asset")
     asset_score = max(_ASSET_CRITICALITY_VALUES.get((asset.criticality or "medium").lower(), 5.0) for asset in linked_assets)
 
-    context = dict(finding.get("cve_context") or {})
+    context = dict(f_dict.get("cve_context") or {})
     business_impact, business_source = _context_score(context, "business_impact")
     if business_impact is None:
         business_impact = _NEUTRAL_UNASSESSED_BUSINESS_IMPACT
@@ -133,22 +166,23 @@ def get_live_cve_tes_context(finding: dict, *, db, tenant_id: str) -> tuple[TESI
 
     exploitability, exploit_source = _context_score(context, "exploitability")
     threat_activity, threat_source = _context_score(context, "threat_actor_activity")
-    ransomware = bool(finding.get("ransomware"))
-    kev = bool(finding.get("cisa") or finding.get("cisa_kev"))
+    ransomware = bool(intel.is_ransomware)
+    kev = bool(intel.is_cisa_kev)
+    last_verified = intel.kev_date_added or f_dict.get("updated_at") or f_dict.get("dateAdded")
     if exploitability is None:
         if ransomware:
-            exploitability, exploit_source = 10.0, {"source": "ransomware_linked_intelligence", "reason": "Recorded ransomware-linked exploitation intelligence", "last_verified_at": finding.get("updated_at") or finding.get("dateAdded")}
+            exploitability, exploit_source = 10.0, {"source": "ransomware_linked_intelligence", "reason": "Recorded ransomware-linked exploitation intelligence", "last_verified_at": last_verified}
         elif kev:
-            exploitability, exploit_source = 8.0, {"source": "cisa_kev", "reason": "CISA Known Exploited Vulnerabilities membership", "last_verified_at": finding.get("updated_at") or finding.get("dateAdded")}
-        elif _nuclei_evidence_present(db, tenant_id, finding):
+            exploitability, exploit_source = 8.0, {"source": "cisa_kev", "reason": "CISA Known Exploited Vulnerabilities membership", "last_verified_at": last_verified}
+        elif _nuclei_evidence_present(db, tenant_id, f_dict):
             exploitability, exploit_source = 7.0, {"source": "nuclei_match", "reason": "Recorded successful Nuclei vulnerability evidence", "last_verified_at": None}
         else:
             exploitability, exploit_source = 0.0, {"source": "unknown_no_evidence", "reason": "No recorded exploit evidence", "last_verified_at": None}
     if threat_activity is None:
         if ransomware:
-            threat_activity, threat_source = 10.0, {"source": "ransomware_linked_intelligence", "reason": "Recorded ransomware-linked threat activity", "last_verified_at": finding.get("updated_at") or finding.get("dateAdded")}
+            threat_activity, threat_source = 10.0, {"source": "ransomware_linked_intelligence", "reason": "Recorded ransomware-linked threat activity", "last_verified_at": last_verified}
         elif kev:
-            threat_activity, threat_source = 8.0, {"source": "cisa_kev", "reason": "CISA Known Exploited Vulnerabilities membership", "last_verified_at": finding.get("updated_at") or finding.get("dateAdded")}
+            threat_activity, threat_source = 8.0, {"source": "cisa_kev", "reason": "CISA Known Exploited Vulnerabilities membership", "last_verified_at": last_verified}
         else:
             threat_activity, threat_source = 0.0, {"source": "unknown_no_evidence", "reason": "No recorded threat-activity evidence", "last_verified_at": None}
 
@@ -163,6 +197,7 @@ def get_live_cve_tes_context(finding: dict, *, db, tenant_id: str) -> tuple[TESI
         "exploitability": exploit_source,
         "threat_actor_activity": threat_source,
         "asset_criticality": {"source": "confirmed_active_asset", "asset_count": len(linked_assets)},
+        "vulnerability_intelligence": intel.to_dict(),
     }
 
 
@@ -184,9 +219,16 @@ def recalculate_open_cve_findings(db, tenant_id: str, *, actor_id: str | None = 
         if finding.id not in confirmed_ids or not is_open(finding):
             continue
         serialized = {
-            "id": finding.id, "cve": finding.cve, "cve_id": finding.cve_id, "cvss": finding.cvss,
-            "cisa": finding.cisa_kev, "ransomware": finding.ransomware,
-            "cve_context": finding.cve_context or {}, "updated_at": finding.updated_at,
+            "id": finding.id,
+            "canonical_cve_id": getattr(finding, "canonical_cve_id", None),
+            "cve": finding.cve,
+            "cve_id": finding.cve_id,
+            "cvss": finding.cvss,
+            "cisa": finding.cisa_kev,
+            "cisa_kev": finding.cisa_kev,
+            "ransomware": finding.ransomware,
+            "cve_context": finding.cve_context or {},
+            "updated_at": finding.updated_at,
             "dateAdded": finding.date_added,
         }
         if not _is_cve_finding(serialized):
@@ -247,9 +289,10 @@ def decision_from_tes(score: float) -> str:
     return "DEFER"
 
 
-def public_decision_for_finding(finding: dict, score: float) -> str:
+def public_decision_for_finding(finding: dict | Any, score: float) -> str:
     """Return the public EDIP action without leaking modifier internals."""
-    sss = finding.get("sss_data") or {}
+    f_dict = _finding_dict(finding)
+    sss = f_dict.get("sss_data") or {}
     engine_decision = str(sss.get("engine_decision") or "").upper()
     if engine_decision in {
         "ESCALATE", "PATCH", "INVESTIGATE", "DEFER", "COMPENSATING_CONTROL"
@@ -260,9 +303,10 @@ def public_decision_for_finding(finding: dict, score: float) -> str:
     return decision_from_tes(score)
 
 
-def calculate_finding_tes(finding: dict, *, db=None, tenant_id: str | None = None) -> float:
+def calculate_finding_tes(finding: dict | Any, *, db=None, tenant_id: str | None = None) -> float:
     """Calculate public TES for either CVE/CVSS or non-CVE/SSS findings."""
-    sss = finding.get("sss_data") or {}
+    f_dict = _finding_dict(finding)
+    sss = f_dict.get("sss_data") or {}
     scoring = sss.get("scoring") or {}
     if not _is_cve_finding(finding):
         if db is not None and tenant_id:
@@ -275,12 +319,21 @@ def calculate_finding_tes(finding: dict, *, db=None, tenant_id: str | None = Non
     return calculate_tes(inputs).total_score
 
 
-def public_severity(finding: dict) -> dict:
+def public_severity(finding: dict | Any, *, db=None) -> dict:
     """Return the inherent severity band, separate from TES priority."""
-    sss = finding.get("sss_data") or {}
+    f_dict = _finding_dict(finding)
+    sss = f_dict.get("sss_data") or {}
     scoring = sss.get("scoring") or {}
     is_sss = not _is_cve_finding(finding)
-    raw_score = scoring.get("base_severity") if is_sss else finding.get("cvss")
+    if is_sss:
+        raw_score = scoring.get("base_severity")
+    elif db is not None:
+        from services.cve_intelligence import resolve_vulnerability_intelligence
+        intel = resolve_vulnerability_intelligence(finding, db)
+        raw_score = intel.cvss_score
+    else:
+        raw_score = f_dict.get("cvss")
+
     try:
         score = float(raw_score) if raw_score is not None else 0.0
     except (TypeError, ValueError):

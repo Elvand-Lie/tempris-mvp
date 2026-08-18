@@ -3,11 +3,12 @@ THREAT-T01: Versioned Idempotent Threat Importer.
 Parses, validates, and imports threat-packs into generic database models with dry-run support.
 """
 from sqlalchemy.orm import Session
-from models import Finding, FindingRelationship, FindingSource, FindingControl, AuditLog
+from models import CanonicalVulnerability, Finding, FindingRelationship, FindingSource, FindingControl, AuditLog
 from routers.audit import append_to_audit_log_db, AuditEntry
+from services.cve_intelligence import validate_and_normalize_cve
 from datetime import datetime, timedelta, timezone
 
-def import_threat_pack(db: Session, pack_data: dict, dry_run: bool = False, requested_by: str = "system") -> dict:
+def import_threat_pack(db: Session, pack_data: dict, dry_run: bool = False, requested_by: str = "system:threat-importer") -> dict:
     pack_name = pack_data.get("pack_name")
     version = pack_data.get("version", "1.0.0")
     
@@ -77,6 +78,25 @@ def import_threat_pack(db: Session, pack_data: dict, dry_run: bool = False, requ
     # 2. Execution (with deduplication)
     imported_findings_count = 0
     for vf in validated_findings:
+        # Check and normalize CVE
+        raw_cve = vf.get("cve")
+        canonical_cve = None
+        if raw_cve:
+            try:
+                canonical_cve = validate_and_normalize_cve(raw_cve)
+                canon = db.query(CanonicalVulnerability).filter(CanonicalVulnerability.cve_id == canonical_cve).first()
+                if canon is None:
+                    canon = CanonicalVulnerability(
+                        cve_id=canonical_cve,
+                        status="unknown",
+                        description=vf.get("title") or vf.get("short_description"),
+                        description_source="THREAT_PACK_IMPORT",
+                    )
+                    db.add(canon)
+                    db.flush()
+            except ValueError:
+                canonical_cve = None
+
         # Check if already exists
         existing = db.query(Finding).filter(Finding.id == vf["id"]).first()
         if existing:
@@ -87,10 +107,13 @@ def import_threat_pack(db: Session, pack_data: dict, dry_run: bool = False, requ
             existing.status = vf["status"]
             existing.verification = vf["verification"]
             existing.source = source_tag
+            if canonical_cve and not existing.canonical_cve_id:
+                existing.canonical_cve_id = canonical_cve
         else:
             new_f = Finding(
                 id=vf["id"],
                 tenant_id=vf["tenant_id"],
+                canonical_cve_id=canonical_cve,
                 finding_type=vf["finding_type"],
                 subtype=vf["subtype"],
                 pipeline=vf["pipeline"],

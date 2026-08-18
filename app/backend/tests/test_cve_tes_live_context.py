@@ -150,3 +150,35 @@ def test_tenant_tes_uses_one_live_score_per_confirmed_cve_not_asset_occurrence(d
     assert posture["confirmed_open_exposure_count"] == 1
     assert posture["confirmed_exposure_link_count"] == 2
     assert posture["aggregate_tenant_tes"] == finding.score
+
+
+def test_cve_tes_uses_canonical_intelligence_when_present(db):
+    from models import CanonicalVulnerability, CisaKevEntry, VulnerabilityCvssAssessment
+
+    # Create canonical vulnerability and assessments
+    db.add(CanonicalVulnerability(
+        cve_id="CVE-2026-1000", status="published", description="Canonical Test Vuln", description_source="NVD"
+    ))
+    db.add(VulnerabilityCvssAssessment(
+        id="CVSS-CANON-1", cve_id="CVE-2026-1000", source="nvd@nist.gov", source_role="Primary",
+        cvss_version="3.1", vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        base_score=9.8, base_severity="CRITICAL",
+    ))
+    db.add(CisaKevEntry(
+        id="KEV-CVE-2026-1000", cve_id="CVE-2026-1000", vendor_project="Vendor",
+        product="Product", vulnerability_name="Name", date_added="2026-01-01",
+        known_ransomware_campaign_use="Known",
+    ))
+    db.commit()
+
+    finding, _ = _confirmed_cve(db, finding_id="F-CANON", canonical_cve_id="CVE-2026-1000", cvss=4.0, ransomware=False)
+    inputs, context = get_live_cve_tes_context(_as_dict(finding), db=db, tenant_id="tenant-a")
+
+    # Canonical 9.8 should override legacy 4.0
+    assert inputs.cvss == 9.8
+    # Canonical ransomware should override legacy False
+    assert inputs.exploitability == 10.0
+    assert inputs.threat_actor_activity == 10.0
+    assert context["vulnerability_intelligence"]["provenance_classification"] == "canonical_authoritative"
+    assert context["vulnerability_intelligence"]["has_canonical_data"] is True
+    assert context["vulnerability_intelligence"]["used_legacy_fallback"] is False

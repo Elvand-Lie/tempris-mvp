@@ -31,7 +31,7 @@ Current open, confirmed CVE findings are scored only by the server from authorit
 
 | Input | Current authority | Evidence and interpretation |
 |---|---|---|
-| CVSS | `Finding.cvss` for the exact stored CVE identifier | Canonical CVE metadata; never inferred from asset matching. |
+| CVSS | Canonical Intelligence Resolver (`services.cve_intelligence.resolve_vulnerability_intelligence`) | Deterministic selection from `VulnerabilityCvssAssessment` (4.0 > 3.1 > 3.0 > 2.0 -> Primary > Secondary -> latest source modification) with read-only fallback to `Finding.cvss` (`legacy_unprovenanced`). |
 | Asset criticality | Confirmed active same-tenant `AssetExposure` -> `Asset.criticality` | When one finding has several confirmed active assets, the highest recorded asset criticality is used for current context. Suggested and legacy links do not qualify. |
 | Business Impact | `Finding.cve_context.business_impact` | An authorised analyst records a 0-10 assessment and justification from SPECTRUM. If not assessed, the server uses its documented neutral context and labels it unassessed rather than analyst-confirmed. |
 | Exploitability | Explicit trusted evidence in the finding context, CISA KEV/ransomware flags, or a successful Nuclei vulnerability observation | Ports, banners, and technology fingerprints are not exploit evidence. |

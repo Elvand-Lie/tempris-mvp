@@ -57,6 +57,9 @@ report_backup="`$root/backups/reports/`$release.tar.gz"
 migration_report="`$root/backups/migrations/`$release-migration-008.json"
 migration_009_report="`$root/backups/migrations/`$release-migration-009.txt"
 migration_010_report="`$root/backups/migrations/`$release-migration-010.txt"
+migration_011_report="`$root/backups/migrations/`$release-migration-011.txt"
+migration_012_report="`$root/backups/migrations/`$release-migration-012.txt"
+migration_013_report="`$root/backups/migrations/`$release-migration-013.txt"
 stage="`$(mktemp -d)"
 restore_stage=''
 source_changed=0
@@ -90,7 +93,7 @@ rollback() {
 }
 trap rollback ERR
 
-mkdir -p "`$(dirname "`$source_backup")" "`$(dirname "`$db_backup")" "`$(dirname "`$report_backup")" "`$(dirname "`$migration_report")" "`$(dirname "`$migration_009_report")" "`$(dirname "`$migration_010_report")"
+mkdir -p "`$(dirname "`$source_backup")" "`$(dirname "`$db_backup")" "`$(dirname "`$report_backup")" "`$(dirname "`$migration_report")" "`$(dirname "`$migration_009_report")" "`$(dirname "`$migration_010_report")" "`$(dirname "`$migration_011_report")" "`$(dirname "`$migration_012_report")" "`$(dirname "`$migration_013_report")"
 tar -C "`$root" -czf "`$source_backup" --exclude='app/deploy/.env' --exclude='app/freellmapi/.env' --exclude='app/backend/data' app
 tar -tzf "`$source_backup" >/dev/null
 tar -C "`$stage" -xzf "`$archive"
@@ -155,6 +158,33 @@ docker run --rm --network host -u 0 \
   python /migrations/010_live_cve_tes_context.py --database-url-env > "`$migration_010_report"
 test -s "`$migration_010_report"
 
+# 011 creates the canonical vulnerability spine tables
+docker run --rm --network host -u 0 \
+  --env-file "`$root/app/deploy/.env" \
+  -v "`$stage/app/backend:/staged:ro" \
+  -v "`$stage/scripts/migrations:/migrations:ro" \
+  -w /staged "`$backend_image" \
+  python /migrations/011_canonical_vulnerability_spine.py --database-url-env > "`$migration_011_report"
+test -s "`$migration_011_report"
+
+# 012 adds canonical_cve_id linkage to findings
+docker run --rm --network host -u 0 \
+  --env-file "`$root/app/deploy/.env" \
+  -v "`$stage/app/backend:/staged:ro" \
+  -v "`$stage/scripts/migrations:/migrations:ro" \
+  -w /staged "`$backend_image" \
+  python /migrations/012_finding_canonical_cve_linkage.py --database-url-env > "`$migration_012_report"
+test -s "`$migration_012_report"
+
+# 013 adds asset_scan_authorizations and scan_jobs target provenance
+docker run --rm --network host -u 0 \
+  --env-file "`$root/app/deploy/.env" \
+  -v "`$stage/app/backend:/staged:ro" \
+  -v "`$stage/scripts/migrations:/migrations:ro" \
+  -w /staged "`$backend_image" \
+  python /migrations/013_asset_scan_authorizations.py --database-url-env --apply > "`$migration_013_report"
+test -s "`$migration_013_report"
+
 source_changed=1
 rsync -a --delete --exclude='deploy/.env' --exclude='freellmapi/.env' --exclude='backend/data/' "`$stage/app/" "`$root/app/"
 docker cp "`$stage/app/backend/data/v62_debrief_findings.json" tempris_backend:/app/data/v62_debrief_findings.json
@@ -181,6 +211,24 @@ docker run --rm --network host -u 0 \
   -v "`$stage/scripts/migrations:/migrations:ro" \
   -w /staged "`$backend_image" \
   python /migrations/010_live_cve_tes_context.py --database-url-env --dry-run >/dev/null
+docker run --rm --network host -u 0 \
+  --env-file "`$root/app/deploy/.env" \
+  -v "`$stage/app/backend:/staged:ro" \
+  -v "`$stage/scripts/migrations:/migrations:ro" \
+  -w /staged "`$backend_image" \
+  python /migrations/011_canonical_vulnerability_spine.py --database-url-env --dry-run >/dev/null
+docker run --rm --network host -u 0 \
+  --env-file "`$root/app/deploy/.env" \
+  -v "`$stage/app/backend:/staged:ro" \
+  -v "`$stage/scripts/migrations:/migrations:ro" \
+  -w /staged "`$backend_image" \
+  python /migrations/012_finding_canonical_cve_linkage.py --database-url-env --dry-run >/dev/null
+docker run --rm --network host -u 0 \
+  --env-file "`$root/app/deploy/.env" \
+  -v "`$stage/app/backend:/staged:ro" \
+  -v "`$stage/scripts/migrations:/migrations:ro" \
+  -w /staged "`$backend_image" \
+  python /migrations/013_asset_scan_authorizations.py --database-url-env --dry-run >/dev/null
 printf '%s\n' '$commit' > "`$root/app/REVISION"
 
 source_changed=0

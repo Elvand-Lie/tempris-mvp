@@ -17,7 +17,8 @@ import logging
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from services.database import SessionLocal, init_db
-from models import Finding
+from models import CanonicalVulnerability, Finding
+from services.cve_intelligence import validate_and_normalize_cve
 from services.tes_engine import calculate_sss_tes, priority_from_tes
 from services.sss_contract import PUBLIC_SSS_FIELDS
 
@@ -137,12 +138,29 @@ def seed_poc_findings(db, existing_ids: set) -> set:
         fid = f"F-{2000 + idx}"
         if fid in existing_ids:
             continue
-        cve_id = vuln.get('cve_id', 'Unknown')
-        if cve_id != 'Unknown':
-            poc_cves.add(cve_id)
+        raw_cve_id = vuln.get('cve_id', 'Unknown')
+        canonical_cve = None
+        if raw_cve_id != 'Unknown':
+            try:
+                canonical_cve = validate_and_normalize_cve(raw_cve_id)
+                poc_cves.add(canonical_cve)
+                canon = db.query(CanonicalVulnerability).filter(CanonicalVulnerability.cve_id == canonical_cve).first()
+                if canon is None:
+                    canon = CanonicalVulnerability(
+                        cve_id=canonical_cve,
+                        status="published",
+                        description=vuln.get('name', 'Unknown'),
+                        description_source="POC_SEED",
+                    )
+                    db.add(canon)
+                    db.flush()
+            except ValueError:
+                canonical_cve = None
 
         db.add(Finding(
-            id=fid, cve=cve_id,
+            id=fid,
+            cve=raw_cve_id,
+            canonical_cve_id=canonical_cve,
             title=vuln.get('name', 'Unknown'),
             vendor="Demo Target",
             product=vuln.get('template_id', 'Unknown'),
@@ -184,7 +202,24 @@ def seed_kev_findings(db, existing_ids: set, poc_cves: set, asset_map: dict):
     mapped = 0
     for idx, vuln in enumerate(vulns):
         cve = vuln.get('cveID', 'Unknown')
-        if cve in poc_cves:
+        canonical_cve = None
+        if cve != 'Unknown':
+            try:
+                canonical_cve = validate_and_normalize_cve(cve)
+                canon = db.query(CanonicalVulnerability).filter(CanonicalVulnerability.cve_id == canonical_cve).first()
+                if canon is None:
+                    canon = CanonicalVulnerability(
+                        cve_id=canonical_cve,
+                        status="published",
+                        description=vuln.get('shortDescription') or vuln.get('vulnerabilityName'),
+                        description_source="CISA-KEV",
+                    )
+                    db.add(canon)
+                    db.flush()
+            except ValueError:
+                canonical_cve = None
+
+        if canonical_cve and canonical_cve in poc_cves:
             continue
         fid = f"F-{1000 + idx}" if idx < 1000 else f"F-1{idx:04d}"
         if fid in existing_ids:
@@ -205,7 +240,9 @@ def seed_kev_findings(db, existing_ids: set, poc_cves: set, asset_map: dict):
                 priority = "P0" if cvss >= 9.0 else ("P1" if cvss >= 7.0 else "P2")
 
         db.add(Finding(
-            id=fid, cve=cve,
+            id=fid,
+            cve=cve,
+            canonical_cve_id=canonical_cve,
             title=vuln.get('vulnerabilityName', 'Unknown'),
             vendor=vendor, product=product,
             cvss=cvss, priority=priority,
@@ -324,6 +361,24 @@ def _seed_threat_pack(db, existing_ids: set, filename: str, id_base: int, label:
         cisa_kev = tf.get('cisa_kev', finding_type == "CVE" and tf.get("source") == "CVE_KEV")
         source = "kev" if cisa_kev else ("cve" if finding_type == "CVE" else "sss")
         cvss = base_severity
+
+        canonical_cve = None
+        if finding_key:
+            try:
+                canonical_cve = validate_and_normalize_cve(finding_key)
+                canon = db.query(CanonicalVulnerability).filter(CanonicalVulnerability.cve_id == canonical_cve).first()
+                if canon is None:
+                    canon = CanonicalVulnerability(
+                        cve_id=canonical_cve,
+                        status="published" if cisa_kev else "unknown",
+                        description=tf.get('title') or tf.get('description'),
+                        description_source=f"THREAT_PACK_{label.upper()}",
+                    )
+                    db.add(canon)
+                    db.flush()
+            except ValueError:
+                canonical_cve = None
+
         raw_inputs = {
             "cvss": cvss,
             "exploitability": 10.0,
@@ -338,6 +393,7 @@ def _seed_threat_pack(db, existing_ids: set, filename: str, id_base: int, label:
             sub_class=tf.get("sub_class"),
             decision=tf.get("engine_decision"),
             cve=finding_key,
+            canonical_cve_id=canonical_cve,
             title=tf.get('title', 'Unknown'),
             vendor=tf.get('affected_ecosystem', 'Threat Intel'),
             product=', '.join(tf.get('attack_vectors', [])),

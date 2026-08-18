@@ -354,6 +354,7 @@ def get_ciso_summary(
         },
     }
     append_to_audit_log_db(db, AuditEntry(
+        user=user.get("sub") or "system:ciso",
         action='CISO_SUMMARY_VIEWED',
         module='CISO',
         detail='Viewed tenant-scoped executive security summary',

@@ -1,75 +1,80 @@
+"""SCOUT Scanner Router — Hardened Production Nuclei + Nmap Integration.
+
+Provides asset-bound vulnerability scanning via Nuclei templates and Nmap port discovery.
+Enforces:
+- Global feature flag: SCOUT_ACTIVE_SCANNING_ENABLED
+- Strict asset binding and approved AssetScanAuthorization requirement
+- SSRF prevention, non-global IP rejection, DNS rebinding validation
+- Subprocess timeout, kill fallback, bounded buffer capture, and resource cleanup
+- Deterministic observation-to-finding normalization
 """
-SCOUT Scanner Router — Production Nuclei + Nmap Integration
-Provides real vulnerability scanning via Nuclei templates and Nmap port discovery.
-Falls back to built-in TCP port scanner if Nuclei is unavailable.
-"""
-from fastapi import APIRouter, Request, Depends, HTTPException
-from pydantic import BaseModel
-from routers.audit import append_to_audit_log, AuditEntry
-from routers.auth import get_auth_context, get_current_user, require_role
+
+from __future__ import annotations
+
 import asyncio
-import subprocess
-import json
-import socket
-import shutil
 import ipaddress
+import json
 import logging
+import os
+import shutil
+import socket
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 from uuid import uuid4
-from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
+
+from models import Asset, AssetScanAuthorization, ScanFinding, ScanJob
+from routers.audit import AuditEntry, append_to_audit_log
+from routers.auth import get_auth_context, get_current_user, require_role
 from services.database import get_db
-from models import ScanFinding, ScanJob
+from services.entitlements import require_module
 from services.operational_events import record_operational_event
 from services.scan_normalizer import normalize_observation, normalize_target
+from services.target_policy import (
+    clean_target_input,
+    is_ip_globally_routable,
+    validate_and_resolve_target,
+)
+
 
 logger = logging.getLogger("tempris.scanner")
 
-from services.entitlements import require_module
-
 router = APIRouter(dependencies=[Depends(require_module("SCOUT"))])
 
-# ── SSRF Protection: blocked IP ranges ────────────────────────────────────────
+
+def _is_active_scanning_enabled() -> bool:
+    return os.environ.get("SCOUT_ACTIVE_SCANNING_ENABLED", "false").strip().lower() in {"true", "1", "yes"}
+
+
+def _is_raw_diagnostic_enabled() -> bool:
+    return os.environ.get("SCOUT_RAW_DIAGNOSTIC_ENABLED", "false").strip().lower() in {"true", "1", "yes"}
+
+
+def _ensure_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+# ── SSRF Protection Helper (Legacy & Direct) ──────────────────────────────────
 
 def _is_blocked_target(host: str) -> bool:
-    """Check if a target is a blocked (internal) IP address."""
-    # Strip brackets if IPv6
-    clean_host = host.replace("[", "").replace("]", "")
-    
-    def is_blocked_ip(ip_obj) -> bool:
-        if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_multicast or ip_obj.is_unspecified:
-            return True
-        # Check for IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1)
-        if getattr(ip_obj, "ipv4_mapped", None):
-            mapped = ip_obj.ipv4_mapped
-            if mapped.is_private or mapped.is_loopback or mapped.is_link_local:
-                return True
-        return False
+    """Check if a target resolves to a private, loopback, link-local, or restricted IP."""
+    res = validate_and_resolve_target(host)
+    return not res.is_valid or not res.is_public_scannable
 
-    try:
-        raw_ip = ipaddress.ip_address(clean_host)
-        if is_blocked_ip(raw_ip):
-            return True
-    except ValueError:
-        pass
-
-    try:
-        resolved = socket.getaddrinfo(clean_host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-        for family, _, _, _, sockaddr in resolved:
-            ip = ipaddress.ip_address(sockaddr[0])
-            if is_blocked_ip(ip):
-                return True
-    except (socket.gaierror, ValueError):
-        return True
-    return False
 
 def _clean_host(target: str) -> str:
-    """Strip protocol and path from target string."""
-    host = target.replace("http://", "").replace("https://", "").split("/")[0]
-    if ":" in host and not host.startswith("["):
-        host = host.split(":")[0]
-    return host
+    return clean_target_input(target)
 
-# ── Nuclei Integration ────────────────────────────────────────────────────────
+
+# ── Scanner Binaries & Subprocess Execution ───────────────────────────────────
 
 NUCLEI_AVAILABLE = shutil.which("nuclei") is not None
 NMAP_AVAILABLE = shutil.which("nmap") is not None
@@ -82,35 +87,71 @@ SEVERITY_MAP = {
     "info": "Info",
 }
 
+MAX_CAPTURE_BYTES = 10 * 1024 * 1024  # 10 MB limit
+
+
+async def _execute_subprocess_safely(
+    cmd: list[str],
+    timeout_seconds: int,
+    max_output_bytes: int = MAX_CAPTURE_BYTES,
+) -> tuple[int, bytes, bytes]:
+    """Executes a subprocess with hard timeout, forced kill fallback, and bounded capture."""
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(),
+            timeout=timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+            await proc.wait()
+        except Exception:
+            pass
+        raise
+    except asyncio.CancelledError:
+        try:
+            proc.kill()
+            await proc.wait()
+        except Exception:
+            pass
+        raise
+
+    if len(stdout) > max_output_bytes:
+        stdout = stdout[:max_output_bytes]
+    if len(stderr) > max_output_bytes:
+        stderr = stderr[:max_output_bytes]
+
+    return (proc.returncode or 0, stdout, stderr)
+
+
+# ── Nuclei Scanner Execution ──────────────────────────────────────────────────
+
 async def _run_nuclei_scan(target: str, scan_id: str) -> list[dict]:
-    """Run Nuclei vulnerability scanner against a target.
-    Uses community templates for CVE detection, misconfigurations, and exposures.
-    """
+    """Run Nuclei vulnerability scanner with server-curated settings."""
     findings = []
     try:
         cmd = [
             "nuclei",
             "-target", target,
-            "-json",               # JSON output for structured parsing
-            "-silent",             # Suppress banner
+            "-json",
+            "-silent",
             "-no-color",
-            "-timeout", "10",      # Per-request timeout
+            "-timeout", "10",
             "-retries", "1",
-            "-rate-limit", "50",   # Requests per second
+            "-rate-limit", "50",
             "-severity", "critical,high,medium,low",
-            "-type", "http",       # Focus on HTTP-based checks
-            "-concurrency", "15",
+            "-type", "http",
+            "-concurrency", "10",
+            "-no-interactsh",
+            "-disable-update-check",
         ]
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=120  # 2 minute max scan time
-        )
+        _, stdout, stderr = await _execute_subprocess_safely(cmd, timeout_seconds=120)
 
         for line in stdout.decode("utf-8", errors="replace").strip().split("\n"):
             line = line.strip()
@@ -138,6 +179,8 @@ async def _run_nuclei_scan(target: str, scan_id: str) -> list[dict]:
                         "tags": info.get("tags", []),
                         "classification": info.get("classification", {}),
                         "reference": info.get("reference", []),
+                        "matcher_name": result.get("matcher-name", ""),
+                        "extracted_results": result.get("extracted-results", []),
                     },
                     "discovered_at": datetime.now(timezone.utc).isoformat(),
                 }
@@ -148,17 +191,19 @@ async def _run_nuclei_scan(target: str, scan_id: str) -> list[dict]:
         if stderr:
             err_text = stderr.decode("utf-8", errors="replace").strip()
             if err_text:
-                logger.warning(f"Nuclei stderr: {err_text[:500]}")
+                logger.warning("Nuclei stderr: %s", err_text[:500])
 
     except asyncio.TimeoutError:
-        logger.error(f"Nuclei scan timed out for {target}")
+        logger.error("Nuclei scan timed out for target %s", target)
+        raise
     except Exception as e:
-        logger.error(f"Nuclei scan error: {e}")
+        logger.error("Nuclei scan error: %s", e)
+        raise
 
     return findings
 
+
 def _extract_port(matched_at: str) -> int:
-    """Extract port number from Nuclei matched-at URL."""
     try:
         if "://" in matched_at:
             host_part = matched_at.split("://")[1].split("/")[0]
@@ -169,8 +214,8 @@ def _extract_port(matched_at: str) -> int:
         pass
     return 0
 
+
 def _extract_cve(info: dict) -> str:
-    """Extract CVE ID from Nuclei info classification."""
     classification = info.get("classification", {})
     cve_ids = classification.get("cve-id", [])
     if isinstance(cve_ids, list) and cve_ids:
@@ -179,13 +224,13 @@ def _extract_cve(info: dict) -> str:
         return cve_ids
     return ""
 
+
 def _build_detail(result: dict, info: dict) -> str:
-    """Build a human-readable detail string from Nuclei output."""
     parts = []
     desc = info.get("description", "")
     if desc:
         parts.append(desc[:300])
-    
+
     matched_at = result.get("matched-at", "")
     if matched_at:
         parts.append(f"Matched: {matched_at}")
@@ -201,31 +246,26 @@ def _build_detail(result: dict, info: dict) -> str:
     return " | ".join(parts) if parts else info.get("name", "Vulnerability detected")
 
 
-# ── Nmap Port Discovery ──────────────────────────────────────────────────────
+# ── Nmap Port Discovery Execution ─────────────────────────────────────────────
 
 async def _run_nmap_scan(target: str, scan_id: str) -> list[dict]:
-    """Run nmap for service/version detection on common ports."""
+    """Run nmap using TCP connect scan (-sT) on top ports with bounded timing."""
     findings = []
     try:
         cmd = [
-            "nmap", "-sV",          # Service version detection
-            "--top-ports", "100",   # Top 100 ports
-            "-T4",                  # Aggressive timing
-            "--open",               # Only open ports
+            "nmap",
+            "-sT",                  # TCP Connect scan (no CAP_NET_RAW / root required)
+            "-sV",                  # Service version detection
+            "--top-ports", "100",   # Bounded top 100 ports
+            "-T3",                  # Normal timing
+            "--open",               # Only report open ports
             "-oX", "-",             # XML output to stdout
             target,
         ]
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=90)
+        _, stdout, _ = await _execute_subprocess_safely(cmd, timeout_seconds=90)
         output = stdout.decode("utf-8", errors="replace")
 
-        # Parse nmap XML output
         import xml.etree.ElementTree as ET
         try:
             root = ET.fromstring(output)
@@ -263,11 +303,14 @@ async def _run_nmap_scan(target: str, scan_id: str) -> list[dict]:
             logger.error("Failed to parse nmap XML output")
 
     except asyncio.TimeoutError:
-        logger.error(f"Nmap scan timed out for {target}")
+        logger.error("Nmap scan timed out for %s", target)
+        raise
     except Exception as e:
-        logger.error(f"Nmap scan error: {e}")
+        logger.error("Nmap scan error: %s", e)
+        raise
 
     return findings
+
 
 DANGEROUS_PORTS = {
     21: "High", 23: "Critical", 25: "Medium", 110: "Medium", 135: "High",
@@ -277,8 +320,8 @@ DANGEROUS_PORTS = {
     11211: "Critical",
 }
 
+
 def _assess_port_risk(port: int, service: str) -> str:
-    """Assess risk level based on port number and service."""
     if port in DANGEROUS_PORTS:
         return DANGEROUS_PORTS[port]
     if service in ("telnet", "ftp", "rsh", "rlogin"):
@@ -307,8 +350,8 @@ PORT_RISK_MAP = {
     9092: {"service": "Kafka", "risk": "High", "detail": "Kafka broker exposed. May allow unauthorized message consumption."},
 }
 
+
 async def _run_builtin_scan(target: str, scan_id: str) -> list[dict]:
-    """Fallback TCP port scanner when Nuclei/Nmap are unavailable."""
     findings = []
     host_clean = _clean_host(target)
     common_ports = [21, 22, 23, 25, 80, 443, 3306, 5432, 6379, 8080, 9092, 27017]
@@ -345,8 +388,6 @@ async def _run_builtin_scan(target: str, scan_id: str) -> list[dict]:
     return findings
 
 
-# ── API Endpoints ─────────────────────────────────────────────────────────────
-
 async def _run_port_scan(target: str, scan_id: str) -> list[dict]:
     if NMAP_AVAILABLE:
         return await _run_nmap_scan(_clean_host(target), scan_id)
@@ -369,78 +410,232 @@ def _engines_for(scan_type: str) -> list[str]:
     return engines
 
 
-class ScanTarget(BaseModel):
-    target: str
-    scan_type: str = "full"  # "full" (nuclei+nmap), "ports" (nmap only), "quick" (nuclei fast)
+# ── Request Models ────────────────────────────────────────────────────────────
 
+class ScanTarget(BaseModel):
+    asset_id: Optional[str] = None
+    target: Optional[str] = None
+    scan_type: str = "full"  # "full", "ports", "quick"
+    engine: Optional[str] = None
+    profile: Optional[str] = "standard"
+
+
+class RawDiagnosticScanRequest(BaseModel):
+    target: str = Field(..., min_length=1, max_length=500)
+    scan_type: str = "quick"
+
+
+# ── Core Scan Execution Handler ───────────────────────────────────────────────
+
+@router.post("/run")
 @router.post("/scan")
 async def trigger_scan(
-    target: ScanTarget,
+    req: ScanTarget,
     request: Request,
     db: Session = Depends(get_db),
     user = Depends(require_role("Superadmin", "Admin", "Analyst")),
 ):
-    """Trigger a vulnerability scan against the target using Nuclei + Nmap.
-    
-    Scan types:
-    - full: Nuclei vulnerability detection + Nmap service discovery (recommended)
-    - ports: Nmap port/service scan only
-    - quick: Nuclei with fast templates only
+    """Trigger an authorized, asset-bound external attack-surface scan.
+
+    Enforces:
+    1. Global active scanning feature flag
+    2. Asset ownership and active status
+    3. Approved, non-expired AssetScanAuthorization
+    4. Target policy & immediate pre-execution DNS validation
+    5. Tenant and global concurrency limits
     """
-    if target.scan_type not in {"full", "ports", "quick"}:
-        raise HTTPException(status_code=422, detail="scan_type must be full, ports, or quick")
-    host_clean = _clean_host(target.target)
-    if _is_blocked_target(host_clean):
+    if not _is_active_scanning_enabled():
         raise HTTPException(
-            status_code=403,
-            detail="Scanning internal, private, or link-local IP addresses is prohibited."
+            status_code=503,
+            detail="Active scanning is disabled globally on this Tempris instance.",
         )
 
+    scan_type = req.scan_type or "full"
+    if scan_type not in {"full", "ports", "quick"}:
+        raise HTTPException(status_code=422, detail="scan_type must be full, ports, or quick")
+
     tenant_id = get_auth_context(user).tenant_id
-    scan_id = f"SCAN-{uuid4().hex[:20].upper()}"
     user_email = user.get("sub", "unknown")
-    all_findings = []
-    engines_used = _engines_for(target.scan_type)
+    now = datetime.now(timezone.utc)
+
+    # 1. Resolve Asset
+    asset: Optional[Asset] = None
+    if req.asset_id:
+        asset = db.query(Asset).filter(
+            Asset.id == req.asset_id,
+            Asset.tenant_id == tenant_id,
+        ).first()
+        if not asset:
+            raise HTTPException(status_code=404, detail=f"Asset {req.asset_id} not found")
+    elif req.target:
+        # Backward-compatibility fallback: resolve active asset matching target
+        cleaned_in = clean_target_input(req.target)
+        candidates = db.query(Asset).filter(
+            Asset.tenant_id == tenant_id,
+            Asset.status == "active",
+        ).all()
+        matched_candidates = [
+            a for a in candidates
+            if clean_target_input(a.hostname or "") == cleaned_in or clean_target_input(a.ip_address or "") == cleaned_in
+        ]
+        if len(matched_candidates) == 1:
+            asset = matched_candidates[0]
+        elif len(matched_candidates) > 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Target matches multiple assets. Explicit asset_id is required.",
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="No active asset found for the specified target. Register the asset and obtain scan authorization first.",
+            )
+    else:
+        raise HTTPException(status_code=400, detail="asset_id is required to trigger a scan.")
+
+    if asset.status != "active":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Asset {asset.id} is {asset.status}. Only active assets can be scanned.",
+        )
+
+    # 2. Verify Approved Scan Authorization
+    auth = db.query(AssetScanAuthorization).filter(
+        AssetScanAuthorization.tenant_id == tenant_id,
+        AssetScanAuthorization.asset_id == asset.id,
+        AssetScanAuthorization.status == "approved",
+    ).order_by(AssetScanAuthorization.approved_at.desc()).first()
+
+    if not auth:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Asset {asset.id} does not have an approved scan authorization. Request approval first.",
+        )
+
+    if auth.expires_at and _ensure_utc(auth.expires_at) < now:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Scan authorization for asset {asset.id} expired at {auth.expires_at.isoformat()}. Re-authorization required.",
+        )
+
+    # 3. Server-Derive Target & Validate against Policy
+    target_to_scan = auth.authorized_target
+    val_res = validate_and_resolve_target(target_to_scan)
+    if not val_res.is_valid or not val_res.is_public_scannable:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Target validation failed: {val_res.error}",
+        )
+
+    canonical_target = val_res.canonical_target
+
+    # If client also passed target, require exact match with authorized target
+    if req.target:
+        client_clean = clean_target_input(req.target)
+        if client_clean != canonical_target:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Provided target '{req.target}' does not match authorized target '{canonical_target}' for asset {asset.id}",
+            )
+
+    # 4. Concurrency and Cooldown Checks
+    running_tenant_jobs = db.query(ScanJob).filter(
+        ScanJob.tenant_id == tenant_id,
+        ScanJob.status.in_(["started", "running"]),
+    ).count()
+    if running_tenant_jobs >= 2:
+        raise HTTPException(
+            status_code=429,
+            detail="Tenant maximum concurrent scans (2) reached. Please wait for running scans to complete.",
+        )
+
+    global_running_jobs = db.query(ScanJob).filter(
+        ScanJob.status.in_(["started", "running"]),
+    ).count()
+    if global_running_jobs >= 5:
+        raise HTTPException(
+            status_code=429,
+            detail="System scanner concurrency limit reached. Please retry in a few moments.",
+        )
+
+    cooldown_cutoff = now - timedelta(seconds=30)
+    recent_job = db.query(ScanJob).filter(
+        ScanJob.tenant_id == tenant_id,
+        ScanJob.asset_id == asset.id,
+        ScanJob.started_at >= cooldown_cutoff,
+    ).first()
+    if recent_job and user.get("role") != "Superadmin":
+        raise HTTPException(
+            status_code=429,
+            detail=f"Asset {asset.id} was scanned recently. Please wait 30 seconds between scans of the same asset.",
+        )
+
+    # 5. Create ScanJob with Immutable Target Provenance
+    scan_id = f"SCAN-{uuid4().hex[:20].upper()}"
+    engines_used = _engines_for(scan_type)
+
     job = ScanJob(
         id=scan_id,
         tenant_id=tenant_id,
-        target=target.target,
-        normalized_target=normalize_target(target.target),
-        scan_type=target.scan_type,
+        asset_id=asset.id,
+        scan_authorization_id=auth.id,
+        authorized_canonical_target=canonical_target,
+        target_kind=val_res.target_kind,
+        resolved_ips=val_res.resolved_ips,
+        dns_resolved_at=val_res.dns_resolved_at or now,
+        initiating_user_id=user_email,
+        execution_origin="tempris_central_vps",
+        target=canonical_target,
+        normalized_target=normalize_target(canonical_target),
+        scan_type=scan_type,
         engines=engines_used,
         status="started",
         started_by=user_email,
-        authorization_context={"requested_by": user_email, "request_ip": request.client.host if request.client else None},
+        authorization_context={
+            "requested_by": user_email,
+            "request_ip": request.client.host if request.client else None,
+            "authorization_id": auth.id,
+            "authorized_target": auth.authorized_target,
+        },
     )
     db.add(job)
     record_operational_event(
-        db, tenant_id=tenant_id, event_type="scan.started",
-        resource_type="scan_job", resource_id=scan_id, source_module="SCOUT",
-        actor_id=user_email, correlation_id=scan_id,
-        metadata={"target": job.normalized_target, "engines": engines_used},
+        db,
+        tenant_id=tenant_id,
+        event_type="scan.started",
+        resource_type="scan_job",
+        resource_id=scan_id,
+        source_module="SCOUT",
+        actor_id=user_email,
+        correlation_id=scan_id,
+        metadata={
+            "target": job.normalized_target,
+            "asset_id": asset.id,
+            "engines": engines_used,
+            "resolved_ips": val_res.resolved_ips,
+        },
     )
     db.commit()
 
+    all_findings = []
     try:
-        if target.scan_type == "full":
+        if scan_type == "full":
             if NUCLEI_AVAILABLE:
-                nuclei_task = _run_nuclei_scan(target.target, scan_id)
-                port_task = _run_port_scan(target.target, scan_id)
+                nuclei_task = _run_nuclei_scan(canonical_target, scan_id)
+                port_task = _run_port_scan(canonical_target, scan_id)
                 nuclei_results, port_results = await asyncio.gather(nuclei_task, port_task)
                 all_findings = _merge_findings(nuclei_results, port_results)
             else:
-                all_findings = await _run_port_scan(target.target, scan_id)
-
-        elif target.scan_type == "ports":
-            all_findings = await _run_port_scan(target.target, scan_id)
-
-        elif target.scan_type == "quick":
+                all_findings = await _run_port_scan(canonical_target, scan_id)
+        elif scan_type == "ports":
+            all_findings = await _run_port_scan(canonical_target, scan_id)
+        elif scan_type == "quick":
             if NUCLEI_AVAILABLE:
-                all_findings = await _run_nuclei_scan(target.target, scan_id)
+                all_findings = await _run_nuclei_scan(canonical_target, scan_id)
             else:
-                all_findings = await _run_builtin_scan(target.target, scan_id)
+                all_findings = await _run_builtin_scan(canonical_target, scan_id)
 
-        # Persist observations and deterministically normalize only vulnerability matches.
+        # Persist observations and normalize
         normalized = []
         for nf in all_findings:
             normalized.append(normalize_observation(
@@ -452,31 +647,42 @@ async def trigger_scan(
             ))
     except Exception as exc:
         db.rollback()
-        job = db.query(ScanJob).filter(
+        failed_job = db.query(ScanJob).filter(
             ScanJob.id == scan_id,
             ScanJob.tenant_id == tenant_id,
         ).first()
-        if job:
-            job.status = "failed"
-            job.error = str(exc)[:2000]
-            job.completed_at = datetime.now(timezone.utc)
+        if failed_job:
+            failed_job.status = "failed"
+            failed_job.error = str(exc)[:2000]
+            failed_job.failure_reason = str(exc)[:2000]
+            failed_job.completed_at = datetime.now(timezone.utc)
             record_operational_event(
-                db, tenant_id=tenant_id, event_type="scan.failed",
-                resource_type="scan_job", resource_id=scan_id, source_module="SCOUT",
-                actor_id=user_email, correlation_id=scan_id,
-                metadata={"error_type": type(exc).__name__},
+                db,
+                tenant_id=tenant_id,
+                event_type="scan.failed",
+                resource_type="scan_job",
+                resource_id=scan_id,
+                source_module="SCOUT",
+                actor_id=user_email,
+                correlation_id=scan_id,
+                metadata={"error_type": type(exc).__name__, "detail": str(exc)[:500]},
             )
             db.commit()
-        logger.exception("SCOUT scan failed for scan job %s", scan_id)
+        logger.exception("SCOUT scan execution failed for scan job %s", scan_id)
         raise HTTPException(status_code=500, detail="Scanner execution failed") from exc
+
     job.status = "completed"
     job.result_count = len(all_findings)
     job.completed_at = datetime.now(timezone.utc)
     record_operational_event(
-        db, tenant_id=tenant_id,
+        db,
+        tenant_id=tenant_id,
         event_type="scan.zero_results" if not all_findings else "scan.completed",
-        resource_type="scan_job", resource_id=scan_id, source_module="SCOUT",
-        actor_id=user_email, correlation_id=scan_id,
+        resource_type="scan_job",
+        resource_id=scan_id,
+        source_module="SCOUT",
+        actor_id=user_email,
+        correlation_id=scan_id,
         metadata={"result_count": len(all_findings)},
     )
     db.commit()
@@ -487,26 +693,26 @@ async def trigger_scan(
     except Exception:
         logger.debug("Finding refresh event could not be published", exc_info=True)
 
-    # Classify results
-    critical_count = len([f for f in all_findings if f["risk"] in ("Critical",)])
-    high_count = len([f for f in all_findings if f["risk"] == "High"])
-
-    # Audit log
+    critical_count = len([f for f in all_findings if f.get("risk") == "Critical"])
+    high_count = len([f for f in all_findings if f.get("risk") == "High"])
     client_ip = request.client.host if request.client else None
+
     append_to_audit_log(AuditEntry(
         user=user_email,
         action="SCOUT_SCAN_COMPLETED",
         module="SCOUT",
-        detail=f"Scanned {target.target} via {', '.join(engines_used)}: "
+        detail=f"Scanned {canonical_target} (Asset {asset.id}) via {', '.join(engines_used)}: "
                f"{len(all_findings)} findings ({critical_count} critical, {high_count} high)",
-        ip_address=client_ip
+        ip_address=client_ip,
     ))
 
     return {
         "status": "success",
         "scan_id": scan_id,
-        "target": target.target,
-        "scan_type": target.scan_type,
+        "asset_id": asset.id,
+        "target": canonical_target,
+        "target_kind": val_res.target_kind,
+        "scan_type": scan_type,
         "engines": engines_used,
         "findings_count": len(all_findings),
         "critical": critical_count,
@@ -515,9 +721,45 @@ async def trigger_scan(
         "normalized_findings": sum(item["finding"] is not None for item in normalized),
         "confirmed_exposures": sum(item["exposure"] == "confirmed" for item in normalized),
         "message": f"Scan completed via {', '.join(engines_used)}. "
-                   f"Discovered {len(all_findings)} findings on {target.target}."
+                   f"Discovered {len(all_findings)} observations on {canonical_target}."
     }
 
+
+# ── Superadmin Diagnostic Raw Scan Route ──────────────────────────────────────
+
+@router.post("/admin/raw-scan")
+async def raw_diagnostic_scan(
+    req: RawDiagnosticScanRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("Superadmin")),
+):
+    """Platform Superadmin diagnostic scan route (disabled by default)."""
+    if not _is_raw_diagnostic_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="Raw diagnostic scanning is disabled. Enable via SCOUT_RAW_DIAGNOSTIC_ENABLED=true in environment.",
+        )
+
+    val_res = validate_and_resolve_target(req.target)
+    if not val_res.is_valid or not val_res.is_public_scannable:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Target rejected by network safety policy: {val_res.error}",
+        )
+
+    scan_id = f"DIAG-{uuid4().hex[:16].upper()}"
+    findings = await _run_builtin_scan(val_res.canonical_target, scan_id)
+    return {
+        "status": "success",
+        "scan_id": scan_id,
+        "target": val_res.canonical_target,
+        "findings_count": len(findings),
+        "findings": findings,
+    }
+
+
+# ── Query & History Endpoints ─────────────────────────────────────────────────
 
 @router.get("/findings")
 def get_scan_findings(db: Session = Depends(get_db), user = Depends(get_current_user)):
@@ -546,7 +788,6 @@ def get_scan_summary(db: Session = Depends(get_db), user = Depends(get_current_u
     if not all_findings:
         return {"total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0, "scans": len(jobs), "normalized_findings": 0}
 
-    scan_ids = set(f.scan_id for f in all_findings)
     return {
         "total": len(all_findings),
         "critical": len([f for f in all_findings if f.risk == "Critical"]),
@@ -560,31 +801,55 @@ def get_scan_summary(db: Session = Depends(get_db), user = Depends(get_current_u
 
 @router.get("/history")
 def get_scan_history(db: Session = Depends(get_db), user = Depends(get_current_user)):
-    """Return scan history grouped by scan_id."""
+    """Return scan history grouped by scan_id with full target provenance."""
     tenant_id = get_auth_context(user).tenant_id
     jobs = db.query(ScanJob).filter(
         ScanJob.tenant_id == tenant_id,
     ).order_by(ScanJob.started_at.desc()).limit(20).all()
     return [{
         "scan_id": row.id,
+        "asset_id": row.asset_id,
         "target": row.target,
+        "authorized_target": row.authorized_canonical_target,
+        "target_kind": row.target_kind,
+        "resolved_ips": row.resolved_ips or [],
         "started_at": row.started_at.isoformat() if row.started_at else "",
         "completed_at": row.completed_at.isoformat() if row.completed_at else "",
         "status": row.status,
         "engines": row.engines or [],
         "findings_count": row.result_count,
-        "error": row.error,
+        "error": row.error or row.failure_reason,
     } for row in jobs]
 
 
 @router.get("/engines")
 def get_scan_engines(user = Depends(get_current_user)):
-    """Return available scanning engines."""
+    """Return available scanning engines and system status."""
     engines = []
+    active_scanning = _is_active_scanning_enabled()
     if NUCLEI_AVAILABLE:
-        engines.append({"name": "Nuclei", "status": "active", "type": "vulnerability", "description": "Template-based vulnerability scanner with CVE detection"})
+        engines.append({
+            "name": "Nuclei",
+            "status": "active" if active_scanning else "disabled_globally",
+            "type": "vulnerability",
+            "description": "Template-based vulnerability scanner with CVE detection",
+        })
     if NMAP_AVAILABLE:
-        engines.append({"name": "Nmap", "status": "active", "type": "port_discovery", "description": "Network port scanner with service version detection"})
-    engines.append({"name": "Built-in TCP", "status": "active", "type": "port_check", "description": "Lightweight TCP port connectivity checker"})
-    return engines
-
+        engines.append({
+            "name": "Nmap",
+            "status": "active" if active_scanning else "disabled_globally",
+            "type": "port_discovery",
+            "description": "Network port scanner with service version detection (TCP connect mode)",
+        })
+    engines.append({
+        "name": "Built-in TCP",
+        "status": "active" if active_scanning else "disabled_globally",
+        "type": "port_check",
+        "description": "Lightweight TCP port connectivity checker",
+    })
+    return {
+        "active_scanning_enabled": active_scanning,
+        "execution_location": "tempris_central_vps",
+        "network_scope": "external_public_only",
+        "engines": engines,
+    }

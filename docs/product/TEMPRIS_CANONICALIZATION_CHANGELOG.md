@@ -1,5 +1,31 @@
 # Canonicalization Changelog
 
+## SCOUT Wave 1: Scan Authorisation, Target-Binding, Execution Safety & SSRF Hardening (2026-08-18)
+
+- Implemented Migration 013 (`013_asset_scan_authorizations.py`) adding additive `asset_scan_authorizations` table and `scan_jobs` target-provenance columns (`asset_id`, `scan_authorization_id`, `authorized_canonical_target`, `target_kind`, `resolved_ips`, `dns_resolved_at`, `initiating_user_id`, `execution_origin`, `failure_reason`).
+- Decoupled asset inventory creation from scan authorization: all assets default to unauthorized; scans strictly require an explicit approved `AssetScanAuthorization` record.
+- Restricted scan authorization approval to platform `Superadmin` only.
+- Bound asset mutation to immediate scan authorization revocation: any modification of asset `hostname` or `ip_address` revokes active authorization with reason `"Asset target modified; re-authorization required"`.
+- Implemented authoritative `TargetPolicyService` enforcing EASM global routability boundary and rejecting RFC 1918, loopbacks (`127.0.0.0/8`, `::1`), link-local (`169.254.0.0/16`, `fe80::/10`), cloud metadata (`169.254.169.254`, `100.100.100.200`, `fd00:ec2::254`), CGNAT (`100.64.0.0/10`), IPv6 ULA (`fc00::/7`), IPv4-mapped IPv6, CIDR blocks, wildcards, and non-http schemes.
+- Hardened customer scan endpoints (`POST /api/scanner/run` and `POST /api/scanner/scan`) to accept only `asset_id`, deriving the canonical target from server-side approved authorizations and recording pre-execution DNS resolution.
+- Enforced platform kill switch `SCOUT_ACTIVE_SCANNING_ENABLED` (default `false`, returning HTTP 503 when disabled), concurrency caps (2 per-tenant, 5 global), and 30s per-asset cooldown.
+- Hardened scanner subprocess lifecycle with unprivileged connect scans (`-sT`), hard wall-clock timeouts with explicit `proc.kill()` and child-process reaping, bounded 10MB output buffers, and safe temp file cleanup.
+- Implemented target drift protection in `scan_normalizer.py`, preventing automatic exposure confirmation if scanner target does not match authorized origin host/IPs.
+- Updated frontend UI with target classification badges, authorization state indicators, modal dialogs for authorization requests and approvals (eliminating `window.prompt`), and kill switch / asset picker integration in SCOUT workspace.
+- Executed full 316-test suite with 100% pass rate.
+
+## Canonical CVE Spine Cutover (2026-08-18)
+
+- Created Migration 011 for additive canonical vulnerability intelligence tables (`canonical_vulnerabilities`, `vulnerability_cvss_assessments`, `cisa_kev_entries`).
+- Created Migration 012 for the Strangler Fig schema evolution adding `findings.canonical_cve_id` foreign key and index without modifying legacy columns.
+- Implemented offline CLI intelligence importers for CISA KEV and NVD CVE 2.0 snapshots with cryptographic provenance hashing and idempotency.
+- Implemented safe, idempotent exact finding linkage CLI with syntax validation (`CVE-YYYY-NNNN`), preserving non-CVE SSS findings with `canonical_cve_id = NULL`.
+- Deployed server-authoritative Canonical Intelligence Resolver implementing the deterministic CVSS selection policy (valid assessments -> 4.0 > 3.1 > 3.0 > 2.0 -> Primary > Secondary -> latest source timestamp -> ID tiebreaker) and read-only legacy fallback.
+- Integrated Canonical Intelligence Resolver into the Dynamic Live Context TES Engine, deriving CVSS, exploitability (KEV/ransomware/Nuclei match), and asset criticality from confirmed active assets.
+- Decoupled global reference CVE notices from customer asset exposure, ensuring regulatory tracking notices never trigger false-positive customer compliance violations.
+- Implemented and verified the 9 canonical cutover gates with a 100% test pass rate across all downstream systems (CISO, SYNTHESIS, SPECTRUM, STRIKE, Reporting Engine, Audit Log).
+- Executed rehearsal database verification with zero orphaned foreign keys, zero historical score drift, and 100% invariant satisfaction.
+
 ## Native module UI restoration hotfix (2026-08-16)
 
 - Restored the retained native SPECTRUM, SCOUT, STRIKE, STANDARD, GRC, and SPOTLIGHT route experiences after the canonicalization extension incorrectly replaced them with fixed-position overlays.

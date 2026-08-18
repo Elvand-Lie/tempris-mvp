@@ -226,7 +226,12 @@ def _safe_text(value, fallback='Not recorded') -> str:
 
 
 def _public_references(finding: Finding) -> list[str]:
-    candidates = [finding.cve_id, finding.cve, *(finding.public_reason_codes or [])]
+    candidates = [
+        getattr(finding, "canonical_cve_id", None),
+        finding.cve_id,
+        finding.cve,
+        *(finding.public_reason_codes or []),
+    ]
     references = [
         str(value).strip().upper()
         for value in candidates

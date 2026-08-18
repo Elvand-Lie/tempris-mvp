@@ -229,6 +229,15 @@ class ScanJob(Base):
     __tablename__ = "scan_jobs"
     id = Column(String(50), primary_key=True)
     tenant_id = Column(String(50), nullable=False, index=True)
+    asset_id = Column(String(50), ForeignKey("assets.id", ondelete="SET NULL"), nullable=True, index=True)
+    scan_authorization_id = Column(String(50), ForeignKey("asset_scan_authorizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    authorized_canonical_target = Column(String(500), nullable=True)
+    target_kind = Column(String(50), nullable=True)
+    resolved_ips = Column(JSON, default=[])
+    dns_resolved_at = Column(DateTime(timezone=True), nullable=True)
+    initiating_user_id = Column(String(255), nullable=True)
+    execution_origin = Column(String(255), default="tempris_central_vps", nullable=True)
+    failure_reason = Column(Text, nullable=True)
     target = Column(String(500), nullable=False)
     normalized_target = Column(String(255), nullable=False, index=True)
     scan_type = Column(String(50), nullable=False)
@@ -240,6 +249,34 @@ class ScanJob(Base):
     started_by = Column(String(255))
     started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     completed_at = Column(DateTime(timezone=True))
+
+
+class AssetScanAuthorization(Base):
+    """Platform-approved scan authorization binding an active Asset to an external target."""
+
+    __tablename__ = "asset_scan_authorizations"
+    id = Column(String(50), primary_key=True)
+    tenant_id = Column(String(50), nullable=False, index=True)
+    asset_id = Column(String(50), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False, index=True)
+    authorized_target = Column(String(500), nullable=False)
+    target_kind = Column(String(50), nullable=False)  # public_hostname, public_ipv4, public_ipv6, public_url
+    status = Column(String(50), nullable=False, default="pending", index=True)  # pending, approved, revoked, expired
+    approval_method = Column(String(50), nullable=False, default="manual_platform_approval")
+    evidence = Column(Text, nullable=True)
+    requested_by = Column(String(255), nullable=False)
+    requested_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    approved_by = Column(String(255), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_by = Column(String(255), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    revocation_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_asset_scan_auth_lookup", "tenant_id", "asset_id", "status"),
+    )
 
 
 class PostureSnapshot(Base):
@@ -480,6 +517,12 @@ class Finding(Base):
     public_reason_codes = Column(JSON, default=[])
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     # Legacy fields mapping
+    canonical_cve_id = Column(
+        String(32),
+        ForeignKey("canonical_vulnerabilities.cve_id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     cve = Column(String(50), index=True)                   # CVE-2026-XXXX or SSS-2026-XXXX
     title = Column(String(500), nullable=False)
     vendor = Column(String(255), index=True)
@@ -730,3 +773,93 @@ class OperationsChangeTicket(Base):
     evidence_path = Column(String(500))
     post_verification_template = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ── Canonical Vulnerability Intelligence Spine (Phase 1A Shadow Layer) ─────────
+
+class CanonicalVulnerability(Base):
+    """Canonical, tenant-agnostic global vulnerability identity and lifecycle registry."""
+
+    __tablename__ = "canonical_vulnerabilities"
+
+    cve_id = Column(String(32), primary_key=True)  # Normalized uppercase "CVE-YYYY-NNNN"
+    status = Column(String(32), nullable=False, default="published", index=True)  # published, rejected, reserved, unknown
+    description = Column(Text, nullable=True)
+    description_source = Column(String(100), nullable=True)
+    published_at = Column(DateTime(timezone=True), nullable=True)
+    source_modified_at = Column(DateTime(timezone=True), nullable=True)
+    replaced_by_cve_id = Column(
+        String(32),
+        ForeignKey("canonical_vulnerabilities.cve_id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class VulnerabilityCvssAssessment(Base):
+    """Provenance-preserving CVSS assessment from an authoritative scoring body."""
+
+    __tablename__ = "vulnerability_cvss_assessments"
+    __table_args__ = (
+        UniqueConstraint(
+            "cve_id", "source", "cvss_version", "vector_string",
+            name="uq_vuln_cvss_cve_src_ver_vector",
+        ),
+        Index("ix_vuln_cvss_cve_version", "cve_id", "cvss_version"),
+    )
+
+    id = Column(String(64), primary_key=True)  # Deterministic SHA-256 or unique ID
+    cve_id = Column(
+        String(32),
+        ForeignKey("canonical_vulnerabilities.cve_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    source = Column(String(100), nullable=False, index=True)  # e.g. "NVD", "CNA", "vendor"
+    source_role = Column(String(50), nullable=True)  # e.g. "Primary", "Secondary"
+    source_record_id = Column(String(100), nullable=True)
+    cvss_version = Column(String(10), nullable=False, index=True)  # "2.0", "3.0", "3.1", "4.0"
+    vector_string = Column(String(200), nullable=False)
+    base_score = Column(Float, nullable=False)
+    base_severity = Column(String(20), nullable=True)  # "CRITICAL", "HIGH", "MEDIUM", "LOW", "NONE"
+    source_modified_at = Column(DateTime(timezone=True), nullable=True)
+    source_snapshot_id = Column(String(100), nullable=True)
+    source_record_sha256 = Column(String(64), nullable=True)
+    ingested_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CisaKevEntry(Base):
+    """Source-specific CISA Known Exploited Vulnerabilities (KEV) enrichment record."""
+
+    __tablename__ = "cisa_kev_entries"
+    __table_args__ = (
+        UniqueConstraint("cve_id", name="uq_cisa_kev_cve_id"),
+    )
+
+    id = Column(String(64), primary_key=True)  # e.g. "KEV-CVE-YYYY-NNNN"
+    cve_id = Column(
+        String(32),
+        ForeignKey("canonical_vulnerabilities.cve_id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    vendor_project = Column(String(255), nullable=False)
+    product = Column(String(255), nullable=False)
+    vulnerability_name = Column(String(500), nullable=False)
+    date_added = Column(String(20), nullable=True)  # YYYY-MM-DD as supplied by CISA
+    due_date = Column(String(20), nullable=True)    # YYYY-MM-DD as supplied by CISA
+    required_action = Column(Text, nullable=True)
+    known_ransomware_campaign_use = Column(String(50), nullable=False)  # "Known", "Unknown" exact string
+    notes = Column(Text, nullable=True)
+    catalog_version = Column(String(50), nullable=True)
+    source_snapshot_id = Column(String(100), nullable=True)
+    source_record_sha256 = Column(String(64), nullable=True)
+    first_ingested_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )

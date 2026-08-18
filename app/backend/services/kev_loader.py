@@ -189,8 +189,21 @@ def get_top_critical_findings(db: Session, limit: int = 20, tenant_id: str = Non
 
 def get_ransomware_findings(db: Session, limit: int = 5, tenant_id: str = None) -> list[dict]:
     """Get ransomware-linked findings for alerts."""
-    from models import Finding
-    query = db.query(Finding).filter(Finding.ransomware == True)
+    from models import Finding, CisaKevEntry
+    from sqlalchemy import or_, select
+
+    ransomware_cves = select(CisaKevEntry.cve_id).where(
+        CisaKevEntry.known_ransomware_campaign_use.in_(["Known", "known"])
+    )
+
+    query = db.query(Finding).filter(
+        or_(
+            Finding.ransomware == True,
+            Finding.canonical_cve_id.in_(ransomware_cves),
+            Finding.cve.in_(ransomware_cves),
+            Finding.cve_id.in_(ransomware_cves),
+        )
+    )
     if tenant_id:
         query = query.filter(Finding.tenant_id == tenant_id)
     findings = (

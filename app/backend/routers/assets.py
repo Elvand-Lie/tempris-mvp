@@ -7,7 +7,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import Optional
 from services.database import get_db
-from models import Asset
+from models import Asset, AssetScanAuthorization
+from services.target_policy import classify_asset_target, validate_and_resolve_target
+from services.operational_events import record_operational_event
+from datetime import timedelta
 from routers.audit import append_to_audit_log_db, AuditEntry
 from routers.auth import get_auth_context, get_current_user, require_role
 from datetime import datetime, timezone
@@ -84,7 +87,7 @@ def list_assets(
     assets = query.order_by(Asset.created_at.desc()).offset((page - 1) * limit).limit(limit).all()
     
     return {
-        "data": [_serialize_asset(a) for a in assets],
+        "data": [_serialize_asset(a, db) for a in assets],
         "meta": {"total": total, "page": page, "limit": limit}
     }
 
@@ -98,7 +101,7 @@ def get_asset_stats(
         Asset.tenant_id == _verified_tenant_id(user),
         Asset.status != "decommissioned",
     ).all()
-    
+
     by_criticality = {"critical": 0, "high": 0, "medium": 0, "low": 0}
     by_type = {}
     for a in all_assets:
@@ -106,7 +109,7 @@ def get_asset_stats(
         by_criticality[crit] = by_criticality.get(crit, 0) + 1
         atype = a.asset_type or "other"
         by_type[atype] = by_type.get(atype, 0) + 1
-    
+
     return {
         "total": len(all_assets),
         "by_criticality": by_criticality,
@@ -126,7 +129,7 @@ def get_asset(
     ).first()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
-    return _serialize_asset(asset)
+    return _serialize_asset(asset, db)
 
 @router.post("")
 def create_asset(
@@ -137,7 +140,7 @@ def create_asset(
     """Create a new asset. Requires Analyst+ role."""
     tenant_id = _verified_tenant_id(user)
     asset_id = f"ASSET-{uuid4().hex[:12].upper()}"
-    
+
     asset = Asset(
         id=asset_id,
         tenant_id=tenant_id,
@@ -165,8 +168,8 @@ def create_asset(
     except Exception:
         db.rollback()
         raise HTTPException(status_code=500, detail="Asset creation failed")
-    
-    return _serialize_asset(asset)
+
+    return _serialize_asset(asset, db)
 
 @router.put("/{asset_id}")
 def update_asset(
@@ -194,6 +197,32 @@ def update_asset(
         try:
             asset.updated_at = datetime.now(timezone.utc)
             db.flush()
+
+            # If target identifiers changed, invalidate active scan authorizations
+            if {"hostname", "ip_address"} & set(req.model_fields_set):
+                now = datetime.now(timezone.utc)
+                active_auths = db.query(AssetScanAuthorization).filter(
+                    AssetScanAuthorization.tenant_id == asset.tenant_id,
+                    AssetScanAuthorization.asset_id == asset.id,
+                    AssetScanAuthorization.status.in_(["approved", "pending"]),
+                ).all()
+                for auth in active_auths:
+                    auth.status = "revoked"
+                    auth.revoked_by = "system"
+                    auth.revoked_at = now
+                    auth.revocation_reason = "Asset target modified; re-authorization required"
+                    record_operational_event(
+                        db,
+                        tenant_id=asset.tenant_id,
+                        event_type="scan_auth.revoked",
+                        resource_type="asset_scan_authorization",
+                        resource_id=auth.id,
+                        source_module="ASSETS",
+                        actor_id=user.get("sub", "unknown"),
+                        correlation_id=asset.id,
+                        metadata={"reason": auth.revocation_reason},
+                    )
+
             recalculated = []
             if {"criticality", "status"} & set(req.model_fields_set):
                 from services.tes_engine import recalculate_open_cve_findings
@@ -214,8 +243,8 @@ def update_asset(
         except Exception:
             db.rollback()
             raise HTTPException(status_code=500, detail="Asset update failed")
-    
-    return _serialize_asset(asset)
+
+    return _serialize_asset(asset, db)
 
 @router.delete("/{asset_id}")
 def decommission_asset(
@@ -257,7 +286,327 @@ def decommission_asset(
     return {"status": "decommissioned", "asset_id": asset_id}
 
 
-def _serialize_asset(a: Asset) -> dict:
+# ── Asset Scan Authorization Endpoints ─────────────────────────────────────────
+
+class ScanAuthRequestModel(BaseModel):
+    evidence: Optional[str] = Field(None, max_length=1000)
+
+
+class ScanAuthRevokeModel(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=1000)
+
+
+class ScanAuthApproveModel(BaseModel):
+    expires_in_days: int = Field(90, ge=1, le=365)
+
+
+@router.post("/{asset_id}/scan-authorization/request")
+def request_scan_authorization(
+    asset_id: str,
+    req: Optional[ScanAuthRequestModel] = None,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("Superadmin", "Admin", "Analyst")),
+):
+    """Request platform scan authorization for an asset. Requires Analyst+ role."""
+    tenant_id = _verified_tenant_id(user)
+    asset = db.query(Asset).filter(
+        Asset.id == asset_id,
+        Asset.tenant_id == tenant_id,
+    ).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if asset.status != "active":
+        raise HTTPException(status_code=400, detail="Cannot request scan authorization for inactive or decommissioned asset")
+
+    # Validate target against network policy
+    classification = classify_asset_target(asset.ip_address, asset.hostname, asset.name)
+    if not classification["is_public_scannable"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Asset target is not publicly scannable: {classification['reason']}",
+        )
+
+    target_str = classification["target"]
+    target_kind = classification["target_kind"]
+    now = datetime.now(timezone.utc)
+    user_email = user.get("sub", "unknown")
+
+    # Check if existing pending or approved authorization already active
+    existing = db.query(AssetScanAuthorization).filter(
+        AssetScanAuthorization.tenant_id == tenant_id,
+        AssetScanAuthorization.asset_id == asset_id,
+        AssetScanAuthorization.status == "approved",
+    ).first()
+    if existing and existing.expires_at and existing.expires_at > now:
+        return _serialize_auth(existing)
+
+    auth_id = f"AUTH-{uuid4().hex[:16].upper()}"
+    evidence_text = req.evidence if req and req.evidence else f"Analyst {user_email} requested authorization for {target_str}"
+    auth = AssetScanAuthorization(
+        id=auth_id,
+        tenant_id=tenant_id,
+        asset_id=asset_id,
+        authorized_target=target_str,
+        target_kind=target_kind,
+        status="pending",
+        approval_method="manual_platform_approval",
+        evidence=evidence_text,
+        requested_by=user_email,
+        requested_at=now,
+    )
+    db.add(auth)
+    record_operational_event(
+        db,
+        tenant_id=tenant_id,
+        event_type="scan_auth.requested",
+        resource_type="asset_scan_authorization",
+        resource_id=auth_id,
+        source_module="ASSETS",
+        actor_id=user_email,
+        correlation_id=asset_id,
+        metadata={"target": target_str, "target_kind": target_kind},
+    )
+    append_to_audit_log_db(
+        db,
+        AuditEntry(
+            user=user_email,
+            action="ASSET_SCAN_AUTHORIZATION_REQUESTED",
+            module="ASSETS",
+            detail=f"Requested scan authorization for asset {asset_id} targeting {target_str} ({target_kind})",
+        ),
+        commit=False,
+    )
+    db.commit()
+    db.refresh(auth)
+    return _serialize_auth(auth)
+
+
+@router.post("/{asset_id}/scan-authorization/approve")
+def approve_scan_authorization(
+    asset_id: str,
+    req: Optional[ScanAuthApproveModel] = None,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("Superadmin")),
+):
+    """Approve scan authorization for an asset. Requires platform Superadmin role."""
+    tenant_id = _verified_tenant_id(user)
+    asset = db.query(Asset).filter(
+        Asset.id == asset_id,
+        Asset.tenant_id == tenant_id,
+    ).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    user_email = user.get("sub", "unknown")
+    pending = db.query(AssetScanAuthorization).filter(
+        AssetScanAuthorization.tenant_id == tenant_id,
+        AssetScanAuthorization.asset_id == asset_id,
+        AssetScanAuthorization.status == "pending",
+    ).order_by(AssetScanAuthorization.requested_at.desc()).first()
+
+    # Re-validate target policy at approval time
+    classification = classify_asset_target(asset.ip_address, asset.hostname, asset.name)
+    if not classification["is_public_scannable"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Asset target is not publicly scannable: {classification['reason']}",
+        )
+
+    now = datetime.now(timezone.utc)
+    days = req.expires_in_days if req else 90
+    expires_at = now + timedelta(days=days)
+
+    if not pending:
+        # Create direct approved authorization
+        auth_id = f"AUTH-{uuid4().hex[:16].upper()}"
+        pending = AssetScanAuthorization(
+            id=auth_id,
+            tenant_id=tenant_id,
+            asset_id=asset_id,
+            authorized_target=classification["target"],
+            target_kind=classification["target_kind"],
+            status="approved",
+            approval_method="manual_platform_approval",
+            evidence=f"Superadmin {user_email} directly approved scan authorization",
+            requested_by=user_email,
+            requested_at=now,
+            approved_by=user_email,
+            approved_at=now,
+            expires_at=expires_at,
+        )
+        db.add(pending)
+    else:
+        pending.status = "approved"
+        pending.approved_by = user_email
+        pending.approved_at = now
+        pending.expires_at = expires_at
+        pending.authorized_target = classification["target"]
+        pending.target_kind = classification["target_kind"]
+
+    record_operational_event(
+        db,
+        tenant_id=tenant_id,
+        event_type="scan_auth.approved",
+        resource_type="asset_scan_authorization",
+        resource_id=pending.id,
+        source_module="ASSETS",
+        actor_id=user_email,
+        correlation_id=asset_id,
+        metadata={"target": pending.authorized_target, "expires_at": expires_at.isoformat()},
+    )
+    append_to_audit_log_db(
+        db,
+        AuditEntry(
+            user=user_email,
+            action="ASSET_SCAN_AUTHORIZATION_APPROVED",
+            module="ASSETS",
+            detail=f"Approved scan authorization for asset {asset_id} targeting {pending.authorized_target} until {expires_at.date()}",
+        ),
+        commit=False,
+    )
+    db.commit()
+    db.refresh(pending)
+    return _serialize_auth(pending)
+
+
+@router.post("/{asset_id}/scan-authorization/revoke")
+def revoke_scan_authorization(
+    asset_id: str,
+    req: ScanAuthRevokeModel,
+    db: Session = Depends(get_db),
+    user = Depends(require_role("Superadmin", "Admin")),
+):
+    """Revoke active or pending scan authorization for an asset."""
+    tenant_id = _verified_tenant_id(user)
+    asset = db.query(Asset).filter(
+        Asset.id == asset_id,
+        Asset.tenant_id == tenant_id,
+    ).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    user_email = user.get("sub", "unknown")
+    now = datetime.now(timezone.utc)
+    active_auths = db.query(AssetScanAuthorization).filter(
+        AssetScanAuthorization.tenant_id == tenant_id,
+        AssetScanAuthorization.asset_id == asset_id,
+        AssetScanAuthorization.status.in_(["approved", "pending"]),
+    ).all()
+
+    if not active_auths:
+        raise HTTPException(status_code=404, detail="No active or pending scan authorization found to revoke")
+
+    for auth in active_auths:
+        auth.status = "revoked"
+        auth.revoked_by = user_email
+        auth.revoked_at = now
+        auth.revocation_reason = req.reason
+        record_operational_event(
+            db,
+            tenant_id=tenant_id,
+            event_type="scan_auth.revoked",
+            resource_type="asset_scan_authorization",
+            resource_id=auth.id,
+            source_module="ASSETS",
+            actor_id=user_email,
+            correlation_id=asset_id,
+            metadata={"reason": req.reason},
+        )
+
+    append_to_audit_log_db(
+        db,
+        AuditEntry(
+            user=user_email,
+            action="ASSET_SCAN_AUTHORIZATION_REVOKED",
+            module="ASSETS",
+            detail=f"Revoked scan authorization for asset {asset_id}: {req.reason}",
+        ),
+        commit=False,
+    )
+    db.commit()
+    return {"status": "success", "message": "Scan authorization revoked", "asset_id": asset_id}
+
+
+@router.get("/{asset_id}/scan-authorization")
+def get_scan_authorization(
+    asset_id: str,
+    db: Session = Depends(get_db),
+    user = Depends(get_current_user),
+):
+    """Get active scan authorization and historical authorizations for an asset."""
+    tenant_id = _verified_tenant_id(user)
+    asset = db.query(Asset).filter(
+        Asset.id == asset_id,
+        Asset.tenant_id == tenant_id,
+    ).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    auths = db.query(AssetScanAuthorization).filter(
+        AssetScanAuthorization.tenant_id == tenant_id,
+        AssetScanAuthorization.asset_id == asset_id,
+    ).order_by(AssetScanAuthorization.created_at.desc()).all()
+
+    classification = classify_asset_target(asset.ip_address, asset.hostname, asset.name)
+    now = datetime.now(timezone.utc)
+    current = next((a for a in auths if a.status == "approved" and (not a.expires_at or _ensure_utc(a.expires_at) > now)), None)
+    if not current:
+        current = next((a for a in auths if a.status == "pending"), None)
+
+    return {
+        "asset_id": asset_id,
+        "classification": classification,
+        "current_authorization": _serialize_auth(current) if current else None,
+        "history": [_serialize_auth(a) for a in auths],
+    }
+
+
+def _ensure_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _serialize_auth(a: Optional[AssetScanAuthorization]) -> Optional[dict]:
+    if not a:
+        return None
+    now = datetime.now(timezone.utc)
+    is_expired = bool(a.expires_at and _ensure_utc(a.expires_at) < now)
+    return {
+        "id": a.id,
+        "tenant_id": a.tenant_id,
+        "asset_id": a.asset_id,
+        "authorized_target": a.authorized_target,
+        "target_kind": a.target_kind,
+        "status": "expired" if is_expired and a.status == "approved" else a.status,
+        "approval_method": a.approval_method,
+        "evidence": a.evidence,
+        "requested_by": a.requested_by,
+        "requested_at": a.requested_at.isoformat() if a.requested_at else None,
+        "approved_by": a.approved_by,
+        "approved_at": a.approved_at.isoformat() if a.approved_at else None,
+        "expires_at": a.expires_at.isoformat() if a.expires_at else None,
+        "is_expired": is_expired,
+        "revoked_by": a.revoked_by,
+        "revoked_at": a.revoked_at.isoformat() if a.revoked_at else None,
+        "revocation_reason": a.revocation_reason,
+    }
+
+
+def _serialize_asset(a: Asset, db: Optional[Session] = None) -> dict:
+    classification = classify_asset_target(a.ip_address, a.hostname, a.name)
+    scan_auth = None
+    if db is not None:
+        now = datetime.now(timezone.utc)
+        latest_auth = db.query(AssetScanAuthorization).filter(
+            AssetScanAuthorization.tenant_id == a.tenant_id,
+            AssetScanAuthorization.asset_id == a.id,
+        ).order_by(AssetScanAuthorization.created_at.desc()).first()
+        if latest_auth:
+            scan_auth = _serialize_auth(latest_auth)
+
     return {
         "id": a.id,
         "name": a.name,
@@ -270,6 +619,8 @@ def _serialize_asset(a: Asset) -> dict:
         "tags": a.tags or [],
         "status": a.status,
         "notes": a.notes,
+        "target_classification": classification,
+        "scan_authorization": scan_auth,
         "created_at": a.created_at.isoformat() if a.created_at else "",
         "updated_at": a.updated_at.isoformat() if a.updated_at else "",
     }
