@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$OutputEncoding = [System.Text.Encoding]::UTF8
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $ssh = "$env:WINDIR\System32\OpenSSH\ssh.exe"
 $scp = "$env:WINDIR\System32\OpenSSH\scp.exe"
