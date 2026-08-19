@@ -204,7 +204,7 @@ def test_scan_authorization_lifecycle_and_invalidation(client, db_session):
     app.dependency_overrides[get_current_user] = lambda: superadmin_user
     approve_resp = client.post(
         f"/api/assets/{asset.id}/scan-authorization/approve",
-        json={"notes": "Verified ownership with DNS TXT record", "expires_in_days": 30},
+        json={"verification_notes": "Verified ownership with DNS TXT record", "expires_in_days": 30},
     )
     assert approve_resp.status_code == 200
     app_data = approve_resp.json()
@@ -469,6 +469,26 @@ def test_scan_normalizer_drift_and_trust_boundary(db_session):
     )
     assert res_nmap["exposure"] == "observation_only"
     assert res_nmap["finding"] is None
+
+
+def test_scanner_subprocess_streaming_bounded_memory():
+    """Verify that _read_stream_bounded raises ScannerOutputLimitExceeded immediately upon crossing limit."""
+    import asyncio
+    from routers.scanner import ScannerOutputLimitExceeded, _read_stream_bounded
+
+    async def _run():
+        reader = asyncio.StreamReader()
+        data_chunk = b"A" * 50000
+        for _ in range(10):
+            reader.feed_data(data_chunk)
+        reader.feed_eof()
+
+        limit = 100 * 1024  # 100 KB limit
+        with pytest.raises(ScannerOutputLimitExceeded) as exc_info:
+            await _read_stream_bounded(reader, limit)
+        assert "exceeded maximum output limit" in str(exc_info.value)
+
+    asyncio.run(_run())
 
 
 # ── 5. Superadmin Raw Diagnostic Scan Route Tests ─────────────────────────────

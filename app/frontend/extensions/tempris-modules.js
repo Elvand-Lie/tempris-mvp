@@ -3,7 +3,7 @@
 
   const TOKEN_KEY = 'tempris_token';
   const USER_KEY = 'tempris_user';
-  const EXTENSION_ROUTES = new Set(['/ciso', '/reports', '/packages', '/sss-intake', '/vdp-queue', '/assets']);
+  const EXTENSION_ROUTES = new Set(['/ciso', '/reports', '/packages', '/sss-intake', '/vdp-queue', '/assets', '/scout']);
   const EXTENSION_HOST_ID = 'tempris-extension-host';
   const RETRY_DELAYS = [1000, 3000, 8000];
   const sssUi = window.TemprisSssUi;
@@ -167,6 +167,23 @@
       }
     }
     throw lastError || new Error('Service unavailable after retries.');
+  }
+
+  async function apiJson(path, {
+    method = 'POST',
+    body,
+    headers = {},
+    ...options
+  } = {}) {
+    return api(path, {
+      ...options,
+      method,
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
   }
 
   function navigate(path) {
@@ -2159,8 +2176,8 @@
             <label>Validity (Days)
               <input type="number" name="expires_in_days" value="90" min="1" max="365" required>
             </label>
-            <label class="tmx-field-wide">Verification Method / Superadmin Notes
-              <textarea name="notes" rows="3" maxlength="2000" placeholder="e.g. Verified DNS TXT record / Contract SOW signed"></textarea>
+            <label class="tmx-field-wide">Verification Method / Superadmin Notes (Required, min 10 chars)
+              <textarea name="verification_notes" minlength="10" maxlength="2000" required rows="3" placeholder="e.g. Verified DNS TXT record / Contract SOW signed for this perimeter IP"></textarea>
             </label>
             <div class="tmx-form-message tmx-field-wide" data-asset-approve-message></div>
             <div class="tmx-dialog-actions tmx-field-wide">
@@ -2215,6 +2232,8 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ evidence: data.get('evidence') }),
           });
+          tenantAssets = null;
+          tenantAssetsRequest = null;
           requestDialog.close();
           await renderAssetsRoute(host);
         } catch (err) {
@@ -2238,15 +2257,22 @@
         const data = new FormData(approveForm);
         const assetId = approveForm.dataset.assetId;
         const msg = host.querySelector('[data-asset-approve-message]');
+        const notes = (data.get('verification_notes') || '').trim();
+        if (notes.length < 10) {
+          if (msg) msg.textContent = 'Verification notes are required and must be at least 10 characters.';
+          return;
+        }
         try {
           await api(`/api/assets/${encodeURIComponent(assetId)}/scan-authorization/approve`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              notes: data.get('notes') || undefined,
+              verification_notes: notes,
               expires_in_days: parseInt(data.get('expires_in_days'), 10) || 90,
             }),
           });
+          tenantAssets = null;
+          tenantAssetsRequest = null;
           approveDialog.close();
           await renderAssetsRoute(host);
         } catch (err) {
@@ -2276,6 +2302,8 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reason: data.get('reason') }),
           });
+          tenantAssets = null;
+          tenantAssetsRequest = null;
           revokeDialog.close();
           await renderAssetsRoute(host);
         } catch (err) {
@@ -2288,132 +2316,705 @@
     }
   }
 
-  let scoutEnginesCache = null;
-  async function decorateScout() {
-    if (window.location.pathname !== '/scout' || !localStorage.getItem(TOKEN_KEY)) return;
-    const root = document.getElementById('root');
-    if (!root) return;
+  let scoutActiveTab = 'scans';
+  let scoutIntelPage = 1;
+  let scoutIntelSearch = '';
+  let scoutIntelKevOnly = false;
+  let scoutIntelRansomwareOnly = false;
+  let scoutIntelStatus = '';
 
-    // Find launch scan button or target input
-    const launchBtn = [...root.querySelectorAll('button')].find((b) => b.textContent.includes('Launch Scan') || b.textContent.includes('Run Scan'));
-    const targetInput = root.querySelector('input[placeholder*="domain"], input[placeholder*="IP"], input[placeholder*="host"], input[placeholder*="scanme"], input[name="target"]');
-    if (!targetInput) return;
+  async function renderScoutRoute(host) {
+    try {
+      // 1. Fetch scanning engines status and asset inventory (always fetch fresh)
+      tenantAssets = null;
+      tenantAssetsRequest = null;
+      const [enginesData, assets, scanSummary, scanHistory, scanFindings] = await Promise.all([
+        api('/api/scanner/engines').catch(() => null),
+        loadTenantAssets().catch(() => null),
+        api('/api/scanner/findings/summary').catch(() => null),
+        api('/api/scanner/history').catch(() => null),
+        api('/api/scanner/findings').catch(() => null),
+      ]);
 
-    const form = targetInput.closest('form') || targetInput.closest('.glass-panel') || targetInput.parentElement;
-    if (!form) return;
+      const activeScanningEnabled = enginesData?.active_scanning_enabled === true;
+      const nucleiEngine = (enginesData?.engines || []).find((e) => e.name === 'Nuclei');
+      const nmapEngine = (enginesData?.engines || []).find((e) => e.name === 'Nmap');
 
-    if (!scoutEnginesCache) {
-      try {
-        scoutEnginesCache = await api('/api/scanner/engines');
-      } catch {
-        scoutEnginesCache = { active_scanning_enabled: false };
-      }
-    }
+      const nucleiAvailable = !!nucleiEngine;
+      const nmapAvailable = !!nmapEngine;
 
-    const activeScanningEnabled = scoutEnginesCache?.active_scanning_enabled === true;
-
-    // 1. Kill Switch Banner
-    let banner = form.querySelector('[data-scout-killswitch-banner]');
-    if (!activeScanningEnabled) {
-      if (!banner) {
-        banner = document.createElement('div');
-        banner.dataset.scoutKillswitchBanner = 'true';
-        banner.className = 'tmx-notice tmx-notice-warning';
-        banner.style.cssText = 'margin-bottom:1rem;padding:0.75rem 1rem;background:rgba(234,179,8,0.1);border:1px solid rgba(234,179,8,0.3);border-radius:6px;color:#eab308;font-size:0.875rem;';
-        banner.innerHTML = '<strong>Central Active Scanning is Disabled:</strong> Active network probing from central Tempris VPS is disabled globally (<code>SCOUT_ACTIVE_SCANNING_ENABLED=false</code>).';
-        form.prepend(banner);
-      }
-      if (launchBtn) launchBtn.disabled = true;
-    } else if (banner) {
-      banner.remove();
-    }
-
-    // 2. Asset Selector Decorator
-    let assetPickerRow = form.querySelector('[data-scout-asset-picker-row]');
-    if (!assetPickerRow) {
-      assetPickerRow = document.createElement('div');
-      assetPickerRow.dataset.scoutAssetPickerRow = 'true';
-      assetPickerRow.className = 'tmx-field tmx-field-wide';
-      assetPickerRow.style.cssText = 'margin-bottom:1rem;';
-      assetPickerRow.innerHTML = `
-        <label style="display:block;font-weight:600;margin-bottom:0.35rem;font-size:0.875rem;">Select Inventory Asset (Required for Scan Authorization)</label>
-        <select data-scout-asset-select style="width:100%;padding:0.5rem;background:#1e293b;border:1px solid #334155;border-radius:4px;color:#f8fafc;font-size:0.875rem;">
-          <option value="">-- Choose an active asset --</option>
-        </select>
-        <div data-scout-asset-info style="margin-top:0.5rem;font-size:0.85rem;display:none;padding:0.5rem 0.75rem;border-radius:4px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);">
-          <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;">
-            <span>Target: <strong data-scout-target-label>-</strong></span>
-            <span>Classification: <span class="tmx-status" data-scout-kind-badge>-</span></span>
-            <span>Scan Authorization: <span class="tmx-status" data-scout-auth-badge>-</span></span>
+      // Render outer scaffolding with dual tabs
+      host.innerHTML = `
+        <header class="tmx-heading">
+          <div>
+            <h1>SCOUT &middot; Attack Surface & Vulnerability Intelligence</h1>
+            <p>Perimeter attack surface discovery and authoritative global CVE threat intelligence.</p>
           </div>
-          <div data-scout-warn-msg style="color:#ef4444;margin-top:0.35rem;display:none;"></div>
-        </div>
+        </header>
+
+        <nav class="tmx-tab-bar" aria-label="SCOUT Navigation">
+          <button type="button" class="tmx-tab ${scoutActiveTab === 'scans' ? 'tmx-tab-active' : ''}" data-scout-nav="scans">
+            External Scans
+          </button>
+          <button type="button" class="tmx-tab ${scoutActiveTab === 'intel' ? 'tmx-tab-active' : ''}" data-scout-nav="intel">
+            Vulnerability Intelligence
+          </button>
+        </nav>
+
+        <div data-scout-tab-content></div>
       `;
-      targetInput.parentElement.insertAdjacentElement('beforebegin', assetPickerRow);
 
-      const select = assetPickerRow.querySelector('[data-scout-asset-select]');
-      loadTenantAssets().then((assets) => {
-        if (!assets || !assets.length) {
-          select.innerHTML = '<option value="">No active assets found in inventory</option>';
-          return;
-        }
-        select.innerHTML = '<option value="">-- Select an authorized asset to scan --</option>' + assets.map((a) => {
-          const classification = a.target_classification || {};
-          const auth = a.scan_authorization || {};
-          const isScannable = classification.is_public_scannable;
-          const authStatus = auth.status || 'unauthorized';
-          const targetDisplay = classification.target || a.hostname || a.ip_address || a.name;
-          const tag = isScannable ? (authStatus === 'approved' ? ' [Authorized]' : ` [${titleCase(authStatus)}]`) : ' [Internal/RFC1918 - Not Scannable]';
-          return `<option value="${escapeHtml(a.id)}" data-target="${escapeHtml(targetDisplay)}" data-kind="${escapeHtml(classification.target_kind || '')}" data-scannable="${isScannable ? 'true' : 'false'}" data-auth="${escapeHtml(authStatus)}">${escapeHtml(a.name)} — ${escapeHtml(targetDisplay)}${tag}</option>`;
-        }).join('');
-      }).catch(() => {});
+      const tabContainer = host.querySelector('[data-scout-tab-content]');
 
-      select.addEventListener('change', () => {
-        const opt = select.selectedOptions?.[0];
-        const info = assetPickerRow.querySelector('[data-scout-asset-info]');
-        const targetLabel = assetPickerRow.querySelector('[data-scout-target-label]');
-        const kindBadge = assetPickerRow.querySelector('[data-scout-kind-badge]');
-        const authBadge = assetPickerRow.querySelector('[data-scout-auth-badge]');
-        const warnMsg = assetPickerRow.querySelector('[data-scout-warn-msg]');
-
-        if (!opt || !opt.value) {
-          if (info) info.style.display = 'none';
-          return;
-        }
-        if (info) info.style.display = 'block';
-        const target = opt.dataset.target || '';
-        const kind = opt.dataset.kind || '';
-        const scannable = opt.dataset.scannable === 'true';
-        const authStatus = opt.dataset.auth || 'unauthorized';
-
-        targetInput.value = target;
-        targetInput.dispatchEvent(new Event('input', { bubbles: true }));
-
-        if (targetLabel) targetLabel.textContent = target;
-        if (kindBadge) {
-          kindBadge.textContent = titleCase(kind);
-          kindBadge.className = `tmx-status ${scannable ? 'tmx-status-available' : 'tmx-status-high'}`;
-        }
-        if (authBadge) {
-          authBadge.textContent = titleCase(authStatus);
-          authBadge.className = `tmx-status ${authStatus === 'approved' ? 'tmx-status-available' : (authStatus === 'pending' ? 'tmx-status-high' : 'tmx-status-critical')}`;
-        }
-
-        let err = '';
-        if (!scannable) {
-          err = 'Target is internal RFC 1918. Central scanning is unsupported.';
-        } else if (authStatus !== 'approved') {
-          err = `Asset scan authorization is ${authStatus}. Platform Superadmin approval required.`;
-        }
-
-        if (err) {
-          if (warnMsg) { warnMsg.textContent = err; warnMsg.style.display = 'block'; }
-          if (launchBtn) launchBtn.disabled = true;
-        } else {
-          if (warnMsg) warnMsg.style.display = 'none';
-          if (launchBtn && activeScanningEnabled) launchBtn.disabled = false;
-        }
+      // Tab switcher event listeners
+      host.querySelectorAll('[data-scout-nav]').forEach((tabBtn) => {
+        tabBtn.addEventListener('click', () => {
+          const targetTab = tabBtn.dataset.scoutNav;
+          if (targetTab === scoutActiveTab) return;
+          scoutActiveTab = targetTab;
+          host.querySelectorAll('[data-scout-nav]').forEach((b) => b.classList.toggle('tmx-tab-active', b.dataset.scoutNav === scoutActiveTab));
+          if (scoutActiveTab === 'scans') {
+            renderScansTab();
+          } else {
+            renderIntelTab();
+          }
+        });
       });
+
+      function renderScansTab() {
+        // Kill-switch banner & Engine indicators
+        let killSwitchHtml = '';
+        if (!activeScanningEnabled) {
+          killSwitchHtml = `
+            <div class="tmx-banner tmx-banner-warning">
+              <div>
+                <strong>Central Active Scanning is Disabled:</strong> Active network probing from central Tempris VPS is disabled globally (<code>SCOUT_ACTIVE_SCANNING_ENABLED=false</code>).
+              </div>
+            </div>`;
+        } else {
+          killSwitchHtml = `
+            <div class="tmx-banner tmx-banner-success">
+              <div>
+                <strong>Active Scanning Enabled:</strong> Scans execute safely from central Tempris VPS against verified customer assets with approved platform scan authorizations.
+              </div>
+            </div>`;
+        }
+
+        const engineBadgesHtml = `
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:12px;">
+            <span style="color:#a1a1aa;font-weight:600;">Engines:</span>
+            <span class="tmx-status ${nucleiAvailable ? 'tmx-status-available' : 'tmx-status-high'}">
+              Nuclei: ${nucleiAvailable ? 'Available' : 'Unavailable (CLI not detected)'}
+            </span>
+            <span class="tmx-status ${nmapAvailable ? 'tmx-status-available' : 'tmx-status-high'}">
+              Nmap: ${nmapAvailable ? 'Available (TCP Connect)' : 'Unavailable (Fallback to TCP Connect)'}
+            </span>
+            <span class="tmx-status ${activeScanningEnabled ? 'tmx-status-available' : 'tmx-status-neutral'}">
+              Built-in TCP: ${activeScanningEnabled ? 'Active' : 'Available'}
+            </span>
+            <span style="color:#71717a;margin-left:auto;">Scope: External Public IP/DNS Only (No RFC 1918)</span>
+          </div>`;
+
+        // Asset select options
+        let assetOptions = '<option value="">-- Select an authorized asset to scan --</option>';
+        if (assets && assets.length) {
+          assetOptions += assets.map((a) => {
+            const classification = a.target_classification || {};
+            const auth = a.scan_authorization || {};
+            const eligibility = a.scan_eligibility || {};
+            const isEligible = Boolean(a.scan_eligible ?? eligibility.eligible);
+            const ineligibleReason = a.scan_ineligible_reason || eligibility.reason || '';
+            const authStatus = auth.status || 'unauthorized';
+            const targetDisplay = classification.target || a.hostname || a.ip_address || a.name;
+            const tag = isEligible
+              ? ' [Authorized]'
+              : (!classification.is_public_scannable
+                ? ' [Internal/RFC1918 - Not Scannable]'
+                : (auth.is_expired || authStatus === 'expired'
+                  ? ' [Expired]'
+                  : ` [${titleCase(authStatus)}]`));
+            return `<option value="${escapeHtml(a.id)}" data-target="${escapeHtml(targetDisplay)}" data-kind="${escapeHtml(classification.target_kind || '')}" data-scannable="${classification.is_public_scannable ? 'true' : 'false'}" data-auth="${escapeHtml(authStatus)}" data-scan-eligible="${isEligible ? 'true' : 'false'}" data-scan-ineligible-reason="${escapeHtml(ineligibleReason)}">${escapeHtml(a.name)} — ${escapeHtml(targetDisplay)}${tag}</option>`;
+          }).join('');
+        } else if (assets === null) {
+          assetOptions = '<option value="">Failed to load assets</option>';
+        } else {
+          assetOptions = '<option value="">No active assets found in inventory</option>';
+        }
+
+        // History rows
+        const historyRows = (scanHistory || []).map((job) => {
+          const statusCls = job.status === 'completed' ? 'tmx-status-available' : (job.status === 'failed' ? 'tmx-status-critical' : 'tmx-status-high');
+          const enginesList = Array.isArray(job.engines) ? job.engines.join(', ') : (job.engines || 'Built-in TCP');
+          return `
+            <tr>
+              <td><code>${escapeHtml(job.scan_id || '-')}</code></td>
+              <td><strong>${escapeHtml(job.target || '-')}</strong></td>
+              <td>${escapeHtml(enginesList)}</td>
+              <td>${escapeHtml(job.findings_count ?? 0)}</td>
+              <td><span class="tmx-status ${statusCls}">${escapeHtml(titleCase(job.status || 'unknown'))}</span></td>
+              <td>${escapeHtml(formatDate(job.started_at))}</td>
+            </tr>`;
+        }).join('');
+
+        // Findings rows
+        const findingsRows = (scanFindings || []).map((f) => {
+          const riskCls = f.risk === 'Critical' ? 'tmx-status-critical' : (f.risk === 'High' ? 'tmx-status-high' : 'tmx-status-available');
+          return `
+            <tr>
+              <td><strong>${escapeHtml(f.target || '-')}</strong></td>
+              <td>${escapeHtml(f.port ? `${f.port}/${f.service || 'tcp'}` : (f.service || 'host'))}</td>
+              <td><span class="tmx-status ${riskCls}">${escapeHtml(f.risk || 'Info')}</span></td>
+              <td>${escapeHtml(f.detail || '-')}</td>
+              <td>${escapeHtml(formatDate(f.discovered_at))}</td>
+            </tr>`;
+        }).join('');
+
+        const summaryLoaded = scanSummary !== null;
+        const valOrUnavail = (val) => (summaryLoaded ? escapeHtml(val ?? 0) : '<span class="tmx-status tmx-status-neutral" style="font-size:10px;padding:1px 4px;min-height:18px;">Unavailable</span>');
+
+        let scanProfileOptions = '';
+        if (nucleiAvailable) {
+          scanProfileOptions += '<option value="full">Full Perimeter Scan (Nuclei CVEs + Port Discovery)</option>';
+          scanProfileOptions += '<option value="quick">Quick Discovery (Nuclei CVE Templates)</option>';
+        } else {
+          scanProfileOptions += '<option value="full" disabled>Full Perimeter Scan (Nuclei unavailable)</option>';
+          scanProfileOptions += '<option value="quick" disabled>Quick Discovery (Nuclei unavailable)</option>';
+        }
+        scanProfileOptions += '<option value="ports">Port Discovery (TCP Connect Scan)</option>';
+
+        tabContainer.innerHTML = `
+          <div class="tmx-page">
+            <section class="tmx-panel">
+              <div class="tmx-panel-body" style="display:grid;gap:10px;">
+                ${killSwitchHtml}
+                ${engineBadgesHtml}
+              </div>
+            </section>
+
+            <section class="tmx-metrics">
+              <div class="tmx-metric"><div class="tmx-metric-label">Scan Runs</div><div class="tmx-metric-value">${valOrUnavail(scanSummary?.scans)}</div></div>
+              <div class="tmx-metric"><div class="tmx-metric-label">All Observations</div><div class="tmx-metric-value">${valOrUnavail(scanSummary?.total_observations ?? scanSummary?.total)}</div></div>
+              <div class="tmx-metric"><div class="tmx-metric-label">Service Observations</div><div class="tmx-metric-value">${valOrUnavail(scanSummary?.service_observations)}</div></div>
+              <div class="tmx-metric"><div class="tmx-metric-label">Vulnerability Observations</div><div class="tmx-metric-value">${valOrUnavail(scanSummary?.vulnerability_observations)}</div></div>
+              <div class="tmx-metric"><div class="tmx-metric-label">Normalized Vulnerability Findings</div><div class="tmx-metric-value tmx-tone-high">${valOrUnavail(scanSummary?.normalized_findings)}</div></div>
+              <div class="tmx-metric"><div class="tmx-metric-label">Confirmed Scan Exposures</div><div class="tmx-metric-value tmx-tone-critical">${valOrUnavail(scanSummary?.confirmed_scan_exposures)}</div></div>
+            </section>
+
+            <section class="tmx-panel">
+              <div class="tmx-panel-header">
+                <h2>Launch External Perimeter Scan</h2>
+              </div>
+              <div class="tmx-panel-body">
+                <form data-scout-scan-form style="display:grid;gap:16px;">
+                  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:16px;">
+                    <div>
+                      <label style="display:block;font-weight:600;font-size:12px;color:#a1a1aa;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;">Select Target Asset (Required)</label>
+                      <select name="asset_id" required style="width:100%;min-height:38px;padding:8px 12px;background:#0f0f11;border:1px solid #3f3f46;border-radius:6px;color:#f4f4f5;font-size:13px;" data-scout-asset-select>
+                        ${assetOptions}
+                      </select>
+                    </div>
+                    <div>
+                      <label style="display:block;font-weight:600;font-size:12px;color:#a1a1aa;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;">Scan Profile</label>
+                      <select name="scan_type" style="width:100%;min-height:38px;padding:8px 12px;background:#0f0f11;border:1px solid #3f3f46;border-radius:6px;color:#f4f4f5;font-size:13px;">
+                        ${scanProfileOptions}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div data-scout-asset-preview style="display:none;padding:12px 16px;border-radius:6px;background:#141416;border:1px solid #27272a;">
+                    <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;font-size:13px;">
+                      <span>Target: <strong data-preview-target>-</strong></span>
+                      <span>Classification: <span class="tmx-status" data-preview-kind>-</span></span>
+                      <span>Scan Authorization: <span class="tmx-status" data-preview-auth>-</span></span>
+                    </div>
+                    <div data-preview-warning style="color:#ef4444;font-size:12px;margin-top:8px;display:none;"></div>
+                  </div>
+
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:8px;">
+                    <span data-scan-status-msg style="font-size:13px;color:#a1a1aa;"></span>
+                    <button type="submit" class="tmx-button" data-scout-launch-btn ${!activeScanningEnabled ? 'disabled' : ''}>
+                      Launch Scan
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </section>
+
+            <section class="tmx-grid">
+              <div class="tmx-panel">
+                <div class="tmx-panel-header">
+                  <h2>Recent Scan Jobs</h2>
+                </div>
+                <div class="tmx-table-wrap">
+                  <table class="tmx-table">
+                    <thead>
+                      <tr>
+                        <th>Scan ID</th>
+                        <th>Target</th>
+                        <th>Engines</th>
+                        <th>Findings</th>
+                        <th>Status</th>
+                        <th>Started</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${historyRows || '<tr><td colspan="6" class="tmx-empty">No scan jobs executed yet.</td></tr>'}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="tmx-panel">
+                <div class="tmx-panel-header">
+                  <h2>Discovered Surface Findings</h2>
+                </div>
+                <div class="tmx-table-wrap">
+                  <table class="tmx-table">
+                    <thead>
+                      <tr>
+                        <th>Target</th>
+                        <th>Service / Port</th>
+                        <th>Risk</th>
+                        <th>Detail</th>
+                        <th>Discovered</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${findingsRows || '<tr><td colspan="5" class="tmx-empty">No scan findings observed.</td></tr>'}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          </div>
+        `;
+
+        // Wire up scan form asset selection & submission
+        const scanForm = tabContainer.querySelector('[data-scout-scan-form]');
+        const assetSelect = tabContainer.querySelector('[data-scout-asset-select]');
+        const assetPreview = tabContainer.querySelector('[data-scout-asset-preview]');
+        const previewTarget = tabContainer.querySelector('[data-preview-target]');
+        const previewKind = tabContainer.querySelector('[data-preview-kind]');
+        const previewAuth = tabContainer.querySelector('[data-preview-auth]');
+        const previewWarning = tabContainer.querySelector('[data-preview-warning]');
+        const launchBtn = tabContainer.querySelector('[data-scout-launch-btn]');
+        const statusMsg = tabContainer.querySelector('[data-scan-status-msg]');
+
+        assetSelect.addEventListener('change', () => {
+          const opt = assetSelect.selectedOptions?.[0];
+          if (!opt || !opt.value) {
+            assetPreview.style.display = 'none';
+            if (launchBtn && activeScanningEnabled) launchBtn.disabled = true;
+            return;
+          }
+          assetPreview.style.display = 'block';
+          const target = opt.dataset.target || '';
+          const kind = opt.dataset.kind || '';
+          const scannable = opt.dataset.scannable === 'true';
+          const authStatus = opt.dataset.auth || 'unauthorized';
+          const isEligible = opt.dataset.scanEligible === 'true';
+          const ineligibleReason = opt.dataset.scanIneligibleReason || '';
+
+          previewTarget.textContent = target;
+          previewKind.textContent = titleCase(kind);
+          previewKind.className = `tmx-status ${scannable ? 'tmx-status-available' : 'tmx-status-high'}`;
+          previewAuth.textContent = isEligible ? 'Authorized' : titleCase(authStatus);
+          previewAuth.className = `tmx-status ${isEligible ? 'tmx-status-available' : (authStatus === 'pending' ? 'tmx-status-high' : 'tmx-status-critical')}`;
+
+          if (!isEligible) {
+            previewWarning.textContent = ineligibleReason || `Asset scan authorization is ${authStatus}. Platform Superadmin approval required in Asset Inventory.`;
+            previewWarning.style.display = 'block';
+            if (launchBtn) launchBtn.disabled = true;
+          } else {
+            previewWarning.style.display = 'none';
+            if (launchBtn && activeScanningEnabled) launchBtn.disabled = false;
+          }
+        });
+
+        scanForm.addEventListener('submit', async (ev) => {
+          ev.preventDefault();
+          const formData = new FormData(scanForm);
+          const assetId = formData.get('asset_id');
+          const scanType = formData.get('scan_type') || 'full';
+
+          if (!assetId) {
+            statusMsg.textContent = 'Please select a valid inventory asset.';
+            statusMsg.style.color = '#ef4444';
+            return;
+          }
+
+          launchBtn.disabled = true;
+          launchBtn.textContent = 'Scanning in progress...';
+          statusMsg.textContent = 'Executing perimeter scan via central VPS...';
+          statusMsg.style.color = '#a1a1aa';
+
+          try {
+            const res = await apiJson('/api/scanner/run', {
+              method: 'POST',
+              body: { asset_id: assetId, scan_type: scanType },
+            });
+            statusMsg.textContent = `Scan completed successfully! ${res.findings_count ?? res.result_count ?? 0} observations recorded.`;
+            statusMsg.style.color = '#34d399';
+            setTimeout(() => {
+              renderScoutRoute(host);
+            }, 1200);
+          } catch (err) {
+            statusMsg.textContent = `Scan failed: ${err.message}`;
+            statusMsg.style.color = '#ef4444';
+            launchBtn.disabled = false;
+            launchBtn.textContent = 'Launch Scan';
+          }
+        });
+      }
+
+      async function renderIntelTab() {
+        tabContainer.innerHTML = `
+          <div class="tmx-page">
+            <div style="padding:20px;text-align:center;color:#a1a1aa;">
+              Loading Canonical Vulnerability Intelligence catalogue...
+            </div>
+          </div>`;
+
+        try {
+          const params = new URLSearchParams();
+          params.set('page', scoutIntelPage);
+          params.set('limit', '20');
+          if (scoutIntelSearch.trim()) params.set('search', scoutIntelSearch.trim());
+          if (scoutIntelKevOnly) params.set('kev_only', 'true');
+          if (scoutIntelRansomwareOnly) params.set('ransomware_only', 'true');
+          if (scoutIntelStatus) params.set('status', scoutIntelStatus);
+
+          const intelResponse = await api(`/api/scout/vulnerabilities?${params.toString()}`);
+          const vulns = intelResponse.data || [];
+          const meta = intelResponse.meta || {
+            catalog_total: vulns.length,
+            filtered_total: vulns.length,
+            total: vulns.length,
+            critical_count: 0,
+            kev_count: 0,
+            ransomware_count: 0,
+            cvss_coverage_count: 0,
+            cvss_total_coverage: 0,
+            kev_total_count: 0,
+            page: 1,
+            limit: 20,
+            total_pages: 1,
+          };
+
+          const catalogTotal = meta.catalog_total ?? meta.total ?? 0;
+          const filteredTotal = meta.filtered_total ?? meta.total ?? 0;
+          const isFiltered = Boolean(scoutIntelSearch.trim() || scoutIntelKevOnly || scoutIntelRansomwareOnly || scoutIntelStatus);
+          const criticalCount = meta.critical_count ?? 0;
+          const kevCount = meta.kev_count ?? 0;
+          const ransomwareCount = meta.ransomware_count ?? 0;
+
+          const rowsHtml = vulns.map((v) => {
+            const cvss = v.cvss || {};
+            const kev = v.cisa_kev || {};
+            const hasScore = cvss.score != null;
+            const score = hasScore ? Number(cvss.score).toFixed(1) : 'N/A';
+            const severityCls = hasScore
+              ? (cvss.score >= 9.0 ? 'tmx-status-critical' : (cvss.score >= 7.0 ? 'tmx-status-high' : 'tmx-status-available'))
+              : 'tmx-status-neutral';
+
+            const descSource = v.description_source || 'Not available';
+            const cvssVer = cvss.version ? `v${escapeHtml(cvss.version)}` : 'N/A';
+            const cvssSource = cvss.source || 'Not available';
+
+            const kevBadge = kev.is_kev ? `<span class="tmx-tag-kev">CISA KEV</span>` : '';
+            const ransomwareBadge = kev.is_ransomware ? `<span class="tmx-tag-ransomware">Ransomware</span>` : '';
+
+            return `
+              <tr>
+                <td>
+                  <span class="tmx-tag-cve">${escapeHtml(v.cve_id)}</span>
+                </td>
+                <td>
+                  <div style="font-weight:600;color:#f4f4f5;margin-bottom:4px;max-width:480px;line-height:1.4;">
+                    ${escapeHtml(v.description || 'No description available')}
+                  </div>
+                  <div style="font-size:11px;color:#71717a;">
+                    Source: ${escapeHtml(descSource)} &middot; Published: ${escapeHtml(v.published_at ? new Date(v.published_at).toLocaleDateString() : 'Unknown')}
+                  </div>
+                </td>
+                <td>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <span class="tmx-status ${severityCls}">${score}</span>
+                    <span style="font-size:11px;color:#a1a1aa;">${cvssVer}</span>
+                  </div>
+                  <div style="font-size:11px;color:#71717a;margin-top:2px;">
+                    ${escapeHtml(cvssSource)}
+                  </div>
+                </td>
+                <td>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                    ${kevBadge || (ransomwareBadge ? '' : '<span style="color:#52525b;font-size:11px;">None</span>')}
+                    ${ransomwareBadge}
+                  </div>
+                </td>
+                <td>
+                  <button type="button" class="tmx-button tmx-button-secondary tmx-button-small" style="font-size:11px;padding:4px 8px;min-height:28px;" data-cve-detail="${escapeHtml(v.cve_id)}">
+                    Inspect Intel
+                  </button>
+                </td>
+              </tr>`;
+          }).join('');
+
+          tabContainer.innerHTML = `
+            <div class="tmx-page">
+              <section class="tmx-metrics">
+                <div class="tmx-metric">
+                  <div class="tmx-metric-label">${isFiltered ? 'Matching Filter Results' : 'Total Catalog CVEs'}</div>
+                  <div class="tmx-metric-value">${escapeHtml(isFiltered ? `${filteredTotal} / ${catalogTotal}` : catalogTotal)}</div>
+                </div>
+                <div class="tmx-metric">
+                  <div class="tmx-metric-label">CVSS Critical (&ge; 9.0)</div>
+                  <div class="tmx-metric-value tmx-tone-critical">${escapeHtml(criticalCount)}</div>
+                </div>
+                <div class="tmx-metric">
+                  <div class="tmx-metric-label">CISA KEV Exploited</div>
+                  <div class="tmx-metric-value tmx-tone-high">${escapeHtml(kevCount)}</div>
+                </div>
+                <div class="tmx-metric">
+                  <div class="tmx-metric-label">Known Ransomware Linked</div>
+                  <div class="tmx-metric-value tmx-tone-critical">${escapeHtml(ransomwareCount)}</div>
+                </div>
+                <div class="tmx-metric">
+                  <div class="tmx-metric-label">CVSS Provenance</div>
+                  <div class="tmx-metric-value tmx-tone-success">${escapeHtml(meta.cvss_total_coverage ?? meta.cvss_coverage_count ?? 0)} / ${escapeHtml(catalogTotal)}</div>
+                </div>
+              </section>
+
+              <section class="tmx-panel">
+                <div class="tmx-search-filter-bar">
+                  <div class="tmx-search-box">
+                    <input type="search" class="tmx-search-input" placeholder="Search CVE ID (e.g. CVE-2021-44228), description, vendor, or product..." value="${escapeHtml(scoutIntelSearch)}" data-intel-search-input>
+                    <button type="button" class="tmx-button" data-intel-search-btn>Search</button>
+                  </div>
+                  <div class="tmx-filter-group">
+                    <label class="tmx-filter-checkbox">
+                      <input type="checkbox" data-intel-kev-check ${scoutIntelKevOnly ? 'checked' : ''}>
+                      <span>CISA KEV Only</span>
+                    </label>
+                    <label class="tmx-filter-checkbox">
+                      <input type="checkbox" data-intel-ransomware-check ${scoutIntelRansomwareOnly ? 'checked' : ''}>
+                      <span>Ransomware Only</span>
+                    </label>
+                    <select class="tmx-filter-select" data-intel-status-select>
+                      <option value="">All Statuses</option>
+                      <option value="published" ${scoutIntelStatus === 'published' ? 'selected' : ''}>Published</option>
+                      <option value="rejected" ${scoutIntelStatus === 'rejected' ? 'selected' : ''}>Rejected</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="tmx-table-wrap">
+                  <table class="tmx-table">
+                    <thead>
+                      <tr>
+                        <th>CVE Identifier</th>
+                        <th>Vulnerability Summary & Description</th>
+                        <th>CVSS Score & Authority</th>
+                        <th>Threat Intelligence</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${rowsHtml || '<tr><td colspan="5" class="tmx-empty">No canonical vulnerabilities matching search criteria.</td></tr>'}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div class="tmx-pagination">
+                  <div>
+                    Showing Page <strong>${meta.page}</strong> of <strong>${meta.total_pages}</strong> (${filteredTotal} matching catalog CVEs)
+                  </div>
+                  <div class="tmx-pagination-buttons">
+                    <button type="button" class="tmx-button tmx-button-secondary" data-intel-prev-page ${meta.page <= 1 ? 'disabled' : ''}>&larr; Previous</button>
+                    <button type="button" class="tmx-button tmx-button-secondary" data-intel-next-page ${meta.page >= meta.total_pages ? 'disabled' : ''}>Next &rarr;</button>
+                  </div>
+                </div>
+              </section>
+
+              <dialog class="tmx-dialog" data-cve-modal>
+                <div style="padding:22px;display:grid;gap:16px;max-width:680px;color:#f4f4f5;">
+                  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+                    <div>
+                      <h2 data-modal-cve-id style="margin:0;font-size:20px;font-family:monospace;color:#60a5fa;"></h2>
+                      <p data-modal-published style="margin:4px 0 0;color:#a1a1aa;font-size:12px;"></p>
+                    </div>
+                    <button type="button" class="tmx-button tmx-button-secondary" data-modal-close style="padding:4px 10px;min-height:28px;">&times; Close</button>
+                  </div>
+                  <div data-modal-body style="display:grid;gap:12px;font-size:13px;line-height:1.5;"></div>
+                </div>
+              </dialog>
+            </div>
+          `;
+
+          // Wire search and filter inputs
+          const searchInput = tabContainer.querySelector('[data-intel-search-input]');
+          const searchBtn = tabContainer.querySelector('[data-intel-search-btn]');
+          const kevCheck = tabContainer.querySelector('[data-intel-kev-check]');
+          const ransomwareCheck = tabContainer.querySelector('[data-intel-ransomware-check]');
+          const statusSelect = tabContainer.querySelector('[data-intel-status-select]');
+          const prevBtn = tabContainer.querySelector('[data-intel-prev-page]');
+          const nextBtn = tabContainer.querySelector('[data-intel-next-page]');
+          const cveModal = tabContainer.querySelector('[data-cve-modal]');
+          const modalClose = tabContainer.querySelector('[data-modal-close]');
+
+          const triggerSearch = () => {
+            scoutIntelSearch = searchInput.value;
+            scoutIntelPage = 1;
+            renderIntelTab();
+          };
+
+          searchBtn.addEventListener('click', triggerSearch);
+          searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') triggerSearch();
+          });
+
+          kevCheck.addEventListener('change', () => {
+            scoutIntelKevOnly = kevCheck.checked;
+            scoutIntelPage = 1;
+            renderIntelTab();
+          });
+
+          ransomwareCheck.addEventListener('change', () => {
+            scoutIntelRansomwareOnly = ransomwareCheck.checked;
+            scoutIntelPage = 1;
+            renderIntelTab();
+          });
+
+          statusSelect.addEventListener('change', () => {
+            scoutIntelStatus = statusSelect.value;
+            scoutIntelPage = 1;
+            renderIntelTab();
+          });
+
+          if (prevBtn) {
+            prevBtn.addEventListener('click', () => {
+              if (scoutIntelPage > 1) {
+                scoutIntelPage--;
+                renderIntelTab();
+              }
+            });
+          }
+
+          if (nextBtn) {
+            nextBtn.addEventListener('click', () => {
+              if (scoutIntelPage < meta.total_pages) {
+                scoutIntelPage++;
+                renderIntelTab();
+              }
+            });
+          }
+
+          if (modalClose) {
+            modalClose.addEventListener('click', () => cveModal.close());
+          }
+
+          // Inspect Intel Modal
+          tabContainer.querySelectorAll('[data-cve-detail]').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+              const cveId = btn.dataset.cveDetail;
+              try {
+                const detail = await api(`/api/scout/vulnerabilities/${encodeURIComponent(cveId)}`);
+                const modalCveId = cveModal.querySelector('[data-modal-cve-id]');
+                const modalPublished = cveModal.querySelector('[data-modal-published]');
+                const modalBody = cveModal.querySelector('[data-modal-body]');
+
+                modalCveId.textContent = detail.cve_id;
+                modalPublished.textContent = `Status: ${detail.status} · Published: ${detail.published_at ? new Date(detail.published_at).toLocaleString() : 'N/A'}`;
+
+                const pref = detail.preferred_cvss || {};
+                const kev = detail.cisa_kev || {};
+                const assessments = detail.all_cvss_assessments || [];
+
+                const assessmentsHtml = assessments.map((a) => {
+                  const itemSevCls = a.base_score != null
+                    ? (a.base_score >= 9.0 ? 'tmx-status-critical' : (a.base_score >= 7.0 ? 'tmx-status-high' : 'tmx-status-available'))
+                    : 'tmx-status-neutral';
+                  const roleLabel = a.source_role ? ` (${escapeHtml(a.source_role)})` : '';
+                  return `
+                  <div style="background:#09090b;padding:8px 12px;border-radius:6px;border:1px solid #27272a;font-size:12px;">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                      <strong>${escapeHtml(a.source || 'Not available')}${roleLabel}</strong>
+                      <span class="tmx-status ${itemSevCls}">
+                        ${a.base_score != null ? a.base_score : 'N/A'} ${a.cvss_version ? `(v${escapeHtml(a.cvss_version)})` : ''}
+                      </span>
+                    </div>
+                    <div style="font-family:monospace;color:#94a3b8;font-size:11px;">
+                      ${escapeHtml(a.vector_string || 'No vector string recorded')}
+                    </div>
+                  </div>`;
+                }).join('');
+
+                const hasPrefScore = pref.score != null;
+                const prefScoreColor = hasPrefScore
+                  ? (pref.score >= 9.0 ? '#ef4444' : (pref.score >= 7.0 ? '#f59e0b' : '#10b981'))
+                  : '#a1a1aa';
+
+                modalBody.innerHTML = `
+                  <div style="background:#141416;padding:12px;border-radius:6px;border:1px solid #27272a;">
+                    <strong style="color:#a1a1aa;font-size:11px;text-transform:uppercase;">Description</strong>
+                    <p style="margin:6px 0 0;color:#f4f4f5;">${escapeHtml(detail.description || 'No description available')}</p>
+                  </div>
+
+                  <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:12px;">
+                    <div style="background:#141416;padding:12px;border-radius:6px;border:1px solid #27272a;">
+                      <strong style="color:#a1a1aa;font-size:11px;text-transform:uppercase;">Preferred CVSS Assessment</strong>
+                      <div style="margin-top:6px;font-size:18px;font-weight:700;color:${prefScoreColor}">
+                        ${hasPrefScore ? pref.score : 'N/A'} ${pref.version ? `<span style="font-size:12px;color:#a1a1aa;">(v${escapeHtml(pref.version)})</span>` : ''}
+                      </div>
+                      <div style="font-size:11px;color:#94a3b8;margin-top:4px;">Authority: ${escapeHtml(pref.source || 'Not available')} (${escapeHtml(pref.provenance || 'Unassessed')})</div>
+                      <div style="font-family:monospace;font-size:11px;color:#71717a;margin-top:4px;">${escapeHtml(pref.vector || '-')}</div>
+                    </div>
+
+                    <div style="background:#141416;padding:12px;border-radius:6px;border:1px solid #27272a;">
+                      <strong style="color:#a1a1aa;font-size:11px;text-transform:uppercase;">CISA KEV Status</strong>
+                      <div style="margin-top:6px;">
+                        ${kev.is_kev ? '<span class="tmx-tag-kev">CISA KEV EXPLOITED</span>' : '<span style="color:#71717a;">Not in CISA KEV</span>'}
+                        ${kev.is_ransomware ? '<span class="tmx-tag-ransomware" style="margin-left:6px;">Ransomware Linked</span>' : ''}
+                      </div>
+                      ${kev.required_action ? `<div style="font-size:11px;color:#f87171;margin-top:6px;">Action: ${escapeHtml(kev.required_action)}</div>` : ''}
+                      ${kev.due_date ? `<div style="font-size:11px;color:#a1a1aa;margin-top:2px;">Remediation Due: ${escapeHtml(kev.due_date)}</div>` : ''}
+                    </div>
+                  </div>
+
+                  ${assessments.length ? `
+                    <div style="margin-top:6px;">
+                      <strong style="color:#a1a1aa;font-size:11px;text-transform:uppercase;margin-bottom:6px;display:block;">All Recorded CVSS Assessments (${assessments.length})</strong>
+                      <div style="display:grid;gap:8px;">${assessmentsHtml}</div>
+                    </div>
+                  ` : ''}
+                `;
+
+                cveModal.showModal();
+              } catch (err) {
+                alert(`Could not load CVE details: ${err.message}`);
+              }
+            });
+          });
+
+        } catch (err) {
+          tabContainer.innerHTML = `
+            <div class="tmx-page">
+              <div class="tmx-banner tmx-banner-danger">
+                <div>Failed to load Vulnerability Intelligence: ${escapeHtml(err.message)}</div>
+              </div>
+            </div>`;
+        }
+      }
+
+      // Initial tab render
+      if (scoutActiveTab === 'scans') {
+        renderScansTab();
+      } else {
+        renderIntelTab();
+      }
+
+    } catch (error) {
+      host.innerHTML = `<div class="tmx-error"><h2>SCOUT could not be loaded</h2><p>${escapeHtml(error.message)}</p></div>`;
     }
   }
 
@@ -2440,6 +3041,7 @@
     if (path === '/packages') renderPackagesRoute(host);
     if (path === '/vdp-queue') renderVdpQueueRoute(host);
     if (path === '/assets') renderAssetsRoute(host);
+    if (path === '/scout') renderScoutRoute(host);
   }
 
   function reconcile() {
@@ -2448,7 +3050,6 @@
     ensureNavigation();
     decorateSynthesisPanel();
     decorateVdp();
-    decorateScout();
     renderCurrentRoute();
   }
 

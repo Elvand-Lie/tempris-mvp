@@ -227,7 +227,7 @@ def test_synthesis_dashboard_downstream_contract(db_session):
 
 
 def test_spectrum_scope_filtering_and_canonical_context(db_session):
-    """SPECTRUM findings endpoint isolates scopes properly."""
+    """SPECTRUM findings endpoint isolates scopes properly and returns unified canonical intelligence."""
     user = {"sub": "analyst@downstream.internal", "role": "Analyst", "tenant_id": "tenant-downstream"}
 
     # 1. Confirmed Exposure scope
@@ -235,10 +235,23 @@ def test_spectrum_scope_filtering_and_canonical_context(db_session):
         page=1, limit=50, scope="confirmed_exposure", db=db_session, user=user,
     )
     assert len(confirmed["data"]) == 1
-    assert confirmed["data"][0]["id"] == "F-DOWN-001"
-    assert confirmed["data"][0]["record_scope"] == "confirmed_exposure"
-    assert confirmed["data"][0]["cve"] == "CVE-2021-44228"
-    assert confirmed["data"][0]["assets"][0]["asset_id"] == "A-GATEWAY-01"
+    f = confirmed["data"][0]
+    assert f["id"] == "F-DOWN-001"
+    assert f["record_scope"] == "confirmed_exposure"
+    assert f["cve"] == "CVE-2021-44228"
+    assert f["assets"][0]["asset_id"] == "A-GATEWAY-01"
+
+    # Canonical intelligence resolution validation
+    assert f["severity"]["score"] == 10.0
+    assert f["severity"]["version"] == "3.1"
+    assert f["severity"]["source_authority"] == "nvd@nist.gov"
+    assert f["cisa_kev"] is True
+    assert f["ransomware"] is True
+    assert f["vulnerability_intelligence"]["cve_id"] == "CVE-2021-44228"
+    assert f["auto_classification"]["decision"] == "fix"
+    assert f["auto_classification"]["factors"]["cisa_kev"] is True
+    assert f["auto_classification"]["factors"]["ransomware_linked"] is True
+    assert f["auto_classification"]["factors"]["severity_score"] == 10.0
 
     # 2. Reference intelligence scope
     reference = get_spectrum_findings(

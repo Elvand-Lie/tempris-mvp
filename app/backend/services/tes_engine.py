@@ -324,23 +324,59 @@ def public_severity(finding: dict | Any, *, db=None) -> dict:
     f_dict = _finding_dict(finding)
     sss = f_dict.get("sss_data") or {}
     scoring = sss.get("scoring") or {}
-    is_sss = not _is_cve_finding(finding)
+    is_sss = not _is_cve_finding(finding) and bool(scoring.get("base_severity") or scoring.get("sss") or sss.get("class"))
+    cvss_version = None
+    cvss_source = None
+    cvss_vector = None
+    provenance = None
     if is_sss:
         raw_score = scoring.get("base_severity")
+        source = "SSS"
     elif db is not None:
         from services.cve_intelligence import resolve_vulnerability_intelligence
         intel = resolve_vulnerability_intelligence(finding, db)
         raw_score = intel.cvss_score
+        cvss_version = intel.cvss_version
+        cvss_source = intel.cvss_source
+        cvss_vector = intel.cvss_vector
+        provenance = intel.provenance_classification
+        source = "Legacy unprovenanced" if provenance == "legacy_unprovenanced" else ("CVSS" if raw_score is not None else None)
     else:
         raw_score = f_dict.get("cvss")
+        provenance = f_dict.get("provenance_classification")
+        source = "Legacy unprovenanced" if provenance == "legacy_unprovenanced" else ("CVSS" if raw_score is not None else None)
+
+    if raw_score is None:
+        return {
+            "score": None,
+            "label": "Not available",
+            "source": None,
+            "version": None,
+            "source_authority": None,
+            "vector": None,
+            "provenance": provenance or "unassessed",
+        }
 
     try:
-        score = float(raw_score) if raw_score is not None else 0.0
+        score = float(raw_score)
     except (TypeError, ValueError):
-        score = 0.0
+        return {
+            "score": None,
+            "label": "Not available",
+            "source": None,
+            "version": None,
+            "source_authority": None,
+            "vector": None,
+            "provenance": provenance or "unassessed",
+        }
+
     return {
         "score": round(score, 2),
         "label": severity_from_score(score),
-        "source": "SSS" if is_sss else "CVSS",
+        "source": source,
+        "version": cvss_version,
+        "source_authority": cvss_source,
+        "vector": cvss_vector,
+        "provenance": provenance,
     }
 

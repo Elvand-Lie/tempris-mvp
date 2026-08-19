@@ -13,11 +13,14 @@ logger = logging.getLogger("tempris.kev_loader")
 
 def _finding_to_dict(f) -> dict:
     """Convert a Finding ORM object to the dict format expected by all consumers."""
+    cve_val = getattr(f, "canonical_cve_id", None) or getattr(f, "cve_id", None) or getattr(f, "cve", None)
     return {
         "id": f.id,
+        "canonical_cve_id": getattr(f, "canonical_cve_id", None) or cve_val,
+        "cve_id": getattr(f, "cve_id", None) or cve_val,
         "finding_type": f.finding_type,
         "sub_class": f.sub_class,
-        "cve": f.cve,
+        "cve": cve_val,
         "title": f.title,
         "vendor": f.vendor,
         "product": f.product,
@@ -25,6 +28,7 @@ def _finding_to_dict(f) -> dict:
         "priority": f.priority,
         "status": f.status,
         "cisa": f.cisa_kev,
+        "cisa_kev": f.cisa_kev,
         "ransomware": f.ransomware,
         "dateAdded": f.date_added,
         "shortDescription": f.short_description,

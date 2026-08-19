@@ -1,0 +1,5 @@
+# Development and Test Dependencies for Tempris
+pytest==9.1.1
+playwright>=1.40.0
+pytest-asyncio>=0.23.0
+httpx>=0.27.0

@@ -3,9 +3,9 @@ Asset Inventory API Router — L5-02/03/08
 Full CRUD for asset management with audit trail integration.
 """
 from fastapi import APIRouter, HTTPException, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, Any
 from services.database import get_db
 from models import Asset, AssetScanAuthorization
 from services.target_policy import classify_asset_target, validate_and_resolve_target
@@ -297,6 +297,8 @@ class ScanAuthRevokeModel(BaseModel):
 
 
 class ScanAuthApproveModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    verification_notes: str = Field(..., min_length=10, max_length=2000)
     expires_in_days: int = Field(90, ge=1, le=365)
 
 
@@ -384,11 +386,11 @@ def request_scan_authorization(
 @router.post("/{asset_id}/scan-authorization/approve")
 def approve_scan_authorization(
     asset_id: str,
-    req: Optional[ScanAuthApproveModel] = None,
+    req: ScanAuthApproveModel,
     db: Session = Depends(get_db),
     user = Depends(require_role("Superadmin")),
 ):
-    """Approve scan authorization for an asset. Requires platform Superadmin role."""
+    """Approve scan authorization for an asset. Requires platform Superadmin role and verification notes."""
     tenant_id = _verified_tenant_id(user)
     asset = db.query(Asset).filter(
         Asset.id == asset_id,
@@ -413,8 +415,10 @@ def approve_scan_authorization(
         )
 
     now = datetime.now(timezone.utc)
-    days = req.expires_in_days if req else 90
+    days = req.expires_in_days
     expires_at = now + timedelta(days=days)
+    notes_clean = req.verification_notes.strip()
+    evidence_text = f"Superadmin {user_email} approved scan authorization with verification notes: {notes_clean}"
 
     if not pending:
         # Create direct approved authorization
@@ -427,7 +431,7 @@ def approve_scan_authorization(
             target_kind=classification["target_kind"],
             status="approved",
             approval_method="manual_platform_approval",
-            evidence=f"Superadmin {user_email} directly approved scan authorization",
+            evidence=evidence_text,
             requested_by=user_email,
             requested_at=now,
             approved_by=user_email,
@@ -442,6 +446,7 @@ def approve_scan_authorization(
         pending.expires_at = expires_at
         pending.authorized_target = classification["target"]
         pending.target_kind = classification["target_kind"]
+        pending.evidence = evidence_text
 
     record_operational_event(
         db,
@@ -452,7 +457,12 @@ def approve_scan_authorization(
         source_module="ASSETS",
         actor_id=user_email,
         correlation_id=asset_id,
-        metadata={"target": pending.authorized_target, "expires_at": expires_at.isoformat()},
+        metadata={
+            "target": pending.authorized_target,
+            "expires_at": expires_at.isoformat(),
+            "has_verification_notes": True,
+            "notes_length": len(notes_clean),
+        },
     )
     append_to_audit_log_db(
         db,
@@ -595,6 +605,71 @@ def _serialize_auth(a: Optional[AssetScanAuthorization]) -> Optional[dict]:
     }
 
 
+def _derive_scan_eligibility(asset: Asset, auth: Optional[dict], classification: dict) -> dict[str, Any]:
+    """Authoritative server derivation of asset scan eligibility."""
+    if asset.status != "active":
+        return {
+            "eligible": False,
+            "reason_code": "ASSET_INACTIVE",
+            "reason": f"Asset {asset.id} is {asset.status} (only active assets can be scanned).",
+        }
+    if not classification.get("is_public_scannable"):
+        return {
+            "eligible": False,
+            "reason_code": "TARGET_NOT_PUBLIC_SCANNABLE",
+            "reason": "Asset target resolves to private, loopback, or non-globally-routable RFC 1918 address.",
+        }
+    if not auth:
+        return {
+            "eligible": False,
+            "reason_code": "NO_AUTHORIZATION",
+            "reason": f"Asset {asset.id} does not have a scan authorization. Request approval first.",
+        }
+    status = auth.get("status")
+    if status == "revoked":
+        return {
+            "eligible": False,
+            "reason_code": "AUTHORIZATION_REVOKED",
+            "reason": f"Scan authorization was revoked: {auth.get('revocation_reason') or 'No reason provided'}.",
+        }
+    if status == "expired" or auth.get("is_expired"):
+        expires_at = auth.get("expires_at") or "unknown"
+        return {
+            "eligible": False,
+            "reason_code": "AUTHORIZATION_EXPIRED",
+            "reason": f"Scan authorization expired at {expires_at}. Re-authorization required.",
+        }
+    if status == "pending":
+        return {
+            "eligible": False,
+            "reason_code": "AUTHORIZATION_PENDING",
+            "reason": "Scan authorization is pending Superadmin approval.",
+        }
+    if status != "approved":
+        return {
+            "eligible": False,
+            "reason_code": f"AUTHORIZATION_{str(status).upper()}",
+            "reason": f"Scan authorization status is {status}.",
+        }
+
+    # Target consistency check
+    current_target = classification.get("target") or asset.hostname or asset.ip_address or ""
+    authorized_target = auth.get("authorized_target") or ""
+    from services.target_policy import clean_target_input
+    if clean_target_input(current_target) != clean_target_input(authorized_target):
+        return {
+            "eligible": False,
+            "reason_code": "TARGET_MISMATCH",
+            "reason": f"Asset target '{current_target}' has changed and does not match authorized target '{authorized_target}'. Re-authorization required.",
+        }
+
+    return {
+        "eligible": True,
+        "reason_code": "ELIGIBLE",
+        "reason": f"Asset is validly authorized for external scanning ({authorized_target}).",
+    }
+
+
 def _serialize_asset(a: Asset, db: Optional[Session] = None) -> dict:
     classification = classify_asset_target(a.ip_address, a.hostname, a.name)
     scan_auth = None
@@ -606,6 +681,8 @@ def _serialize_asset(a: Asset, db: Optional[Session] = None) -> dict:
         ).order_by(AssetScanAuthorization.created_at.desc()).first()
         if latest_auth:
             scan_auth = _serialize_auth(latest_auth)
+
+    scan_eligibility = _derive_scan_eligibility(a, scan_auth, classification)
 
     return {
         "id": a.id,
@@ -621,6 +698,9 @@ def _serialize_asset(a: Asset, db: Optional[Session] = None) -> dict:
         "notes": a.notes,
         "target_classification": classification,
         "scan_authorization": scan_auth,
+        "scan_eligibility": scan_eligibility,
+        "scan_eligible": scan_eligibility["eligible"],
+        "scan_ineligible_reason": scan_eligibility["reason"] if not scan_eligibility["eligible"] else None,
         "created_at": a.created_at.isoformat() if a.created_at else "",
         "updated_at": a.updated_at.isoformat() if a.updated_at else "",
     }
