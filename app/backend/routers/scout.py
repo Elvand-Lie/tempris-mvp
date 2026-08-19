@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query, Depends, HTTPException
 from typing import Optional, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 from services.kev_loader import get_findings_paginated, get_finding_stats, get_unique_vendors
 from services.database import get_db
 from models import CanonicalVulnerability, CisaKevEntry, Finding, ScanFinding, ScanJob, VulnerabilityCvssAssessment
@@ -96,32 +96,73 @@ def get_canonical_vulnerabilities(
         .all()
     )
 
-    # Server-side aggregates for the active filter using preferred assessment policy
+    # Server-side aggregates for the active filter using SQL window function matching deterministic policy
     if total_count > 0:
-        filtered_cve_ids = [r[0] for r in query.with_entities(CanonicalVulnerability.cve_id).all()]
-        kev_count = db.query(func.count(CisaKevEntry.cve_id)).filter(
-            CisaKevEntry.cve_id.in_(filtered_cve_ids)
-        ).scalar() or 0
-        ransomware_count = db.query(func.count(CisaKevEntry.cve_id)).filter(
-            CisaKevEntry.cve_id.in_(filtered_cve_ids),
-            func.lower(CisaKevEntry.known_ransomware_campaign_use) == "known",
-        ).scalar() or 0
+        filtered_cve_subq = query.with_entities(CanonicalVulnerability.cve_id).subquery()
 
-        assessments = db.query(VulnerabilityCvssAssessment).filter(
-            VulnerabilityCvssAssessment.cve_id.in_(filtered_cve_ids)
-        ).all()
-        assessments_by_cve: dict[str, list[VulnerabilityCvssAssessment]] = {}
-        for a in assessments:
-            assessments_by_cve.setdefault(a.cve_id, []).append(a)
+        kev_count = (
+            db.query(func.count(CisaKevEntry.cve_id))
+            .filter(CisaKevEntry.cve_id.in_(filtered_cve_subq.select()))
+            .scalar()
+            or 0
+        )
+        ransomware_count = (
+            db.query(func.count(CisaKevEntry.cve_id))
+            .filter(
+                CisaKevEntry.cve_id.in_(filtered_cve_subq.select()),
+                func.lower(CisaKevEntry.known_ransomware_campaign_use) == "known",
+            )
+            .scalar()
+            or 0
+        )
 
-        critical_count = 0
-        cvss_coverage_count = 0
-        for cve_id_val, ass_list in assessments_by_cve.items():
-            pref = select_preferred_cvss_assessment(ass_list)
-            if pref is not None:
-                cvss_coverage_count += 1
-                if pref.base_score is not None and pref.base_score >= 9.0:
-                    critical_count += 1
+        version_case = case(
+            (VulnerabilityCvssAssessment.cvss_version == "4.0", 40),
+            (VulnerabilityCvssAssessment.cvss_version == "3.1", 31),
+            (VulnerabilityCvssAssessment.cvss_version == "3.0", 30),
+            (VulnerabilityCvssAssessment.cvss_version == "2.0", 20),
+            else_=0,
+        )
+        role_case = case(
+            (func.lower(func.coalesce(VulnerabilityCvssAssessment.source_role, "")) == "primary", 1),
+            else_=0,
+        )
+        rn = func.row_number().over(
+            partition_by=VulnerabilityCvssAssessment.cve_id,
+            order_by=[
+                version_case.desc(),
+                role_case.desc(),
+                VulnerabilityCvssAssessment.source_modified_at.desc(),
+                VulnerabilityCvssAssessment.source.desc(),
+                VulnerabilityCvssAssessment.id.desc(),
+            ],
+        ).label("rn")
+
+        preferred_window_subq = (
+            db.query(
+                VulnerabilityCvssAssessment.cve_id.label("cve_id"),
+                VulnerabilityCvssAssessment.base_score.label("base_score"),
+                rn,
+            )
+            .filter(VulnerabilityCvssAssessment.cve_id.in_(filtered_cve_subq.select()))
+            .subquery()
+        )
+
+        preferred_assessments = (
+            db.query(preferred_window_subq)
+            .filter(preferred_window_subq.c.rn == 1)
+            .subquery()
+        )
+
+        cvss_coverage_count = (
+            db.query(func.count(preferred_assessments.c.cve_id)).scalar() or 0
+        )
+        critical_count = (
+            db.query(func.count(preferred_assessments.c.cve_id))
+            .filter(preferred_assessments.c.base_score >= 9.0)
+            .scalar()
+            or 0
+        )
     else:
         kev_count = 0
         ransomware_count = 0

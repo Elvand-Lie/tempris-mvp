@@ -41,14 +41,14 @@ def _build_context_binding_footer(
 
 
 def auto_classify(
-    cvss: float,
+    cvss: float | None,
     asset_criticality: str = "medium",
     cisa_kev: bool = False,
     ransomware_linked: bool = False,
     has_compensating_control: bool = False,
     exploit_maturity: str = "unproven",
     asset_context: dict = None,
-    severity_source: str = "CVSS",
+    severity_source: str | None = None,
 ) -> dict:
     """
     Automated EDIP decision engine.
@@ -63,10 +63,11 @@ def auto_classify(
 
     Returns:
         {
-            "decision": "fix" | "defer" | "accept_candidate" | "manual",
+            "decision": "fix" | "defer" | "accept_candidate" | "manual" | None,
+            "state": str (optional, e.g. "insufficient_evidence"),
             "confidence": float (0.0 to 1.0),
             "explanation": str,
-            "auto_classified": True,
+            "auto_classified": bool,
             "factors": dict,
             "context_bound": bool
         }
@@ -83,11 +84,11 @@ def auto_classify(
         asset_ref = "unassigned infrastructure asset (pending asset mapping)"
         context_bound = False
 
-    score_label = severity_source.upper()
+    score_label = (severity_source or "CVSS").upper()
 
     factors = {
         "severity_score": cvss,
-        "severity_source": score_label,
+        "severity_source": score_label if cvss is not None else None,
         "asset_criticality": asset_criticality,
         "cisa_kev": cisa_kev,
         "ransomware_linked": ransomware_linked,
@@ -95,6 +96,18 @@ def auto_classify(
         "exploit_maturity": exploit_maturity,
         "asset_context": asset_context,
     }
+
+    if cvss is None:
+        explanation = f"INSUFFICIENT EVIDENCE: No inherent technical severity score is recorded for this finding on {asset_ref}. Automated EDIP triage requires a valid CVSS or SSS severity score."
+        return {
+            "decision": None,
+            "state": "insufficient_evidence",
+            "confidence": 0.0,
+            "explanation": explanation + _build_context_binding_footer(asset_context=asset_context, response_seed=explanation),
+            "auto_classified": False,
+            "factors": factors,
+            "context_bound": context_bound,
+        }
 
     reasons = []
 
@@ -227,7 +240,7 @@ def bulk_classify(findings: list[dict], asset_map: dict = None) -> list[dict]:
         asset_info = (asset_map or {}).get(asset_id, {})
 
         result = auto_classify(
-            cvss=f.get("cvss", 0.0),
+            cvss=f.get("cvss"),
             asset_criticality=asset_info.get("criticality", f.get("asset_criticality", "medium")),
             cisa_kev=f.get("cisa_kev", f.get("ransomware", False)),
             ransomware_linked=f.get("ransomware", False),

@@ -289,23 +289,22 @@ def get_findings(
             if decision in VALID_EDIP_DECISIONS and f_copy.get("edip_decision") != decision:
                 continue
 
-        # Filter by live TES priority
-        if priority:
-            if f_copy.get("tes_priority") != priority and f_copy.get("priority") != priority:
-                continue
+        # Filter by live TES priority (pure live value without fallback to stale Finding.priority)
+        if priority and f_copy.get("tes_priority") != priority:
+            continue
 
         processed.append(_strip_internal_fields(f_copy))
 
-    # Stable sort: TES Priority -> TES score desc -> CVSS desc -> created_at / ID
+    # Stable sort: Live TES Priority rank -> Live TES score desc -> Canonical CVSS desc -> stable ID
     def _spectrum_sort_key(item: dict) -> tuple:
-        p = item.get("tes_priority") or item.get("priority")
+        p = item.get("tes_priority")
         p_rank = PRIORITY_RANK.get(p, 99) if p else 99
         tes = item.get("tes_score")
-        tes_val = float(tes) if tes is not None else -1.0
+        tes_sort = -float(tes) if tes is not None else float("inf")
         cvss = item.get("cvss")
-        cvss_val = float(cvss) if cvss is not None else -1.0
+        cvss_sort = -float(cvss) if cvss is not None else float("inf")
         fid = str(item.get("id") or "")
-        return (p_rank, -tes_val, -cvss_val, fid)
+        return (p_rank, tes_sort, cvss_sort, fid)
 
     processed.sort(key=_spectrum_sort_key)
 

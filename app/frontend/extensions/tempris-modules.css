@@ -187,6 +187,7 @@ body.tmx-extension-active #root main {
 .tmx-status-high { border-color: rgb(245 158 11 / 35%); color: #f59e0b; background: rgb(245 158 11 / 8%); }
 .tmx-status-low,
 .tmx-status-available { border-color: rgb(16 185 129 / 35%); color: #34d399; background: rgb(16 185 129 / 8%); }
+.tmx-status-neutral { border-color: #3f3f46; color: #a1a1aa; background: #18181b; }
 
 .tmx-table-wrap {
   max-width: 100%;

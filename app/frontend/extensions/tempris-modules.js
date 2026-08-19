@@ -2176,8 +2176,8 @@
             <label>Validity (Days)
               <input type="number" name="expires_in_days" value="90" min="1" max="365" required>
             </label>
-            <label class="tmx-field-wide">Verification Method / Superadmin Notes
-              <textarea name="notes" rows="3" maxlength="2000" placeholder="e.g. Verified DNS TXT record / Contract SOW signed"></textarea>
+            <label class="tmx-field-wide">Verification Method / Superadmin Notes (Required, min 10 chars)
+              <textarea name="verification_notes" minlength="10" maxlength="2000" required rows="3" placeholder="e.g. Verified DNS TXT record / Contract SOW signed for this perimeter IP"></textarea>
             </label>
             <div class="tmx-form-message tmx-field-wide" data-asset-approve-message></div>
             <div class="tmx-dialog-actions tmx-field-wide">
@@ -2232,6 +2232,8 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ evidence: data.get('evidence') }),
           });
+          tenantAssets = null;
+          tenantAssetsRequest = null;
           requestDialog.close();
           await renderAssetsRoute(host);
         } catch (err) {
@@ -2255,15 +2257,22 @@
         const data = new FormData(approveForm);
         const assetId = approveForm.dataset.assetId;
         const msg = host.querySelector('[data-asset-approve-message]');
+        const notes = (data.get('verification_notes') || '').trim();
+        if (notes.length < 10) {
+          if (msg) msg.textContent = 'Verification notes are required and must be at least 10 characters.';
+          return;
+        }
         try {
           await api(`/api/assets/${encodeURIComponent(assetId)}/scan-authorization/approve`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              notes: data.get('notes') || undefined,
+              verification_notes: notes,
               expires_in_days: parseInt(data.get('expires_in_days'), 10) || 90,
             }),
           });
+          tenantAssets = null;
+          tenantAssetsRequest = null;
           approveDialog.close();
           await renderAssetsRoute(host);
         } catch (err) {
@@ -2293,6 +2302,8 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reason: data.get('reason') }),
           });
+          tenantAssets = null;
+          tenantAssetsRequest = null;
           revokeDialog.close();
           await renderAssetsRoute(host);
         } catch (err) {
@@ -2314,13 +2325,15 @@
 
   async function renderScoutRoute(host) {
     try {
-      // 1. Fetch scanning engines status and asset inventory
+      // 1. Fetch scanning engines status and asset inventory (always fetch fresh)
+      tenantAssets = null;
+      tenantAssetsRequest = null;
       const [enginesData, assets, scanSummary, scanHistory, scanFindings] = await Promise.all([
-        api('/api/scanner/engines').catch(() => ({ active_scanning_enabled: false, engines: [] })),
-        loadTenantAssets().catch(() => []),
-        api('/api/scanner/findings/summary').catch(() => ({ total: 0, critical: 0, high: 0, medium: 0, low: 0, scans: 0, normalized_findings: 0 })),
-        api('/api/scanner/history').catch(() => []),
-        api('/api/scanner/findings').catch(() => []),
+        api('/api/scanner/engines').catch(() => null),
+        loadTenantAssets().catch(() => null),
+        api('/api/scanner/findings/summary').catch(() => null),
+        api('/api/scanner/history').catch(() => null),
+        api('/api/scanner/findings').catch(() => null),
       ]);
 
       const activeScanningEnabled = enginesData?.active_scanning_enabled === true;
@@ -2396,8 +2409,8 @@
             <span class="tmx-status ${nmapAvailable ? 'tmx-status-available' : 'tmx-status-high'}">
               Nmap: ${nmapAvailable ? 'Available (TCP Connect)' : 'Unavailable (Fallback to TCP Connect)'}
             </span>
-            <span class="tmx-status tmx-status-available">
-              Built-in TCP: Active
+            <span class="tmx-status ${activeScanningEnabled ? 'tmx-status-available' : 'tmx-status-neutral'}">
+              Built-in TCP: ${activeScanningEnabled ? 'Active' : 'Available'}
             </span>
             <span style="color:#71717a;margin-left:auto;">Scope: External Public IP/DNS Only (No RFC 1918)</span>
           </div>`;
@@ -2422,6 +2435,8 @@
                   : ` [${titleCase(authStatus)}]`));
             return `<option value="${escapeHtml(a.id)}" data-target="${escapeHtml(targetDisplay)}" data-kind="${escapeHtml(classification.target_kind || '')}" data-scannable="${classification.is_public_scannable ? 'true' : 'false'}" data-auth="${escapeHtml(authStatus)}" data-scan-eligible="${isEligible ? 'true' : 'false'}" data-scan-ineligible-reason="${escapeHtml(ineligibleReason)}">${escapeHtml(a.name)} — ${escapeHtml(targetDisplay)}${tag}</option>`;
           }).join('');
+        } else if (assets === null) {
+          assetOptions = '<option value="">Failed to load assets</option>';
         } else {
           assetOptions = '<option value="">No active assets found in inventory</option>';
         }
@@ -2454,6 +2469,19 @@
             </tr>`;
         }).join('');
 
+        const summaryLoaded = scanSummary !== null;
+        const valOrUnavail = (val) => (summaryLoaded ? escapeHtml(val ?? 0) : '<span class="tmx-status tmx-status-neutral" style="font-size:10px;padding:1px 4px;min-height:18px;">Unavailable</span>');
+
+        let scanProfileOptions = '';
+        if (nucleiAvailable) {
+          scanProfileOptions += '<option value="full">Full Perimeter Scan (Nuclei CVEs + Port Discovery)</option>';
+          scanProfileOptions += '<option value="quick">Quick Discovery (Nuclei CVE Templates)</option>';
+        } else {
+          scanProfileOptions += '<option value="full" disabled>Full Perimeter Scan (Nuclei unavailable)</option>';
+          scanProfileOptions += '<option value="quick" disabled>Quick Discovery (Nuclei unavailable)</option>';
+        }
+        scanProfileOptions += '<option value="ports">Port Discovery (TCP Connect Scan)</option>';
+
         tabContainer.innerHTML = `
           <div class="tmx-page">
             <section class="tmx-panel">
@@ -2464,12 +2492,12 @@
             </section>
 
             <section class="tmx-metrics">
-              <div class="tmx-metric"><div class="tmx-metric-label">Scan Runs</div><div class="tmx-metric-value">${escapeHtml(scanSummary.scans ?? 0)}</div></div>
-              <div class="tmx-metric"><div class="tmx-metric-label">All Observations</div><div class="tmx-metric-value">${escapeHtml(scanSummary.total_observations ?? scanSummary.total ?? 0)}</div></div>
-              <div class="tmx-metric"><div class="tmx-metric-label">Service Observations</div><div class="tmx-metric-value">${escapeHtml(scanSummary.service_observations ?? 0)}</div></div>
-              <div class="tmx-metric"><div class="tmx-metric-label">Vulnerability Observations</div><div class="tmx-metric-value">${escapeHtml(scanSummary.vulnerability_observations ?? 0)}</div></div>
-              <div class="tmx-metric"><div class="tmx-metric-label">Normalized Vulnerability Findings</div><div class="tmx-metric-value tmx-tone-high">${escapeHtml(scanSummary.normalized_findings ?? 0)}</div></div>
-              <div class="tmx-metric"><div class="tmx-metric-label">Confirmed Scan Exposures</div><div class="tmx-metric-value tmx-tone-critical">${escapeHtml(scanSummary.confirmed_scan_exposures ?? 0)}</div></div>
+              <div class="tmx-metric"><div class="tmx-metric-label">Scan Runs</div><div class="tmx-metric-value">${valOrUnavail(scanSummary?.scans)}</div></div>
+              <div class="tmx-metric"><div class="tmx-metric-label">All Observations</div><div class="tmx-metric-value">${valOrUnavail(scanSummary?.total_observations ?? scanSummary?.total)}</div></div>
+              <div class="tmx-metric"><div class="tmx-metric-label">Service Observations</div><div class="tmx-metric-value">${valOrUnavail(scanSummary?.service_observations)}</div></div>
+              <div class="tmx-metric"><div class="tmx-metric-label">Vulnerability Observations</div><div class="tmx-metric-value">${valOrUnavail(scanSummary?.vulnerability_observations)}</div></div>
+              <div class="tmx-metric"><div class="tmx-metric-label">Normalized Vulnerability Findings</div><div class="tmx-metric-value tmx-tone-high">${valOrUnavail(scanSummary?.normalized_findings)}</div></div>
+              <div class="tmx-metric"><div class="tmx-metric-label">Confirmed Scan Exposures</div><div class="tmx-metric-value tmx-tone-critical">${valOrUnavail(scanSummary?.confirmed_scan_exposures)}</div></div>
             </section>
 
             <section class="tmx-panel">
@@ -2488,9 +2516,7 @@
                     <div>
                       <label style="display:block;font-weight:600;font-size:12px;color:#a1a1aa;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;">Scan Profile</label>
                       <select name="scan_type" style="width:100%;min-height:38px;padding:8px 12px;background:#0f0f11;border:1px solid #3f3f46;border-radius:6px;color:#f4f4f5;font-size:13px;">
-                        <option value="full">Full Perimeter Scan (Nuclei CVEs + Port Discovery)</option>
-                        <option value="quick">Quick Discovery (Nuclei CVE Templates)</option>
-                        <option value="ports">Port Discovery (TCP Connect Scan)</option>
+                        ${scanProfileOptions}
                       </select>
                     </div>
                   </div>
@@ -2904,19 +2930,24 @@
                 const kev = detail.cisa_kev || {};
                 const assessments = detail.all_cvss_assessments || [];
 
-                const assessmentsHtml = assessments.map((a) => `
+                const assessmentsHtml = assessments.map((a) => {
+                  const itemSevCls = a.base_score != null
+                    ? (a.base_score >= 9.0 ? 'tmx-status-critical' : (a.base_score >= 7.0 ? 'tmx-status-high' : 'tmx-status-available'))
+                    : 'tmx-status-neutral';
+                  const roleLabel = a.source_role ? ` (${escapeHtml(a.source_role)})` : '';
+                  return `
                   <div style="background:#09090b;padding:8px 12px;border-radius:6px;border:1px solid #27272a;font-size:12px;">
                     <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-                      <strong>${escapeHtml(a.source || 'Assessor')} (${escapeHtml(a.source_role || 'Assessor')})</strong>
-                      <span class="tmx-status ${a.base_score >= 9.0 ? 'tmx-status-critical' : (a.base_score >= 7.0 ? 'tmx-status-high' : 'tmx-status-available')}">
+                      <strong>${escapeHtml(a.source || 'Not available')}${roleLabel}</strong>
+                      <span class="tmx-status ${itemSevCls}">
                         ${a.base_score != null ? a.base_score : 'N/A'} ${a.cvss_version ? `(v${escapeHtml(a.cvss_version)})` : ''}
                       </span>
                     </div>
                     <div style="font-family:monospace;color:#94a3b8;font-size:11px;">
                       ${escapeHtml(a.vector_string || 'No vector string recorded')}
                     </div>
-                  </div>
-                `).join('');
+                  </div>`;
+                }).join('');
 
                 const hasPrefScore = pref.score != null;
                 const prefScoreColor = hasPrefScore

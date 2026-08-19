@@ -3,7 +3,7 @@ Asset Inventory API Router — L5-02/03/08
 Full CRUD for asset management with audit trail integration.
 """
 from fastapi import APIRouter, HTTPException, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
 from typing import Optional, Any
 from services.database import get_db
@@ -297,6 +297,8 @@ class ScanAuthRevokeModel(BaseModel):
 
 
 class ScanAuthApproveModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    verification_notes: str = Field(..., min_length=10, max_length=2000)
     expires_in_days: int = Field(90, ge=1, le=365)
 
 
@@ -384,11 +386,11 @@ def request_scan_authorization(
 @router.post("/{asset_id}/scan-authorization/approve")
 def approve_scan_authorization(
     asset_id: str,
-    req: Optional[ScanAuthApproveModel] = None,
+    req: ScanAuthApproveModel,
     db: Session = Depends(get_db),
     user = Depends(require_role("Superadmin")),
 ):
-    """Approve scan authorization for an asset. Requires platform Superadmin role."""
+    """Approve scan authorization for an asset. Requires platform Superadmin role and verification notes."""
     tenant_id = _verified_tenant_id(user)
     asset = db.query(Asset).filter(
         Asset.id == asset_id,
@@ -413,8 +415,10 @@ def approve_scan_authorization(
         )
 
     now = datetime.now(timezone.utc)
-    days = req.expires_in_days if req else 90
+    days = req.expires_in_days
     expires_at = now + timedelta(days=days)
+    notes_clean = req.verification_notes.strip()
+    evidence_text = f"Superadmin {user_email} approved scan authorization with verification notes: {notes_clean}"
 
     if not pending:
         # Create direct approved authorization
@@ -427,7 +431,7 @@ def approve_scan_authorization(
             target_kind=classification["target_kind"],
             status="approved",
             approval_method="manual_platform_approval",
-            evidence=f"Superadmin {user_email} directly approved scan authorization",
+            evidence=evidence_text,
             requested_by=user_email,
             requested_at=now,
             approved_by=user_email,
@@ -442,6 +446,7 @@ def approve_scan_authorization(
         pending.expires_at = expires_at
         pending.authorized_target = classification["target"]
         pending.target_kind = classification["target_kind"]
+        pending.evidence = evidence_text
 
     record_operational_event(
         db,
@@ -452,7 +457,12 @@ def approve_scan_authorization(
         source_module="ASSETS",
         actor_id=user_email,
         correlation_id=asset_id,
-        metadata={"target": pending.authorized_target, "expires_at": expires_at.isoformat()},
+        metadata={
+            "target": pending.authorized_target,
+            "expires_at": expires_at.isoformat(),
+            "has_verification_notes": True,
+            "notes_length": len(notes_clean),
+        },
     )
     append_to_audit_log_db(
         db,

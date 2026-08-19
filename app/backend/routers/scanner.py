@@ -99,28 +99,28 @@ SEVERITY_MAP = {
 MAX_CAPTURE_BYTES = 10 * 1024 * 1024  # 10 MB per stream limit
 
 
-async def _read_stream_bounded(stream: asyncio.StreamReader | None, limit: int) -> tuple[bytes, bool]:
+async def _read_stream_bounded(stream: asyncio.StreamReader | None, limit: int, stream_name: str = "stdout") -> bytes:
     """Read from an asyncio StreamReader up to `limit` bytes.
 
-    Returns (captured_bytes, exceeded_limit).
+    Raises ScannerOutputLimitExceeded immediately when the next chunk crosses the limit.
     """
     if stream is None:
-        return b"", False
+        return b""
     buffer = bytearray()
-    exceeded = False
     while True:
         chunk = await stream.read(64 * 1024)
         if not chunk:
             break
-        if len(buffer) < limit:
+        if len(buffer) + len(chunk) > limit:
             remaining = limit - len(buffer)
-            buffer.extend(chunk[:remaining])
-            if len(chunk) > remaining:
-                exceeded = True
-        else:
-            exceeded = True
-        # Discard data beyond limit to prevent memory bloat during execution
-    return bytes(buffer), exceeded
+            if remaining > 0:
+                buffer.extend(chunk[:remaining])
+            raise ScannerOutputLimitExceeded(
+                f"Subprocess stream '{stream_name}' exceeded maximum output limit of {limit} bytes",
+                stream=stream_name,
+            )
+        buffer.extend(chunk)
+    return bytes(buffer)
 
 
 async def _execute_subprocess_safely(
@@ -128,46 +128,41 @@ async def _execute_subprocess_safely(
     timeout_seconds: int,
     max_output_bytes: int = MAX_CAPTURE_BYTES,
 ) -> tuple[int, bytes, bytes]:
-    """Executes a subprocess with hard timeout, forced kill fallback, and true streaming bounded capture."""
+    """Executes a subprocess with hard timeout, forced kill fallback, and immediate streaming overflow abort."""
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout_task = asyncio.create_task(_read_stream_bounded(proc.stdout, max_output_bytes))
-    stderr_task = asyncio.create_task(_read_stream_bounded(proc.stderr, max_output_bytes))
+    stdout_task = asyncio.create_task(_read_stream_bounded(proc.stdout, max_output_bytes, stream_name="stdout"))
+    stderr_task = asyncio.create_task(_read_stream_bounded(proc.stderr, max_output_bytes, stream_name="stderr"))
+
+    async def _cleanup_process():
+        try:
+            if proc.returncode is None:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=0.5)
+                except (asyncio.TimeoutError, Exception):
+                    proc.kill()
+                    await proc.wait()
+        except Exception:
+            pass
+        stdout_task.cancel()
+        stderr_task.cancel()
+        await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
 
     try:
         await asyncio.wait_for(
             asyncio.gather(stdout_task, stderr_task, proc.wait()),
             timeout=timeout_seconds,
         )
-        stdout, stdout_exceeded = stdout_task.result()
-        stderr, stderr_exceeded = stderr_task.result()
-    except (asyncio.TimeoutError, asyncio.CancelledError):
-        stdout_task.cancel()
-        stderr_task.cancel()
-        await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
-        try:
-            proc.kill()
-            await proc.wait()
-        except Exception:
-            pass
+        stdout = stdout_task.result()
+        stderr = stderr_task.result()
+        return proc.returncode or 0, stdout, stderr
+    except Exception:
+        await _cleanup_process()
         raise
-
-    if stdout_exceeded or stderr_exceeded:
-        try:
-            proc.kill()
-            await proc.wait()
-        except Exception:
-            pass
-        stream_name = "stdout" if stdout_exceeded else "stderr"
-        raise ScannerOutputLimitExceeded(
-            f"Scanner output on {stream_name} exceeded maximum buffer limit of {max_output_bytes // (1024 * 1024)} MB (output_limit_exceeded)",
-            stream=stream_name,
-        )
-
-    return (proc.returncode or 0, stdout, stderr)
 
 
 # ── Nuclei Scanner Execution ──────────────────────────────────────────────────
@@ -662,10 +657,16 @@ async def trigger_scan(
     try:
         if scan_type == "full":
             if NUCLEI_AVAILABLE:
-                nuclei_task = _run_nuclei_scan(canonical_target, scan_id)
-                port_task = _run_port_scan(canonical_target, scan_id)
-                nuclei_results, port_results = await asyncio.gather(nuclei_task, port_task)
-                all_findings = _merge_findings(nuclei_results, port_results)
+                nuclei_task = asyncio.create_task(_run_nuclei_scan(canonical_target, scan_id))
+                port_task = asyncio.create_task(_run_port_scan(canonical_target, scan_id))
+                try:
+                    nuclei_results, port_results = await asyncio.gather(nuclei_task, port_task)
+                    all_findings = _merge_findings(nuclei_results, port_results)
+                except Exception:
+                    nuclei_task.cancel()
+                    port_task.cancel()
+                    await asyncio.gather(nuclei_task, port_task, return_exceptions=True)
+                    raise
             else:
                 all_findings = await _run_port_scan(canonical_target, scan_id)
         elif scan_type == "ports":
@@ -718,7 +719,7 @@ async def trigger_scan(
             status_code=500,
             detail="Scanner output exceeded maximum buffer limit (output_limit_exceeded)",
         ) from exc
-    except Exception as exc:
+    except asyncio.TimeoutError as exc:
         db.rollback()
         failed_job = db.query(ScanJob).filter(
             ScanJob.id == scan_id,
@@ -726,8 +727,8 @@ async def trigger_scan(
         ).first()
         if failed_job:
             failed_job.status = "failed"
-            failed_job.error = str(exc)[:2000]
-            failed_job.failure_reason = str(exc)[:2000]
+            failed_job.failure_reason = "scanner_timeout"
+            failed_job.error = "Scanner execution timed out (scanner_timeout)"
             failed_job.completed_at = datetime.now(timezone.utc)
             record_operational_event(
                 db,
@@ -738,11 +739,61 @@ async def trigger_scan(
                 source_module="SCOUT",
                 actor_id=user_email,
                 correlation_id=scan_id,
-                metadata={"error_type": type(exc).__name__, "detail": str(exc)[:500]},
+                metadata={"error_type": "scanner_timeout"},
+            )
+            db.commit()
+        logger.warning("SCOUT scan timed out for scan job %s", scan_id)
+        raise HTTPException(status_code=504, detail="Scanner execution timed out (scanner_timeout)") from exc
+    except asyncio.CancelledError as exc:
+        db.rollback()
+        failed_job = db.query(ScanJob).filter(
+            ScanJob.id == scan_id,
+            ScanJob.tenant_id == tenant_id,
+        ).first()
+        if failed_job:
+            failed_job.status = "failed"
+            failed_job.failure_reason = "scanner_cancelled"
+            failed_job.error = "Scanner execution was cancelled (scanner_cancelled)"
+            failed_job.completed_at = datetime.now(timezone.utc)
+            record_operational_event(
+                db,
+                tenant_id=tenant_id,
+                event_type="scan.failed",
+                resource_type="scan_job",
+                resource_id=scan_id,
+                source_module="SCOUT",
+                actor_id=user_email,
+                correlation_id=scan_id,
+                metadata={"error_type": "scanner_cancelled"},
+            )
+            db.commit()
+        logger.warning("SCOUT scan cancelled for scan job %s", scan_id)
+        raise
+    except Exception as exc:
+        db.rollback()
+        failed_job = db.query(ScanJob).filter(
+            ScanJob.id == scan_id,
+            ScanJob.tenant_id == tenant_id,
+        ).first()
+        if failed_job:
+            failed_job.status = "failed"
+            failed_job.error = str(exc)[:2000]
+            failed_job.failure_reason = "scanner_execution_failed"
+            failed_job.completed_at = datetime.now(timezone.utc)
+            record_operational_event(
+                db,
+                tenant_id=tenant_id,
+                event_type="scan.failed",
+                resource_type="scan_job",
+                resource_id=scan_id,
+                source_module="SCOUT",
+                actor_id=user_email,
+                correlation_id=scan_id,
+                metadata={"error_type": "scanner_execution_failed", "detail": str(exc)[:500]},
             )
             db.commit()
         logger.exception("SCOUT scan execution failed for scan job %s", scan_id)
-        raise HTTPException(status_code=500, detail="Scanner execution failed") from exc
+        raise HTTPException(status_code=500, detail="Scanner execution failed (scanner_execution_failed)") from exc
 
     job.status = "completed"
     job.result_count = len(all_findings)
@@ -868,25 +919,31 @@ def get_scan_summary(db: Session = Depends(get_db), user = Depends(get_current_u
     ])
     vuln_obs = len(all_findings) - service_obs
 
-    # Distinct open tenant Findings with qualifying ScanFinding and confirmed same-tenant AssetExposure
-    from services.customer_posture import RESOLVED_STATUSES
-    scan_finding_norm_ids = db.query(ScanFinding.normalized_finding_id).filter(
-        ScanFinding.tenant_id == tenant_id,
-        ScanFinding.normalized_finding_id.isnot(None),
-    ).distinct().scalar_subquery()
+    # Distinct open tenant Findings with qualifying Nuclei ScanFinding and confirmed same-tenant AssetExposure
+    from services.customer_posture import RESOLVED_STATUSES, REFERENCE_STATUSES, NOT_APPLICABLE_STATUSES
+    EXCLUDED_STATUSES = set(RESOLVED_STATUSES) | set(REFERENCE_STATUSES) | set(NOT_APPLICABLE_STATUSES)
 
-    confirmed_scan_exposures = db.query(func.count(func.distinct(Finding.id))).join(
-        AssetExposure, (AssetExposure.finding_id == Finding.id) & (AssetExposure.tenant_id == tenant_id)
-    ).join(
-        Asset, (Asset.id == AssetExposure.asset_id) & (Asset.tenant_id == tenant_id)
-    ).filter(
-        Finding.tenant_id == tenant_id,
-        Finding.id.in_(scan_finding_norm_ids),
-        ~func.lower(func.coalesce(Finding.status, "unmitigated")).in_(list(RESOLVED_STATUSES)),
-        AssetExposure.status == "confirmed",
-        AssetExposure.match_method.in_(["nuclei", "scanner_observation", "scanner"]),
-        Asset.status == "active",
-    ).scalar() or 0
+    confirmed_scan_exposures = (
+        db.query(func.count(func.distinct(Finding.id)))
+        .join(AssetExposure, (AssetExposure.finding_id == Finding.id) & (AssetExposure.tenant_id == tenant_id))
+        .join(Asset, (Asset.id == AssetExposure.asset_id) & (Asset.tenant_id == tenant_id))
+        .join(
+            ScanFinding,
+            (ScanFinding.normalized_finding_id == Finding.id)
+            & (ScanFinding.asset_id == AssetExposure.asset_id)
+            & (ScanFinding.tenant_id == tenant_id),
+        )
+        .filter(
+            Finding.tenant_id == tenant_id,
+            AssetExposure.status == "confirmed",
+            Asset.status == "active",
+            ~func.lower(func.coalesce(Finding.status, "unmitigated")).in_(list(EXCLUDED_STATUSES)),
+            (func.lower(func.coalesce(getattr(ScanFinding, "engine", None), "")) == "nuclei")
+            | (ScanFinding.template_id.ilike("cve-%")),
+        )
+        .scalar()
+        or 0
+    )
 
     if not all_findings:
         return {

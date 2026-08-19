@@ -694,7 +694,7 @@ def resolve_vulnerability_intelligence(
             kev_due_date=None,
             kev_required_action=finding_dict.get("required_action") or finding_dict.get("requiredAction"),
             kev_notes=None,
-            provenance_classification="non_cve",
+            provenance_classification=finding_dict.get("provenance_classification") or "non_cve",
             has_canonical_data=False,
             used_legacy_fallback=bool(finding_dict.get("cvss") is not None),
         )

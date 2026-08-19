@@ -1,4 +1,4 @@
-"""Real Playwright Browser E2E Test Suite for SCOUT Route and Amendments.
+"""Real Playwright Browser E2E Test Suite for SCOUT Route and Authoritative Hardening.
 
 Validates in a real headless Chromium browser:
 1. Loads /scout route with authenticated session.
@@ -6,7 +6,8 @@ Validates in a real headless Chromium browser:
 3. Asserts exactly one asset selector in DOM after repeated DOM mutations.
 4. Switches between 'External Scans' and 'Vulnerability Intelligence' tabs repeatedly and verifies DOM stability.
 5. Selects an authorized scannable asset from the dropdown.
-6. Submits an external scan and verifies outgoing POST to /api/scanner/run has 'Content-Type: application/json'.
+6. Submits an external scan and verifies outgoing POST to /api/scanner/run is intercepted (ZERO live network scans),
+   uses apiJson with 'Content-Type: application/json', and matches the exact permitted request schema.
 7. In Vulnerability Intelligence tab: asserts catalog metrics are populated dynamically from API.
 8. Verifies missing CVSS records render 'N/A' / neutral styling.
 9. Verifies table rows contain canonical CVE identifiers and zero internal 'F-XXXX' finding IDs.
@@ -14,6 +15,7 @@ Validates in a real headless Chromium browser:
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import sys
@@ -38,7 +40,6 @@ from models import (
     CisaKevEntry,
     VulnerabilityCvssAssessment,
 )
-from routers.auth import create_access_token
 from services.database import get_db
 
 
@@ -50,7 +51,9 @@ def find_free_port() -> int:
 
 @pytest.fixture(scope="module")
 def e2e_server(tmp_path_factory):
+    old_env = os.environ.get("SCOUT_ACTIVE_SCANNING_ENABLED")
     os.environ["SCOUT_ACTIVE_SCANNING_ENABLED"] = "true"
+
     db_file = tmp_path_factory.mktemp("e2e_db") / "test_browser_e2e.db"
     engine = create_engine(f"sqlite:///{db_file.resolve().as_posix()}", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
@@ -75,6 +78,7 @@ def e2e_server(tmp_path_factory):
         authorized_target="93.184.216.34",
         target_kind="ipv4",
         status="approved",
+        evidence="Superadmin superadmin@tempris.com approved scan authorization with verification notes: Verified DNS TXT record and contract SOW",
         requested_by="analyst@tempris.com",
         approved_by="superadmin@tempris.com",
         approved_at=now,
@@ -150,9 +154,14 @@ def e2e_server(tmp_path_factory):
     app.dependency_overrides.clear()
     engine.dispose()
 
+    if old_env is None:
+        os.environ.pop("SCOUT_ACTIVE_SCANNING_ENABLED", None)
+    else:
+        os.environ["SCOUT_ACTIVE_SCANNING_ENABLED"] = old_env
+
 
 def test_scout_browser_real_e2e_flow(e2e_server):
-    """Executes full browser end-to-end assertions in headless Chromium."""
+    """Executes full browser end-to-end assertions in headless Chromium with strict mock interception."""
     server_url, token = e2e_server
 
     with sync_playwright() as p:
@@ -160,18 +169,35 @@ def test_scout_browser_real_e2e_flow(e2e_server):
         context = browser.new_context()
         page = context.new_page()
 
-        # Intercept and record outgoing scan trigger request
+        # Intercept and fulfill scan trigger request - GUARANTEES ZERO LIVE EXTERNAL PROBES
         scan_requests = []
 
-        def handle_request(req):
-            if "/api/scanner/run" in req.url:
-                scan_requests.append({
-                    "method": req.method,
-                    "headers": req.headers,
-                    "post_data": req.post_data,
-                })
+        def handle_scan_route(route):
+            req = route.request
+            scan_requests.append({
+                "method": req.method,
+                "headers": req.headers,
+                "post_data": req.post_data,
+                "json": req.post_data_json,
+            })
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "status": "success",
+                    "scan_id": "SCAN-E2E-MOCK",
+                    "asset_id": "asset-e2e-1",
+                    "target": "93.184.216.34",
+                    "scan_type": "full",
+                    "engines": ["Nuclei", "Nmap"],
+                    "findings_count": 0,
+                    "normalized_findings": 0,
+                    "confirmed_exposures": 0,
+                    "message": "Mock E2E scan completed.",
+                }),
+            )
 
-        page.on("request", handle_request)
+        page.route("**/api/scanner/run", handle_scan_route)
 
         # 1. Set authentication token in localStorage and navigate to /scout
         page.goto(f"{server_url}/")
@@ -239,12 +265,12 @@ def test_scout_browser_real_e2e_flow(e2e_server):
         page.click("button[data-scout-launch-btn]")
         page.wait_for_timeout(600)
 
-        # 7. Assert outgoing HTTP request used apiJson with Content-Type: application/json
-        assert len(scan_requests) >= 1, "A request to /api/scanner/run must have been captured"
+        # 7. Assert outgoing HTTP request used apiJson with Content-Type: application/json and exact schema
+        assert len(scan_requests) == 1, "A single intercepted request to /api/scanner/run must have been captured"
         last_req = scan_requests[-1]
         assert last_req["method"] == "POST"
         assert "application/json" in last_req["headers"].get("content-type", "").lower()
-        assert "asset-e2e-1" in (last_req["post_data"] or "")
+        assert last_req["json"] == {"asset_id": "asset-e2e-1", "scan_type": "full"}
 
         # 8. Switch to Vulnerability Intelligence tab
         page.click('button[data-scout-nav="intel"]')
