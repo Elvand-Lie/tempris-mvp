@@ -484,9 +484,10 @@ def test_scanner_subprocess_streaming_bounded_memory():
         reader.feed_eof()
 
         limit = 100 * 1024  # 100 KB limit
-        captured = await _read_stream_bounded(reader, limit)
+        captured, overflowed = await _read_stream_bounded(reader, limit)
         assert len(captured) == limit
         assert captured == b"A" * limit
+        assert overflowed is True
 
     asyncio.run(_run())
 

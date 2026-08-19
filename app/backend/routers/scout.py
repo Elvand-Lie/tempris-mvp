@@ -6,7 +6,11 @@ from services.kev_loader import get_findings_paginated, get_finding_stats, get_u
 from services.database import get_db
 from models import CanonicalVulnerability, CisaKevEntry, Finding, ScanFinding, ScanJob, VulnerabilityCvssAssessment
 from routers.auth import get_auth_context, get_current_user
-from services.cve_intelligence import resolve_vulnerability_intelligence, validate_and_normalize_cve
+from services.cve_intelligence import (
+    resolve_vulnerability_intelligence,
+    select_preferred_cvss_assessment,
+    validate_and_normalize_cve,
+)
 import math
 
 from services.entitlements import require_module
@@ -45,6 +49,8 @@ def get_canonical_vulnerabilities(
     - Queries CanonicalVulnerability / VulnerabilityCvssAssessment / CisaKevEntry only.
     - Zero queries to Finding or ScanFinding customer records.
     - Reference records are never customer exposure.
+    - Search covers CVE ID, description, and available CISA KEV vendor/product enrichment.
+    - Aggregates strictly reflect active filter results via deterministic preferred CVSS selection.
     """
     query = db.query(CanonicalVulnerability)
 
@@ -53,10 +59,18 @@ def get_canonical_vulnerabilities(
 
     if search:
         s = f"%{search.strip()}%"
+        kev_search_subquery = db.query(CisaKevEntry.cve_id).filter(
+            or_(
+                CisaKevEntry.vendor_project.ilike(s),
+                CisaKevEntry.product.ilike(s),
+                CisaKevEntry.vulnerability_name.ilike(s),
+            )
+        )
         query = query.filter(
             or_(
                 CanonicalVulnerability.cve_id.ilike(s),
                 CanonicalVulnerability.description.ilike(s),
+                CanonicalVulnerability.cve_id.in_(kev_search_subquery),
             )
         )
 
@@ -70,6 +84,10 @@ def get_canonical_vulnerabilities(
             kev_subquery = kev_subquery.filter(CisaKevEntry.product.ilike(f"%{product.strip()}%"))
         query = query.filter(CanonicalVulnerability.cve_id.in_(kev_subquery))
 
+    catalog_total = db.query(func.count(CanonicalVulnerability.cve_id)).scalar() or 0
+    kev_total = db.query(func.count(CisaKevEntry.cve_id)).scalar() or 0
+    cvss_total_coverage = db.query(func.count(func.distinct(VulnerabilityCvssAssessment.cve_id))).scalar() or 0
+
     total_count = query.count()
     rows = (
         query.order_by(CanonicalVulnerability.cve_id.desc())
@@ -77,6 +95,38 @@ def get_canonical_vulnerabilities(
         .limit(limit)
         .all()
     )
+
+    # Server-side aggregates for the active filter using preferred assessment policy
+    if total_count > 0:
+        filtered_cve_ids = [r[0] for r in query.with_entities(CanonicalVulnerability.cve_id).all()]
+        kev_count = db.query(func.count(CisaKevEntry.cve_id)).filter(
+            CisaKevEntry.cve_id.in_(filtered_cve_ids)
+        ).scalar() or 0
+        ransomware_count = db.query(func.count(CisaKevEntry.cve_id)).filter(
+            CisaKevEntry.cve_id.in_(filtered_cve_ids),
+            func.lower(CisaKevEntry.known_ransomware_campaign_use) == "known",
+        ).scalar() or 0
+
+        assessments = db.query(VulnerabilityCvssAssessment).filter(
+            VulnerabilityCvssAssessment.cve_id.in_(filtered_cve_ids)
+        ).all()
+        assessments_by_cve: dict[str, list[VulnerabilityCvssAssessment]] = {}
+        for a in assessments:
+            assessments_by_cve.setdefault(a.cve_id, []).append(a)
+
+        critical_count = 0
+        cvss_coverage_count = 0
+        for cve_id_val, ass_list in assessments_by_cve.items():
+            pref = select_preferred_cvss_assessment(ass_list)
+            if pref is not None:
+                cvss_coverage_count += 1
+                if pref.base_score is not None and pref.base_score >= 9.0:
+                    critical_count += 1
+    else:
+        kev_count = 0
+        ransomware_count = 0
+        critical_count = 0
+        cvss_coverage_count = 0
 
     data: list[dict[str, Any]] = []
     for row in rows:
@@ -114,7 +164,15 @@ def get_canonical_vulnerabilities(
     return {
         "data": data,
         "meta": {
-            "total": total_count,
+            "catalog_total": catalog_total,
+            "filtered_total": total_count,
+            "total": total_count,  # backward compatibility alias
+            "critical_count": critical_count,
+            "kev_count": kev_count,
+            "ransomware_count": ransomware_count,
+            "cvss_coverage_count": cvss_coverage_count,
+            "cvss_total_coverage": cvss_total_coverage,
+            "kev_total_count": kev_total,
             "page": page,
             "limit": limit,
             "total_pages": total_pages,

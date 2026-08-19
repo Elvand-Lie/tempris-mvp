@@ -5,7 +5,7 @@ Full CRUD for asset management with audit trail integration.
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, Any
 from services.database import get_db
 from models import Asset, AssetScanAuthorization
 from services.target_policy import classify_asset_target, validate_and_resolve_target
@@ -595,6 +595,71 @@ def _serialize_auth(a: Optional[AssetScanAuthorization]) -> Optional[dict]:
     }
 
 
+def _derive_scan_eligibility(asset: Asset, auth: Optional[dict], classification: dict) -> dict[str, Any]:
+    """Authoritative server derivation of asset scan eligibility."""
+    if asset.status != "active":
+        return {
+            "eligible": False,
+            "reason_code": "ASSET_INACTIVE",
+            "reason": f"Asset {asset.id} is {asset.status} (only active assets can be scanned).",
+        }
+    if not classification.get("is_public_scannable"):
+        return {
+            "eligible": False,
+            "reason_code": "TARGET_NOT_PUBLIC_SCANNABLE",
+            "reason": "Asset target resolves to private, loopback, or non-globally-routable RFC 1918 address.",
+        }
+    if not auth:
+        return {
+            "eligible": False,
+            "reason_code": "NO_AUTHORIZATION",
+            "reason": f"Asset {asset.id} does not have a scan authorization. Request approval first.",
+        }
+    status = auth.get("status")
+    if status == "revoked":
+        return {
+            "eligible": False,
+            "reason_code": "AUTHORIZATION_REVOKED",
+            "reason": f"Scan authorization was revoked: {auth.get('revocation_reason') or 'No reason provided'}.",
+        }
+    if status == "expired" or auth.get("is_expired"):
+        expires_at = auth.get("expires_at") or "unknown"
+        return {
+            "eligible": False,
+            "reason_code": "AUTHORIZATION_EXPIRED",
+            "reason": f"Scan authorization expired at {expires_at}. Re-authorization required.",
+        }
+    if status == "pending":
+        return {
+            "eligible": False,
+            "reason_code": "AUTHORIZATION_PENDING",
+            "reason": "Scan authorization is pending Superadmin approval.",
+        }
+    if status != "approved":
+        return {
+            "eligible": False,
+            "reason_code": f"AUTHORIZATION_{str(status).upper()}",
+            "reason": f"Scan authorization status is {status}.",
+        }
+
+    # Target consistency check
+    current_target = classification.get("target") or asset.hostname or asset.ip_address or ""
+    authorized_target = auth.get("authorized_target") or ""
+    from services.target_policy import clean_target_input
+    if clean_target_input(current_target) != clean_target_input(authorized_target):
+        return {
+            "eligible": False,
+            "reason_code": "TARGET_MISMATCH",
+            "reason": f"Asset target '{current_target}' has changed and does not match authorized target '{authorized_target}'. Re-authorization required.",
+        }
+
+    return {
+        "eligible": True,
+        "reason_code": "ELIGIBLE",
+        "reason": f"Asset is validly authorized for external scanning ({authorized_target}).",
+    }
+
+
 def _serialize_asset(a: Asset, db: Optional[Session] = None) -> dict:
     classification = classify_asset_target(a.ip_address, a.hostname, a.name)
     scan_auth = None
@@ -606,6 +671,8 @@ def _serialize_asset(a: Asset, db: Optional[Session] = None) -> dict:
         ).order_by(AssetScanAuthorization.created_at.desc()).first()
         if latest_auth:
             scan_auth = _serialize_auth(latest_auth)
+
+    scan_eligibility = _derive_scan_eligibility(a, scan_auth, classification)
 
     return {
         "id": a.id,
@@ -621,6 +688,9 @@ def _serialize_asset(a: Asset, db: Optional[Session] = None) -> dict:
         "notes": a.notes,
         "target_classification": classification,
         "scan_authorization": scan_auth,
+        "scan_eligibility": scan_eligibility,
+        "scan_eligible": scan_eligibility["eligible"],
+        "scan_ineligible_reason": scan_eligibility["reason"] if not scan_eligibility["eligible"] else None,
         "created_at": a.created_at.isoformat() if a.created_at else "",
         "updated_at": a.updated_at.isoformat() if a.updated_at else "",
     }

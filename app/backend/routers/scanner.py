@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from models import Asset, AssetScanAuthorization, ScanFinding, ScanJob
+from models import Asset, AssetExposure, AssetScanAuthorization, Finding, ScanFinding, ScanJob
 from routers.audit import AuditEntry, append_to_audit_log
 from routers.auth import get_auth_context, get_current_user, require_role
 from services.database import get_db
@@ -44,6 +44,15 @@ from services.target_policy import (
 logger = logging.getLogger("tempris.scanner")
 
 router = APIRouter(dependencies=[Depends(require_module("SCOUT"))])
+
+
+class ScannerOutputLimitExceeded(RuntimeError):
+    """Raised when scanner subprocess output exceeds the maximum capture limit."""
+    code = "output_limit_exceeded"
+
+    def __init__(self, message: str, stream: str = "stdout"):
+        super().__init__(message)
+        self.stream = stream
 
 
 def _is_active_scanning_enabled() -> bool:
@@ -87,14 +96,18 @@ SEVERITY_MAP = {
     "info": "Info",
 }
 
-MAX_CAPTURE_BYTES = 10 * 1024 * 1024  # 10 MB limit
+MAX_CAPTURE_BYTES = 10 * 1024 * 1024  # 10 MB per stream limit
 
 
-async def _read_stream_bounded(stream: asyncio.StreamReader | None, limit: int) -> bytes:
-    """Read from an asyncio StreamReader up to `limit` bytes without unbounded memory growth."""
+async def _read_stream_bounded(stream: asyncio.StreamReader | None, limit: int) -> tuple[bytes, bool]:
+    """Read from an asyncio StreamReader up to `limit` bytes.
+
+    Returns (captured_bytes, exceeded_limit).
+    """
     if stream is None:
-        return b""
+        return b"", False
     buffer = bytearray()
+    exceeded = False
     while True:
         chunk = await stream.read(64 * 1024)
         if not chunk:
@@ -102,8 +115,12 @@ async def _read_stream_bounded(stream: asyncio.StreamReader | None, limit: int) 
         if len(buffer) < limit:
             remaining = limit - len(buffer)
             buffer.extend(chunk[:remaining])
+            if len(chunk) > remaining:
+                exceeded = True
+        else:
+            exceeded = True
         # Discard data beyond limit to prevent memory bloat during execution
-    return bytes(buffer)
+    return bytes(buffer), exceeded
 
 
 async def _execute_subprocess_safely(
@@ -125,17 +142,30 @@ async def _execute_subprocess_safely(
             asyncio.gather(stdout_task, stderr_task, proc.wait()),
             timeout=timeout_seconds,
         )
-        stdout = stdout_task.result()
-        stderr = stderr_task.result()
+        stdout, stdout_exceeded = stdout_task.result()
+        stderr, stderr_exceeded = stderr_task.result()
     except (asyncio.TimeoutError, asyncio.CancelledError):
         stdout_task.cancel()
         stderr_task.cancel()
+        await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
         try:
             proc.kill()
             await proc.wait()
         except Exception:
             pass
         raise
+
+    if stdout_exceeded or stderr_exceeded:
+        try:
+            proc.kill()
+            await proc.wait()
+        except Exception:
+            pass
+        stream_name = "stdout" if stdout_exceeded else "stderr"
+        raise ScannerOutputLimitExceeded(
+            f"Scanner output on {stream_name} exceeded maximum buffer limit of {max_output_bytes // (1024 * 1024)} MB (output_limit_exceeded)",
+            stream=stream_name,
+        )
 
     return (proc.returncode or 0, stdout, stderr)
 
@@ -656,6 +686,38 @@ async def trigger_scan(
                 observation=nf,
                 actor_id=user_email,
             ))
+    except ScannerOutputLimitExceeded as exc:
+        db.rollback()
+        failed_job = db.query(ScanJob).filter(
+            ScanJob.id == scan_id,
+            ScanJob.tenant_id == tenant_id,
+        ).first()
+        if failed_job:
+            failed_job.status = "failed"
+            failed_job.failure_reason = "output_limit_exceeded"
+            failed_job.error = "Scanner output exceeded maximum buffer limit (output_limit_exceeded)"
+            failed_job.completed_at = datetime.now(timezone.utc)
+            record_operational_event(
+                db,
+                tenant_id=tenant_id,
+                event_type="scan.failed",
+                resource_type="scan_job",
+                resource_id=scan_id,
+                source_module="SCOUT",
+                actor_id=user_email,
+                correlation_id=scan_id,
+                metadata={
+                    "error_type": "output_limit_exceeded",
+                    "stream": exc.stream,
+                    "detail": str(exc),
+                },
+            )
+            db.commit()
+        logger.warning("SCOUT scan output limit exceeded for scan job %s on %s stream", scan_id, exc.stream)
+        raise HTTPException(
+            status_code=500,
+            detail="Scanner output exceeded maximum buffer limit (output_limit_exceeded)",
+        ) from exc
     except Exception as exc:
         db.rollback()
         failed_job = db.query(ScanJob).filter(
@@ -792,21 +854,74 @@ def get_scan_findings(db: Session = Depends(get_db), user = Depends(get_current_
 
 @router.get("/findings/summary")
 def get_scan_summary(db: Session = Depends(get_db), user = Depends(get_current_user)):
-    """Return summary stats of scan findings."""
+    """Return exact summary statistics for SCOUT external scans."""
     tenant_id = get_auth_context(user).tenant_id
     all_findings = db.query(ScanFinding).filter(ScanFinding.tenant_id == tenant_id).all()
     jobs = db.query(ScanJob).filter(ScanJob.tenant_id == tenant_id).all()
+
+    # Distinguish service observations from vulnerability observations
+    service_obs = len([
+        f for f in all_findings
+        if (getattr(f, "engine", "") or "").lower() in ("nmap", "builtin_tcp", "builtin")
+        or (f.template_id or "").startswith(("nmap", "builtin"))
+        or (not getattr(f, "cve_id", None) and not getattr(f, "normalized_finding_id", None) and not (f.template_id or "").startswith("cve-"))
+    ])
+    vuln_obs = len(all_findings) - service_obs
+
+    # Distinct open tenant Findings with qualifying ScanFinding and confirmed same-tenant AssetExposure
+    from services.customer_posture import RESOLVED_STATUSES
+    scan_finding_norm_ids = db.query(ScanFinding.normalized_finding_id).filter(
+        ScanFinding.tenant_id == tenant_id,
+        ScanFinding.normalized_finding_id.isnot(None),
+    ).distinct().scalar_subquery()
+
+    confirmed_scan_exposures = db.query(func.count(func.distinct(Finding.id))).join(
+        AssetExposure, (AssetExposure.finding_id == Finding.id) & (AssetExposure.tenant_id == tenant_id)
+    ).join(
+        Asset, (Asset.id == AssetExposure.asset_id) & (Asset.tenant_id == tenant_id)
+    ).filter(
+        Finding.tenant_id == tenant_id,
+        Finding.id.in_(scan_finding_norm_ids),
+        ~func.lower(func.coalesce(Finding.status, "unmitigated")).in_(list(RESOLVED_STATUSES)),
+        AssetExposure.status == "confirmed",
+        AssetExposure.match_method.in_(["nuclei", "scanner_observation", "scanner"]),
+        Asset.status == "active",
+    ).scalar() or 0
+
     if not all_findings:
-        return {"total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0, "scans": len(jobs), "normalized_findings": 0}
+        return {
+            "scans": len(jobs),
+            "total_observations": 0,
+            "total": 0,
+            "service_observations": 0,
+            "vulnerability_observations": 0,
+            "critical_observations": 0,
+            "high_observations": 0,
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "normalized_findings": 0,
+            "confirmed_scan_exposures": 0,
+        }
+
+    critical_obs = len([f for f in all_findings if f.risk == "Critical"])
+    high_obs = len([f for f in all_findings if f.risk == "High"])
 
     return {
-        "total": len(all_findings),
-        "critical": len([f for f in all_findings if f.risk == "Critical"]),
-        "high": len([f for f in all_findings if f.risk == "High"]),
+        "scans": len(jobs),
+        "total_observations": len(all_findings),
+        "total": len(all_findings),  # backward compatibility alias
+        "service_observations": service_obs,
+        "vulnerability_observations": vuln_obs,
+        "critical_observations": critical_obs,
+        "high_observations": high_obs,
+        "critical": critical_obs,  # backward compatibility alias
+        "high": high_obs,  # backward compatibility alias
         "medium": len([f for f in all_findings if f.risk == "Medium"]),
         "low": len([f for f in all_findings if f.risk == "Low"]),
-        "scans": len(jobs),
         "normalized_findings": len({f.normalized_finding_id for f in all_findings if f.normalized_finding_id}),
+        "confirmed_scan_exposures": confirmed_scan_exposures,
     }
 
 

@@ -169,6 +169,23 @@
     throw lastError || new Error('Service unavailable after retries.');
   }
 
+  async function apiJson(path, {
+    method = 'POST',
+    body,
+    headers = {},
+    ...options
+  } = {}) {
+    return api(path, {
+      ...options,
+      method,
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  }
+
   function navigate(path) {
     if (window.location.pathname === path) return;
     window.history.pushState({}, '', path);
@@ -2391,11 +2408,19 @@
           assetOptions += assets.map((a) => {
             const classification = a.target_classification || {};
             const auth = a.scan_authorization || {};
-            const isScannable = classification.is_public_scannable;
+            const eligibility = a.scan_eligibility || {};
+            const isEligible = Boolean(a.scan_eligible ?? eligibility.eligible);
+            const ineligibleReason = a.scan_ineligible_reason || eligibility.reason || '';
             const authStatus = auth.status || 'unauthorized';
             const targetDisplay = classification.target || a.hostname || a.ip_address || a.name;
-            const tag = isScannable ? (authStatus === 'approved' ? ' [Authorized]' : ` [${titleCase(authStatus)}]`) : ' [Internal/RFC1918 - Not Scannable]';
-            return `<option value="${escapeHtml(a.id)}" data-target="${escapeHtml(targetDisplay)}" data-kind="${escapeHtml(classification.target_kind || '')}" data-scannable="${isScannable ? 'true' : 'false'}" data-auth="${escapeHtml(authStatus)}">${escapeHtml(a.name)} — ${escapeHtml(targetDisplay)}${tag}</option>`;
+            const tag = isEligible
+              ? ' [Authorized]'
+              : (!classification.is_public_scannable
+                ? ' [Internal/RFC1918 - Not Scannable]'
+                : (auth.is_expired || authStatus === 'expired'
+                  ? ' [Expired]'
+                  : ` [${titleCase(authStatus)}]`));
+            return `<option value="${escapeHtml(a.id)}" data-target="${escapeHtml(targetDisplay)}" data-kind="${escapeHtml(classification.target_kind || '')}" data-scannable="${classification.is_public_scannable ? 'true' : 'false'}" data-auth="${escapeHtml(authStatus)}" data-scan-eligible="${isEligible ? 'true' : 'false'}" data-scan-ineligible-reason="${escapeHtml(ineligibleReason)}">${escapeHtml(a.name)} — ${escapeHtml(targetDisplay)}${tag}</option>`;
           }).join('');
         } else {
           assetOptions = '<option value="">No active assets found in inventory</option>';
@@ -2439,11 +2464,12 @@
             </section>
 
             <section class="tmx-metrics">
-              <div class="tmx-metric"><div class="tmx-metric-label">Total Scans Run</div><div class="tmx-metric-value">${escapeHtml(scanSummary.scans ?? 0)}</div></div>
-              <div class="tmx-metric"><div class="tmx-metric-label">Total Observations</div><div class="tmx-metric-value">${escapeHtml(scanSummary.total ?? 0)}</div></div>
-              <div class="tmx-metric"><div class="tmx-metric-label">Critical Findings</div><div class="tmx-metric-value tmx-tone-critical">${escapeHtml(scanSummary.critical ?? 0)}</div></div>
-              <div class="tmx-metric"><div class="tmx-metric-label">High Findings</div><div class="tmx-metric-value tmx-tone-high">${escapeHtml(scanSummary.high ?? 0)}</div></div>
-              <div class="tmx-metric"><div class="tmx-metric-label">Normalized Exposures</div><div class="tmx-metric-value tmx-tone-success">${escapeHtml(scanSummary.normalized_findings ?? 0)}</div></div>
+              <div class="tmx-metric"><div class="tmx-metric-label">Scan Runs</div><div class="tmx-metric-value">${escapeHtml(scanSummary.scans ?? 0)}</div></div>
+              <div class="tmx-metric"><div class="tmx-metric-label">All Observations</div><div class="tmx-metric-value">${escapeHtml(scanSummary.total_observations ?? scanSummary.total ?? 0)}</div></div>
+              <div class="tmx-metric"><div class="tmx-metric-label">Service Observations</div><div class="tmx-metric-value">${escapeHtml(scanSummary.service_observations ?? 0)}</div></div>
+              <div class="tmx-metric"><div class="tmx-metric-label">Vulnerability Observations</div><div class="tmx-metric-value">${escapeHtml(scanSummary.vulnerability_observations ?? 0)}</div></div>
+              <div class="tmx-metric"><div class="tmx-metric-label">Normalized Vulnerability Findings</div><div class="tmx-metric-value tmx-tone-high">${escapeHtml(scanSummary.normalized_findings ?? 0)}</div></div>
+              <div class="tmx-metric"><div class="tmx-metric-label">Confirmed Scan Exposures</div><div class="tmx-metric-value tmx-tone-critical">${escapeHtml(scanSummary.confirmed_scan_exposures ?? 0)}</div></div>
             </section>
 
             <section class="tmx-panel">
@@ -2560,22 +2586,17 @@
           const kind = opt.dataset.kind || '';
           const scannable = opt.dataset.scannable === 'true';
           const authStatus = opt.dataset.auth || 'unauthorized';
+          const isEligible = opt.dataset.scanEligible === 'true';
+          const ineligibleReason = opt.dataset.scanIneligibleReason || '';
 
           previewTarget.textContent = target;
           previewKind.textContent = titleCase(kind);
           previewKind.className = `tmx-status ${scannable ? 'tmx-status-available' : 'tmx-status-high'}`;
-          previewAuth.textContent = titleCase(authStatus);
-          previewAuth.className = `tmx-status ${authStatus === 'approved' ? 'tmx-status-available' : (authStatus === 'pending' ? 'tmx-status-high' : 'tmx-status-critical')}`;
+          previewAuth.textContent = isEligible ? 'Authorized' : titleCase(authStatus);
+          previewAuth.className = `tmx-status ${isEligible ? 'tmx-status-available' : (authStatus === 'pending' ? 'tmx-status-high' : 'tmx-status-critical')}`;
 
-          let err = '';
-          if (!scannable) {
-            err = 'Target is internal RFC 1918. Central scanning is unsupported.';
-          } else if (authStatus !== 'approved') {
-            err = `Asset scan authorization is ${authStatus}. Platform Superadmin approval required in Asset Inventory.`;
-          }
-
-          if (err) {
-            previewWarning.textContent = err;
+          if (!isEligible) {
+            previewWarning.textContent = ineligibleReason || `Asset scan authorization is ${authStatus}. Platform Superadmin approval required in Asset Inventory.`;
             previewWarning.style.display = 'block';
             if (launchBtn) launchBtn.disabled = true;
           } else {
@@ -2602,9 +2623,9 @@
           statusMsg.style.color = '#a1a1aa';
 
           try {
-            const res = await api('/api/scanner/run', {
+            const res = await apiJson('/api/scanner/run', {
               method: 'POST',
-              body: JSON.stringify({ asset_id: assetId, scan_type: scanType }),
+              body: { asset_id: assetId, scan_type: scanType },
             });
             statusMsg.textContent = `Scan completed successfully! ${res.findings_count ?? res.result_count ?? 0} observations recorded.`;
             statusMsg.style.color = '#34d399';
@@ -2639,18 +2660,40 @@
 
           const intelResponse = await api(`/api/scout/vulnerabilities?${params.toString()}`);
           const vulns = intelResponse.data || [];
-          const meta = intelResponse.meta || { total: vulns.length, page: 1, limit: 20, total_pages: 1 };
+          const meta = intelResponse.meta || {
+            catalog_total: vulns.length,
+            filtered_total: vulns.length,
+            total: vulns.length,
+            critical_count: 0,
+            kev_count: 0,
+            ransomware_count: 0,
+            cvss_coverage_count: 0,
+            cvss_total_coverage: 0,
+            kev_total_count: 0,
+            page: 1,
+            limit: 20,
+            total_pages: 1,
+          };
 
-          // Count metrics for current page or meta
-          const criticalCount = vulns.filter((v) => (v.cvss?.score || 0) >= 9.0).length;
-          const kevCount = vulns.filter((v) => v.cisa_kev?.is_kev).length;
-          const ransomwareCount = vulns.filter((v) => v.cisa_kev?.is_ransomware).length;
+          const catalogTotal = meta.catalog_total ?? meta.total ?? 0;
+          const filteredTotal = meta.filtered_total ?? meta.total ?? 0;
+          const isFiltered = Boolean(scoutIntelSearch.trim() || scoutIntelKevOnly || scoutIntelRansomwareOnly || scoutIntelStatus);
+          const criticalCount = meta.critical_count ?? 0;
+          const kevCount = meta.kev_count ?? 0;
+          const ransomwareCount = meta.ransomware_count ?? 0;
 
           const rowsHtml = vulns.map((v) => {
             const cvss = v.cvss || {};
             const kev = v.cisa_kev || {};
-            const score = cvss.score != null ? Number(cvss.score).toFixed(1) : 'N/A';
-            const severityCls = score >= 9.0 ? 'tmx-status-critical' : (score >= 7.0 ? 'tmx-status-high' : 'tmx-status-available');
+            const hasScore = cvss.score != null;
+            const score = hasScore ? Number(cvss.score).toFixed(1) : 'N/A';
+            const severityCls = hasScore
+              ? (cvss.score >= 9.0 ? 'tmx-status-critical' : (cvss.score >= 7.0 ? 'tmx-status-high' : 'tmx-status-available'))
+              : 'tmx-status-neutral';
+
+            const descSource = v.description_source || 'Not available';
+            const cvssVer = cvss.version ? `v${escapeHtml(cvss.version)}` : 'N/A';
+            const cvssSource = cvss.source || 'Not available';
 
             const kevBadge = kev.is_kev ? `<span class="tmx-tag-kev">CISA KEV</span>` : '';
             const ransomwareBadge = kev.is_ransomware ? `<span class="tmx-tag-ransomware">Ransomware</span>` : '';
@@ -2665,16 +2708,16 @@
                     ${escapeHtml(v.description || 'No description available')}
                   </div>
                   <div style="font-size:11px;color:#71717a;">
-                    Source: ${escapeHtml(v.description_source || 'NVD')} &middot; Published: ${escapeHtml(v.published_at ? new Date(v.published_at).toLocaleDateString() : 'Unknown')}
+                    Source: ${escapeHtml(descSource)} &middot; Published: ${escapeHtml(v.published_at ? new Date(v.published_at).toLocaleDateString() : 'Unknown')}
                   </div>
                 </td>
                 <td>
                   <div style="display:flex;align-items:center;gap:6px;">
                     <span class="tmx-status ${severityCls}">${score}</span>
-                    <span style="font-size:11px;color:#a1a1aa;">v${escapeHtml(cvss.version || '3.1')}</span>
+                    <span style="font-size:11px;color:#a1a1aa;">${cvssVer}</span>
                   </div>
                   <div style="font-size:11px;color:#71717a;margin-top:2px;">
-                    ${escapeHtml(cvss.source || 'NVD')}
+                    ${escapeHtml(cvssSource)}
                   </div>
                 </td>
                 <td>
@@ -2694,11 +2737,26 @@
           tabContainer.innerHTML = `
             <div class="tmx-page">
               <section class="tmx-metrics">
-                <div class="tmx-metric"><div class="tmx-metric-label">Total Catalog CVEs</div><div class="tmx-metric-value">${escapeHtml(meta.total)}</div></div>
-                <div class="tmx-metric"><div class="tmx-metric-label">CVSS Critical (&ge; 9.0)</div><div class="tmx-metric-value tmx-tone-critical">${escapeHtml(criticalCount)}</div></div>
-                <div class="tmx-metric"><div class="tmx-metric-label">CISA KEV Exploited</div><div class="tmx-metric-value tmx-tone-high">${escapeHtml(kevCount)}</div></div>
-                <div class="tmx-metric"><div class="tmx-metric-label">Known Ransomware Linked</div><div class="tmx-metric-value tmx-tone-critical">${escapeHtml(ransomwareCount)}</div></div>
-                <div class="tmx-metric"><div class="tmx-metric-label">Catalogue Authority</div><div class="tmx-metric-value tmx-tone-success">NVD + CISA</div></div>
+                <div class="tmx-metric">
+                  <div class="tmx-metric-label">${isFiltered ? 'Matching Filter Results' : 'Total Catalog CVEs'}</div>
+                  <div class="tmx-metric-value">${escapeHtml(isFiltered ? `${filteredTotal} / ${catalogTotal}` : catalogTotal)}</div>
+                </div>
+                <div class="tmx-metric">
+                  <div class="tmx-metric-label">CVSS Critical (&ge; 9.0)</div>
+                  <div class="tmx-metric-value tmx-tone-critical">${escapeHtml(criticalCount)}</div>
+                </div>
+                <div class="tmx-metric">
+                  <div class="tmx-metric-label">CISA KEV Exploited</div>
+                  <div class="tmx-metric-value tmx-tone-high">${escapeHtml(kevCount)}</div>
+                </div>
+                <div class="tmx-metric">
+                  <div class="tmx-metric-label">Known Ransomware Linked</div>
+                  <div class="tmx-metric-value tmx-tone-critical">${escapeHtml(ransomwareCount)}</div>
+                </div>
+                <div class="tmx-metric">
+                  <div class="tmx-metric-label">CVSS Provenance</div>
+                  <div class="tmx-metric-value tmx-tone-success">${escapeHtml(meta.cvss_total_coverage ?? meta.cvss_coverage_count ?? 0)} / ${escapeHtml(catalogTotal)}</div>
+                </div>
               </section>
 
               <section class="tmx-panel">
@@ -2743,7 +2801,7 @@
 
                 <div class="tmx-pagination">
                   <div>
-                    Showing Page <strong>${meta.page}</strong> of <strong>${meta.total_pages}</strong> (${meta.total} total catalog CVEs)
+                    Showing Page <strong>${meta.page}</strong> of <strong>${meta.total_pages}</strong> (${filteredTotal} matching catalog CVEs)
                   </div>
                   <div class="tmx-pagination-buttons">
                     <button type="button" class="tmx-button tmx-button-secondary" data-intel-prev-page ${meta.page <= 1 ? 'disabled' : ''}>&larr; Previous</button>
@@ -2849,9 +2907,9 @@
                 const assessmentsHtml = assessments.map((a) => `
                   <div style="background:#09090b;padding:8px 12px;border-radius:6px;border:1px solid #27272a;font-size:12px;">
                     <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-                      <strong>${escapeHtml(a.source)} (${escapeHtml(a.source_role || 'Assessor')})</strong>
+                      <strong>${escapeHtml(a.source || 'Assessor')} (${escapeHtml(a.source_role || 'Assessor')})</strong>
                       <span class="tmx-status ${a.base_score >= 9.0 ? 'tmx-status-critical' : (a.base_score >= 7.0 ? 'tmx-status-high' : 'tmx-status-available')}">
-                        ${a.base_score} (v${escapeHtml(a.cvss_version)})
+                        ${a.base_score != null ? a.base_score : 'N/A'} ${a.cvss_version ? `(v${escapeHtml(a.cvss_version)})` : ''}
                       </span>
                     </div>
                     <div style="font-family:monospace;color:#94a3b8;font-size:11px;">
@@ -2860,19 +2918,24 @@
                   </div>
                 `).join('');
 
+                const hasPrefScore = pref.score != null;
+                const prefScoreColor = hasPrefScore
+                  ? (pref.score >= 9.0 ? '#ef4444' : (pref.score >= 7.0 ? '#f59e0b' : '#10b981'))
+                  : '#a1a1aa';
+
                 modalBody.innerHTML = `
                   <div style="background:#141416;padding:12px;border-radius:6px;border:1px solid #27272a;">
                     <strong style="color:#a1a1aa;font-size:11px;text-transform:uppercase;">Description</strong>
-                    <p style="margin:6px 0 0;color:#f4f4f5;">${escapeHtml(detail.description || 'No description')}</p>
+                    <p style="margin:6px 0 0;color:#f4f4f5;">${escapeHtml(detail.description || 'No description available')}</p>
                   </div>
 
                   <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:12px;">
                     <div style="background:#141416;padding:12px;border-radius:6px;border:1px solid #27272a;">
                       <strong style="color:#a1a1aa;font-size:11px;text-transform:uppercase;">Preferred CVSS Assessment</strong>
-                      <div style="margin-top:6px;font-size:18px;font-weight:700;color:${pref.score >= 9.0 ? '#ef4444' : (pref.score >= 7.0 ? '#f59e0b' : '#10b981')}">
-                        ${pref.score ?? 'N/A'} <span style="font-size:12px;color:#a1a1aa;">(v${escapeHtml(pref.version || '3.1')})</span>
+                      <div style="margin-top:6px;font-size:18px;font-weight:700;color:${prefScoreColor}">
+                        ${hasPrefScore ? pref.score : 'N/A'} ${pref.version ? `<span style="font-size:12px;color:#a1a1aa;">(v${escapeHtml(pref.version)})</span>` : ''}
                       </div>
-                      <div style="font-size:11px;color:#94a3b8;margin-top:4px;">Authority: ${escapeHtml(pref.source || 'NVD')} (${escapeHtml(pref.provenance || 'Deterministic Policy')})</div>
+                      <div style="font-size:11px;color:#94a3b8;margin-top:4px;">Authority: ${escapeHtml(pref.source || 'Not available')} (${escapeHtml(pref.provenance || 'Unassessed')})</div>
                       <div style="font-family:monospace;font-size:11px;color:#71717a;margin-top:4px;">${escapeHtml(pref.vector || '-')}</div>
                     </div>
 

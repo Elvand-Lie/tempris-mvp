@@ -6,7 +6,7 @@ from services.tes_engine import calculate_tes, TESInputs, calculate_finding_tes,
 from services.sss_contract import public_sss_output
 from routers.audit import append_to_audit_log, AuditEntry
 from routers.auth import get_current_user, require_role
-from services.kev_loader import get_findings_paginated, get_finding_by_id
+from services.kev_loader import get_findings_paginated, get_finding_by_id, _finding_to_dict
 from services.database import get_db
 from models import EdipDecision, FindingEvidence
 from services.edip_engine import auto_classify
@@ -85,6 +85,9 @@ def _strip_internal_fields(f: dict) -> dict:
         f.pop(field, None)
     return f
 
+PRIORITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+
+
 @router.get("/findings")
 def get_findings(
     page: int = 1,
@@ -96,17 +99,28 @@ def get_findings(
     db: Session = Depends(get_db),
     user = Depends(get_current_user),
 ):
-    """Returns findings with TES scores. DB-level pagination, search, and filtering."""
+    """Returns findings with TES scores and canonical intelligence.
+
+    Dedicated SPECTRUM pipeline:
+    1. Loads tenant Finding records.
+    2. Classifies scope (confirmed exposure, intake, suggested match, etc.).
+    3. Hydrates canonical CVE intelligence (CVSS, KEV, Ransomware).
+    4. Computes live TES scores, decisions, and priorities.
+    5. Filters by scope, decision, and live TES priority.
+    6. Stably sorts by live TES priority -> TES score desc -> CVSS desc -> stable ID.
+    7. Paginates the exact sorted and filtered results.
+    """
+    from models import Finding
     from routers.auth import get_auth_context
+    from sqlalchemy import or_
+
     auth_ctx = get_auth_context(user)
     edip_map = _load_edip_decisions(db, auth_ctx.tenant_id, auth_ctx.is_superadmin)
     posture = build_customer_posture(db, auth_ctx.tenant_id)
     confirmed_ids = set(posture["confirmed_finding_ids"])
     legacy_ids = set(posture["legacy_unverified_finding_ids"])
     confirmed_assets: dict[str, list[dict[str, Any]]] = {}
-    # Include historical confirmed links in a finding's detail view too.  Open
-    # posture still comes solely from ``confirmed_ids`` above, so resolving or
-    # marking a finding false-positive cannot keep it in the main queue.
+
     for finding, asset, link in canonical_exposure_rows(db, auth_ctx.tenant_id, open_only=False):
         confirmed_assets.setdefault(finding.id, []).append({
             "id": asset.id,
@@ -130,20 +144,26 @@ def get_findings(
     if scope not in allowed_scopes:
         raise HTTPException(status_code=422, detail="Unknown finding scope")
 
-    # DB-level filtered + paginated query
-    fetch_page = 1 if scope != "all" else page
-    fetch_limit = 100000 if scope != "all" else limit
-    page_findings, total = get_findings_paginated(
-        db, page=fetch_page, limit=fetch_limit,
-        priority=priority, search=search,
-        decision_filter=decision,
-        user_tenant_id=auth_ctx.tenant_id,
-        is_superadmin=auth_ctx.is_superadmin,
-    )
-    finding_ids = [row.get("id") for row in page_findings if row.get("id")]
+    query = db.query(Finding).filter(Finding.tenant_id == auth_ctx.tenant_id)
+    if search:
+        search_pattern = f"%{search.strip()}%"
+        query = query.filter(
+            or_(
+                Finding.cve.ilike(search_pattern),
+                Finding.cve_id.ilike(search_pattern),
+                Finding.title.ilike(search_pattern),
+                Finding.vendor.ilike(search_pattern),
+                Finding.id.ilike(search_pattern),
+            )
+        )
+
+    all_tenant_findings = query.all()
+
+    # Pre-fetch evidence files for all candidate findings
+    candidate_ids = [f.id for f in all_tenant_findings]
     evidence_by_finding: dict[str, list[dict[str, Any]]] = {}
-    if finding_ids:
-        for evidence in db.query(FindingEvidence).filter(FindingEvidence.finding_id.in_(finding_ids)).all():
+    if candidate_ids:
+        for evidence in db.query(FindingEvidence).filter(FindingEvidence.finding_id.in_(candidate_ids)).all():
             evidence_by_finding.setdefault(evidence.finding_id, []).append({
                 "id": evidence.id,
                 "filename": evidence.filename,
@@ -174,15 +194,14 @@ def get_findings(
             return "catalogue_record"
         return "unmapped_intake"
 
-    scoped = [(row, record_scope(row)) for row in page_findings]
-    if scope != "all":
-        scoped = [pair for pair in scoped if pair[1] == scope]
-        total = len(scoped)
-        start = max(0, (page - 1) * limit)
-        scoped = scoped[start:start + limit]
+    processed: list[dict[str, Any]] = []
 
-    result = []
-    for f, scope_label in scoped:
+    for f_orm in all_tenant_findings:
+        f = _finding_to_dict(f_orm)
+        scope_label = record_scope(f)
+        if scope != "all" and scope_label != scope:
+            continue
+
         f_copy = f.copy()
         f_copy["record_scope"] = scope_label
         f_copy["record_scope_label"] = scope_label.replace("_", " ").title()
@@ -200,18 +219,34 @@ def get_findings(
             f_copy["cisa"] = intel.is_cisa_kev
             f_copy["ransomware"] = intel.is_ransomware
 
-        try:
-            f_copy["tes_score"] = _public_tes_score(f, db, auth_ctx.tenant_id)
-        except (KeyError, TypeError, ValueError):
+        # Live TES resolution
+        has_cve_score = is_cve and f_copy.get("cvss") is not None
+        has_sss_score = (not is_cve) and bool(
+            (f.get("sss_data") or {}).get("scoring")
+            or ((f.get("sss_data") or {}).get("base_severity") is not None)
+            or (f.get("cvss") is not None and f.get("cvss") > 0)
+        )
+
+        if has_cve_score or has_sss_score:
+            try:
+                tes_val = _public_tes_score(f, db, auth_ctx.tenant_id)
+                f_copy["tes_score"] = tes_val
+                f_copy["tes_decision"] = public_decision_for_finding(f, tes_val)
+                f_copy["tes_priority"] = priority_from_tes(tes_val)
+            except (KeyError, TypeError, ValueError):
+                f_copy["tes_score"] = None
+                f_copy["tes_decision"] = None
+                f_copy["tes_priority"] = None
+        else:
             f_copy["tes_score"] = None
-        f_copy["tes_decision"] = public_decision_for_finding(f, f_copy["tes_score"] or 0.0)
-        f_copy["tes_priority"] = priority_from_tes(f_copy["tes_score"] or 0.0)
+            f_copy["tes_decision"] = None
+            f_copy["tes_priority"] = None
+
         f_copy["severity"] = public_severity(f, db=db)
         if is_cve and f_copy["tes_score"] is not None:
             f_copy["business_impact"] = public_cve_context(f, db=db, tenant_id=auth_ctx.tenant_id)["business_impact"]
 
-        # Native SPECTRUM receives canonical confirmed assets, never the legacy
-        # Finding.asset_id convenience field.
+        # Native SPECTRUM receives canonical confirmed assets
         assets = confirmed_assets.get(f["id"], [])
         f_copy["assets"] = assets
         f_copy["asset"] = assets[0] if assets else None
@@ -225,7 +260,7 @@ def get_findings(
                 "asset_id": asset_data.get("asset_id", ""),
             }
 
-        # Run automated EDIP classification with context binding using authoritative intel
+        # Automated EDIP classification
         cisa_flag = intel.is_cisa_kev if intel else bool(f.get("cisa", False))
         ransomware_flag = intel.is_ransomware if intel else bool(f.get("ransomware", False))
         f_copy["auto_classification"] = auto_classify(
@@ -243,10 +278,43 @@ def get_findings(
             f_copy["edip_decision"] = edip_data["decision"]
             f_copy["edip_rationale"] = edip_data.get("rationale")
             f_copy["edip_decided_by"] = edip_data.get("decided_by")
-        result.append(_strip_internal_fields(f_copy))
+
+        # Filter by decision
+        if decision:
+            has_decision = f_copy.get("edip_decision") is not None
+            if decision == "pending" and has_decision:
+                continue
+            if decision == "decided" and not has_decision:
+                continue
+            if decision in VALID_EDIP_DECISIONS and f_copy.get("edip_decision") != decision:
+                continue
+
+        # Filter by live TES priority
+        if priority:
+            if f_copy.get("tes_priority") != priority and f_copy.get("priority") != priority:
+                continue
+
+        processed.append(_strip_internal_fields(f_copy))
+
+    # Stable sort: TES Priority -> TES score desc -> CVSS desc -> created_at / ID
+    def _spectrum_sort_key(item: dict) -> tuple:
+        p = item.get("tes_priority") or item.get("priority")
+        p_rank = PRIORITY_RANK.get(p, 99) if p else 99
+        tes = item.get("tes_score")
+        tes_val = float(tes) if tes is not None else -1.0
+        cvss = item.get("cvss")
+        cvss_val = float(cvss) if cvss is not None else -1.0
+        fid = str(item.get("id") or "")
+        return (p_rank, -tes_val, -cvss_val, fid)
+
+    processed.sort(key=_spectrum_sort_key)
+
+    total = len(processed)
+    start = max(0, (page - 1) * limit)
+    paged = processed[start : start + limit]
 
     return {
-        "data": result,
+        "data": paged,
         "meta": {"total": total, "page": page, "limit": limit, "scope": scope}
     }
 
