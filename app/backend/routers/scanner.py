@@ -160,6 +160,9 @@ async def _execute_subprocess_safely(
         stdout = stdout_task.result()
         stderr = stderr_task.result()
         return proc.returncode or 0, stdout, stderr
+    except asyncio.CancelledError:
+        await _cleanup_process()
+        raise
     except Exception:
         await _cleanup_process()
         raise
@@ -936,10 +939,9 @@ def get_scan_summary(db: Session = Depends(get_db), user = Depends(get_current_u
         .filter(
             Finding.tenant_id == tenant_id,
             AssetExposure.status == "confirmed",
+            AssetExposure.match_method == "nuclei",
             Asset.status == "active",
             ~func.lower(func.coalesce(Finding.status, "unmitigated")).in_(list(EXCLUDED_STATUSES)),
-            (func.lower(func.coalesce(getattr(ScanFinding, "engine", None), "")) == "nuclei")
-            | (ScanFinding.template_id.ilike("cve-%")),
         )
         .scalar()
         or 0

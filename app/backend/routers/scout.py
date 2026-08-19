@@ -132,7 +132,7 @@ def get_canonical_vulnerabilities(
             order_by=[
                 version_case.desc(),
                 role_case.desc(),
-                VulnerabilityCvssAssessment.source_modified_at.desc(),
+                VulnerabilityCvssAssessment.source_modified_at.desc().nullslast(),
                 VulnerabilityCvssAssessment.source.desc(),
                 VulnerabilityCvssAssessment.id.desc(),
             ],

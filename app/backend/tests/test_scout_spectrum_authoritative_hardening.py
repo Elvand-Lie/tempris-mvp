@@ -111,6 +111,22 @@ def test_real_subprocess_immediate_stream_overflow_abort():
     asyncio.run(_run())
 
 
+def test_real_subprocess_cancellation_terminates_child_process():
+    """Verify that cancelling an asyncio task running _execute_subprocess_safely cleans up and terminates the OS process."""
+    async def _run():
+        code = "import time; time.sleep(60)"
+        cmd = [sys.executable, "-c", code]
+
+        task = asyncio.create_task(_execute_subprocess_safely(cmd, timeout_seconds=60))
+        await asyncio.sleep(0.3)
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(_run())
+
+
 # ── 2. Full Scan Sibling Task Cancellation & Distinct Failure Reasons ───────────
 
 def test_scanner_sibling_task_cancellation_and_failure_reasons(db_session, client, monkeypatch):
@@ -224,13 +240,18 @@ def test_scan_summary_exact_lineage_and_canonical_status_exclusions(db_session, 
     exp4 = AssetExposure(id="exp-4", tenant_id="tenant-auth-1", finding_id=f4.id, asset_id=asset_decom.id, status="confirmed", match_method="nuclei")
     sf4 = ScanFinding(id="sf-4", tenant_id="tenant-auth-1", asset_id=asset_decom.id, normalized_finding_id=f4.id, template_id="cve-2024-0001")
 
-    db_session.add_all([asset_a, asset_b, asset_decom, f1, exp1, sf1, f2, exp2, sf2, f3, exp3, sf3, f4, exp4, sf4])
+    # Finding 5: Open non-CVE security finding on Asset A backed by Nuclei observation -> COUNTED (1)
+    f5 = Finding(id="F-LIN-05", tenant_id="tenant-auth-1", title="Exposed Admin Panel", status="open")
+    exp5 = AssetExposure(id="exp-5", tenant_id="tenant-auth-1", finding_id=f5.id, asset_id=asset_a.id, status="confirmed", match_method="nuclei")
+    sf5 = ScanFinding(id="sf-5", tenant_id="tenant-auth-1", asset_id=asset_a.id, normalized_finding_id=f5.id, template_id="exposed-admin-panel")
+
+    db_session.add_all([asset_a, asset_b, asset_decom, f1, exp1, sf1, f2, exp2, sf2, f3, exp3, sf3, f4, exp4, sf4, f5, exp5, sf5])
     db_session.commit()
 
     resp = client.get("/api/scanner/findings/summary")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["confirmed_scan_exposures"] == 1, f"Expected exactly 1 confirmed scan exposure, got {data['confirmed_scan_exposures']}"
+    assert data["confirmed_scan_exposures"] == 2, f"Expected exactly 2 confirmed scan exposures, got {data['confirmed_scan_exposures']}"
 
 
 # ── 4. Scale-Safe SQL Window Function Aggregates for Catalogue ─────────────────
