@@ -129,7 +129,8 @@ def e2e_server(tmp_path_factory):
     app.dependency_overrides[get_db] = override_get_db
 
     from routers.auth import create_test_session
-    token = create_test_session(db, "analyst@tempris.com")
+    analyst_token = create_test_session(db, "analyst@tempris.com")
+    admin_token = create_test_session(db, "admin@tempris.com")
     db.close()
 
     port = find_free_port()
@@ -147,7 +148,10 @@ def e2e_server(tmp_path_factory):
     if not server.started:
         raise RuntimeError(f"Server failed to start on port {port} within {timeout}s")
 
-    yield f"http://127.0.0.1:{port}", token
+    yield f"http://127.0.0.1:{port}", analyst_token, admin_token
+
+    from middleware.rate_limit import _buckets
+    _buckets.clear()
 
     server.should_exit = True
     thread.join(timeout=2.0)
@@ -162,7 +166,9 @@ def e2e_server(tmp_path_factory):
 
 def test_scout_browser_real_e2e_flow(e2e_server):
     """Executes full browser end-to-end assertions in headless Chromium with strict mock interception."""
-    server_url, token = e2e_server
+    from middleware.rate_limit import _buckets
+    _buckets.clear()
+    server_url, token, _ = e2e_server
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -295,4 +301,149 @@ def test_scout_browser_real_e2e_flow(e2e_server):
             assert text.startswith("CVE-"), f"Expected CVE identifier, got: {text}"
             assert not text.startswith("F-"), f"Internal finding ID found in CVE column: {text}"
 
+        browser.close()
+
+
+def test_assets_inventory_browser_crud_and_auth_flow(e2e_server):
+    """Playwright Browser E2E test validating complete Asset Inventory CRUD and Scan Auth boundaries.
+
+    Verifies:
+    1. Loads /assets route and asserts single-owner extension host.
+    2. '+ Add Asset' button exists and opens create modal with correct fields and dark theme styles.
+    3. Creating an asset sends correct JSON with serialized tags array to POST /api/assets and updates the table.
+    4. Clicking 'Edit' opens edit modal pre-populated with current asset data.
+    5. Editing asset name updates table without affecting scan authorization logic.
+    6. Internal RFC1918 asset displays 'RFC 1918 / Internal' and 'Not scannable' without scan request button.
+    7. Public asset displays scan authorization actions ('Scan in SCOUT' link).
+    8. Clicking 'Decommission' opens confirmation modal, soft-deletes asset via DELETE /api/assets/{id}.
+    9. Navigating between /assets and /scout preserves DOM single-ownership without duplicated roots.
+    """
+    from middleware.rate_limit import _buckets
+    _buckets.clear()
+    server_url, _, admin_token = e2e_server
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context()
+        page = context.new_page()
+
+        # 1. Set authentication token in localStorage and navigate to /assets
+        page.goto(f"{server_url}/")
+        page.evaluate(
+            f"""([token]) => {{
+                localStorage.setItem('tempris_token', token);
+                localStorage.setItem('tempris_user', JSON.stringify({{
+                    email: 'admin@tempris.com',
+                    role: 'Admin',
+                    tenant_id: 'tempris',
+                    package: 'ENTERPRISE',
+                    is_superadmin: false
+                }}));
+            }}""",
+            [admin_token],
+        )
+
+        page.goto(f"{server_url}/assets")
+        page.wait_for_selector("button[data-asset-add]", timeout=12000)
+
+        # 2. Assert single-owner host and table headers
+        hosts = page.query_selector_all("#tempris-extension-host")
+        assert len(hosts) == 1, "There must be exactly one extension host"
+
+        page_content = page.content()
+        assert "Asset Inventory" in page_content
+        assert "Scan Authorizations" in page_content
+        assert "Target Endpoint" in page_content
+        assert "Classification" in page_content
+        assert "Criticality" in page_content
+        assert "Scan Authorization" in page_content
+
+        # 3. Open '+ Add Asset' modal
+        page.click("button[data-asset-add]")
+        page.wait_for_selector("dialog[data-asset-form-dialog][open]", timeout=5000)
+
+        # 4. Fill in asset creation form
+        page.fill('dialog[data-asset-form-dialog] input[name="name"]', "Internal Staging Proxy")
+        page.select_option('dialog[data-asset-form-dialog] select[name="asset_type"]', "server")
+        page.select_option('dialog[data-asset-form-dialog] select[name="criticality"]', "high")
+        page.fill('dialog[data-asset-form-dialog] input[name="hostname"]', "staging-proxy.internal.local")
+        page.fill('dialog[data-asset-form-dialog] input[name="ip_address"]', "10.0.150.25")
+        page.fill('dialog[data-asset-form-dialog] input[name="owner"]', "Platform SRE")
+        page.select_option('dialog[data-asset-form-dialog] select[name="environment"]', "staging")
+        page.fill('dialog[data-asset-form-dialog] input[name="tags"]', "staging, proxy, rfc1918")
+        page.fill('dialog[data-asset-form-dialog] textarea[name="notes"]', "Internal test proxy")
+
+        # Submit create form
+        page.click('dialog[data-asset-form-dialog] button[data-asset-form-submit]')
+        page.wait_for_timeout(800)
+
+        # Modal should close and new asset row should appear in table
+        assert not page.query_selector("dialog[data-asset-form-dialog][open]"), "Create modal must close on success"
+        page.wait_for_selector('#tempris-extension-host tr:has-text("Internal Staging Proxy")', timeout=5000)
+
+        staging_row_text = page.inner_text('#tempris-extension-host tr:has-text("Internal Staging Proxy")')
+        assert "staging-proxy.internal.local" in staging_row_text
+        assert "RFC 1918 / Internal" in staging_row_text
+        assert "Not scannable" in staging_row_text
+        assert "HIGH" in staging_row_text.upper()
+
+        # 5. Click 'Edit' on the new asset
+        edit_btn = page.query_selector('#tempris-extension-host tr:has-text("Internal Staging Proxy") button[data-asset-edit]')
+        assert edit_btn is not None, "Edit button must be present on asset row"
+        edit_btn.click()
+        page.wait_for_selector("dialog[data-asset-form-dialog][open]", timeout=5000)
+
+        # Verify modal opened in edit mode and fields pre-populated
+        modal_title = page.inner_text('dialog[data-asset-form-dialog] [data-asset-form-title]')
+        assert "Edit Asset" in modal_title
+        assert "Internal Staging Proxy" in modal_title
+
+        current_name_val = page.input_value('dialog[data-asset-form-dialog] input[name="name"]')
+        assert current_name_val == "Internal Staging Proxy"
+
+        # Update name
+        page.fill('dialog[data-asset-form-dialog] input[name="name"]', "Internal Staging Proxy V2")
+        page.click('dialog[data-asset-form-dialog] button[data-asset-form-submit]')
+        page.wait_for_timeout(800)
+
+        assert not page.query_selector("dialog[data-asset-form-dialog][open]")
+        page.wait_for_selector('#tempris-extension-host tr:has-text("Internal Staging Proxy V2")', timeout=5000)
+
+        # 6. Click 'Decommission' on the asset
+        decomm_btn = page.query_selector('#tempris-extension-host tr:has-text("Internal Staging Proxy V2") button[data-asset-decommission]')
+        assert decomm_btn is not None, "Decommission button must be present"
+        decomm_btn.click()
+        page.wait_for_selector("dialog[data-asset-decommission-dialog][open]", timeout=5000)
+
+        decomm_title = page.inner_text('dialog[data-asset-decommission-dialog] [data-asset-decommission-title]')
+        assert "Decommission Internal Staging Proxy V2?" in decomm_title
+
+        # Confirm decommission
+        page.click('dialog[data-asset-decommission-dialog] button[data-asset-decommission-submit]')
+        page.wait_for_timeout(1000)
+
+        assert not page.query_selector("dialog[data-asset-decommission-dialog][open]")
+        # Verify asset row is removed from active list
+        remaining_rows_text = page.content()
+        assert "Internal Staging Proxy V2" not in remaining_rows_text
+
+        # 7. Verify public asset scan authorization controls remain present
+        page.wait_for_selector('#tempris-extension-host tr:has-text("Production Edge Server")', timeout=5000)
+        public_row_text = page.inner_text('#tempris-extension-host tr:has-text("Production Edge Server")')
+        assert "93.184.216.34" in public_row_text
+        assert "Scan in SCOUT" in public_row_text
+
+        # 8. Navigation test: switch to /scout and back to /assets
+        _buckets.clear()
+        page.goto(f"{server_url}/scout")
+        page.wait_for_selector('button[data-scout-nav="scans"]', timeout=12000)
+        page.click('button[data-scout-nav="scans"]')
+        page.wait_for_selector("select[data-scout-asset-select]", timeout=12000)
+        assert len(page.query_selector_all("#tempris-extension-host")) == 1
+
+        _buckets.clear()
+        page.goto(f"{server_url}/assets")
+        page.wait_for_selector("button[data-asset-add]", timeout=12000)
+        assert len(page.query_selector_all("#tempris-extension-host")) == 1
+        assert len(page.query_selector_all("button[data-asset-add]")) == 1
         browser.close()

@@ -752,6 +752,33 @@ body.tmx-extension-active #root main {
 .tmx-dialog h2,
 .tmx-dialog p { margin: 0; }
 .tmx-dialog p { color: #a1a1aa; font-size: 13px; }
+.tmx-dialog label {
+  display: grid;
+  gap: 6px;
+  color: #a1a1aa;
+  font-size: 12px;
+  font-weight: 600;
+}
+.tmx-dialog input,
+.tmx-dialog select,
+.tmx-dialog textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #3f3f46;
+  border-radius: 6px;
+  background: #09090b;
+  color: #f4f4f5;
+  font: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.tmx-dialog input:focus,
+.tmx-dialog select:focus,
+.tmx-dialog textarea:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 1px #6366f1;
+}
 .tmx-dialog-actions { display: flex; justify-content: flex-end; gap: 9px; flex-wrap: wrap; }
 
 @media (max-width: 1050px) {
