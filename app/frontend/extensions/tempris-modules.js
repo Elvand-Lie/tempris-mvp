@@ -2039,6 +2039,7 @@
       const userRole = currentUserRole();
       const isSuperadmin = userRole === 'Superadmin';
       const isAdminOrSuper = ['Superadmin', 'Admin'].includes(userRole);
+      const canManage = ['Superadmin', 'Admin', 'Analyst'].includes(userRole);
 
       let publicCount = 0;
       let internalCount = 0;
@@ -2060,7 +2061,9 @@
         const auth = a.scan_authorization || {};
         const isScannable = classification.is_public_scannable;
         const authStatus = auth.status || 'unauthorized';
-        const target = classification.target || a.hostname || a.ip_address || a.name;
+        const target = classification.target || a.hostname || a.ip_address || a.name || '—';
+        const crit = (a.criticality || 'medium').toLowerCase();
+        const critClass = crit === 'critical' ? 'tmx-status-critical' : (crit === 'high' ? 'tmx-status-high' : 'tmx-status-available');
 
         let authAction = '';
         if (authStatus === 'pending') {
@@ -2082,7 +2085,19 @@
         }
 
         const scanLink = (authStatus === 'approved' && !auth.is_expired && isScannable)
-          ? `<a href="/scout" class="tmx-button tmx-button-secondary tmx-button-small" style="text-decoration:none;margin-left:0.5rem;">Scan in SCOUT</a>`
+          ? `<a href="/scout" class="tmx-button tmx-button-secondary tmx-button-small" style="text-decoration:none;">Scan in SCOUT</a>`
+          : '';
+
+        const tagsHtml = (Array.isArray(a.tags) && a.tags.length > 0)
+          ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;">${a.tags.map((t) => `<span style="font-size:0.7rem;padding:1px 6px;border-radius:4px;background:#27272a;color:#a1a1aa;">${escapeHtml(t)}</span>`).join('')}</div>`
+          : '';
+
+        const editBtn = canManage
+          ? `<button type="button" class="tmx-button tmx-button-secondary tmx-button-small" data-asset-edit="${escapeHtml(a.id)}">Edit</button>`
+          : '';
+
+        const decommBtn = isAdminOrSuper
+          ? `<button type="button" class="tmx-button tmx-button-danger tmx-button-small" data-asset-decommission="${escapeHtml(a.id)}" data-asset-name="${escapeHtml(a.name)}">Decommission</button>`
           : '';
 
         return `
@@ -2090,6 +2105,7 @@
             <td>
               <strong>${escapeHtml(a.name)}</strong>
               <div style="font-size:0.8rem;opacity:0.7;">${escapeHtml(a.id)} &middot; ${escapeHtml(a.asset_type || 'server')}</div>
+              ${tagsHtml}
             </td>
             <td><code>${escapeHtml(target)}</code></td>
             <td>
@@ -2099,26 +2115,45 @@
               ${!isScannable ? `<div style="font-size:0.75rem;color:#ef4444;margin-top:2px;">RFC 1918 / Internal</div>` : ''}
             </td>
             <td>
+              <span class="tmx-status ${critClass}">
+                ${escapeHtml(titleCase(a.criticality || 'medium'))}
+              </span>
+            </td>
+            <td>
+              ${escapeHtml(titleCase(a.environment || 'production'))}
+            </td>
+            <td>
               <span class="tmx-status ${authStatus === 'approved' && !auth.is_expired ? 'tmx-status-available' : (authStatus === 'pending' ? 'tmx-status-high' : 'tmx-status-critical')}">
                 ${escapeHtml(titleCase(authStatus === 'approved' && auth.is_expired ? 'expired' : authStatus))}
               </span>
               ${auth.expires_at ? `<div style="font-size:0.75rem;opacity:0.7;margin-top:2px;">Exp: ${escapeHtml(formatDate(auth.expires_at))}</div>` : ''}
             </td>
             <td>
-              <div style="display:flex;align-items:center;gap:0.5rem;">
+              <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
+                ${editBtn}
                 ${authAction}
                 ${scanLink}
+                ${decommBtn}
               </div>
             </td>
           </tr>`;
       }).join('');
 
+      const emptyRows = `
+        <tr>
+          <td colspan="7" class="tmx-empty" style="text-align:center;padding:2.5rem 1rem;">
+            <p style="margin-bottom:1rem;color:#a1a1aa;font-size:0.95rem;">No active assets in inventory.<br>Add an Asset to begin mapping customer infrastructure.</p>
+            ${canManage ? '<button type="button" class="tmx-button" data-asset-add>+ Add Asset</button>' : ''}
+          </td>
+        </tr>`;
+
       host.innerHTML = `
-        <header class="tmx-heading">
+        <header class="tmx-heading" style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;">
           <div>
             <h1>Asset Inventory &middot; Scan Authorizations</h1>
             <p>Authoritative inventory of customer infrastructure. Central SCOUT scans require explicit platform scan authorization for each public target.</p>
           </div>
+          ${canManage ? '<button type="button" class="tmx-button" data-asset-add style="white-space:nowrap;">+ Add Asset</button>' : ''}
         </header>
 
         <section class="tmx-metrics">
@@ -2132,7 +2167,9 @@
         <section class="tmx-panel">
           <div class="tmx-panel-header">
             <h2>Inventory Assets</h2>
-            <span data-asset-action-msg></span>
+            <div style="display:flex;align-items:center;gap:0.75rem;">
+              <span data-asset-action-msg style="font-size:0.85rem;color:#10b981;font-weight:500;"></span>
+            </div>
           </div>
           <div class="tmx-table-wrap">
             <table class="tmx-table">
@@ -2141,16 +2178,115 @@
                   <th>Asset</th>
                   <th>Target Endpoint</th>
                   <th>Classification</th>
+                  <th>Criticality</th>
+                  <th>Environment</th>
                   <th>Scan Authorization</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                ${assetRows || '<tr><td colspan="5" class="tmx-empty">No assets registered in inventory.</td></tr>'}
+                ${assetRows || emptyRows}
               </tbody>
             </table>
           </div>
         </section>
+
+        <dialog class="tmx-dialog" data-asset-form-dialog style="max-width:600px;">
+          <form class="tmx-form-grid" data-asset-form>
+            <h2 class="tmx-field-wide" data-asset-form-title>Add Asset</h2>
+            <p class="tmx-field-wide" data-asset-form-subtitle>Register infrastructure into tenant inventory. Scan authorization is managed separately for verified public endpoints.</p>
+
+            <label class="tmx-field-wide">Name *
+              <input type="text" name="name" required maxlength="255" placeholder="e.g. Production Web Gateway">
+            </label>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;" class="tmx-field-wide">
+              <label>Asset Type *
+                <select name="asset_type" required>
+                  <option value="server">Server</option>
+                  <option value="application">Application</option>
+                  <option value="database">Database</option>
+                  <option value="network">Network</option>
+                  <option value="endpoint">Endpoint</option>
+                  <option value="iot">IoT</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+
+              <label>Criticality *
+                <select name="criticality" required>
+                  <option value="critical">Critical</option>
+                  <option value="high">High</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </label>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;" class="tmx-field-wide">
+              <label>Hostname
+                <input type="text" name="hostname" maxlength="255" placeholder="e.g. gateway.customer.com">
+              </label>
+
+              <label>IP Address
+                <input type="text" name="ip_address" maxlength="50" placeholder="e.g. 203.0.113.10">
+              </label>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;" class="tmx-field-wide">
+              <label>Owner
+                <input type="text" name="owner" maxlength="255" placeholder="e.g. SecOps / Cloud Team">
+              </label>
+
+              <label>Environment
+                <select name="environment">
+                  <option value="production" selected>Production</option>
+                  <option value="staging">Staging</option>
+                  <option value="development">Development</option>
+                  <option value="testing">Testing</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+            </div>
+
+            <div data-asset-status-group class="tmx-field-wide" style="display:none;">
+              <label>Status
+                <select name="status">
+                  <option value="active" selected>Active</option>
+                  <option value="maintenance">Maintenance</option>
+                  <option value="decommissioned">Decommissioned</option>
+                </select>
+              </label>
+            </div>
+
+            <label class="tmx-field-wide">Tags
+              <input type="text" name="tags" placeholder="e.g. aws, perimeter, web (comma-separated)">
+            </label>
+
+            <label class="tmx-field-wide">Notes
+              <textarea name="notes" rows="2" placeholder="Optional context, notes, or operational metadata"></textarea>
+            </label>
+
+            <div class="tmx-form-message tmx-field-wide" data-asset-form-message style="color:#ef4444;font-size:0.85rem;"></div>
+
+            <div class="tmx-dialog-actions tmx-field-wide">
+              <button type="button" class="tmx-button tmx-button-secondary" data-asset-form-cancel>Cancel</button>
+              <button type="submit" class="tmx-button" data-asset-form-submit>Save Asset</button>
+            </div>
+          </form>
+        </dialog>
+
+        <dialog class="tmx-dialog" data-asset-decommission-dialog>
+          <form class="tmx-form-grid" data-asset-decommission-form>
+            <h2 class="tmx-field-wide" data-asset-decommission-title>Decommission Asset?</h2>
+            <p class="tmx-field-wide">The Asset will remain in historical records but will no longer be treated as active infrastructure.</p>
+            <div class="tmx-form-message tmx-field-wide" data-asset-decommission-message style="color:#ef4444;font-size:0.85rem;"></div>
+            <div class="tmx-dialog-actions tmx-field-wide">
+              <button type="button" class="tmx-button tmx-button-secondary" data-asset-decommission-cancel>Cancel</button>
+              <button type="submit" class="tmx-button tmx-button-danger" data-asset-decommission-submit>Decommission</button>
+            </div>
+          </form>
+        </dialog>
 
         <dialog class="tmx-dialog" data-asset-request-dialog>
           <form class="tmx-form-grid" data-asset-request-form>
@@ -2203,12 +2339,192 @@
           </form>
         </dialog>`;
 
+      const assetFormDialog = host.querySelector('[data-asset-form-dialog]');
+      const assetForm = host.querySelector('[data-asset-form]');
+      const decommissionDialog = host.querySelector('[data-asset-decommission-dialog]');
+      const decommissionForm = host.querySelector('[data-asset-decommission-form]');
+
       const requestDialog = host.querySelector('[data-asset-request-dialog]');
       const requestForm = host.querySelector('[data-asset-request-form]');
       const approveDialog = host.querySelector('[data-asset-approve-dialog]');
       const approveForm = host.querySelector('[data-asset-approve-form]');
       const revokeDialog = host.querySelector('[data-asset-revoke-dialog]');
       const revokeForm = host.querySelector('[data-asset-revoke-form]');
+
+      // Add Asset Handler
+      host.querySelectorAll('[data-asset-add]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          assetForm.reset();
+          assetForm.dataset.mode = 'create';
+          assetForm.dataset.assetId = '';
+          host.querySelector('[data-asset-form-title]').textContent = 'Add Asset';
+          host.querySelector('[data-asset-form-subtitle]').textContent = 'Register infrastructure into tenant inventory. Scan authorization is managed separately for verified public endpoints.';
+          host.querySelector('[data-asset-status-group]').style.display = 'none';
+          host.querySelector('[data-asset-form-message]').textContent = '';
+          const submitBtn = host.querySelector('[data-asset-form-submit]');
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Save Asset';
+          assetFormDialog.showModal();
+        });
+      });
+
+      // Edit Asset Handler
+      host.querySelectorAll('[data-asset-edit]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const assetId = btn.dataset.assetEdit;
+          const asset = assets.find((a) => a.id === assetId);
+          if (!asset) return;
+
+          assetForm.reset();
+          assetForm.dataset.mode = 'edit';
+          assetForm.dataset.assetId = asset.id;
+          host.querySelector('[data-asset-form-title]').textContent = `Edit Asset \u00b7 ${asset.name}`;
+          host.querySelector('[data-asset-form-subtitle]').textContent = 'Update asset details. Changing target hostname/IP will require re-authorization for external scanning.';
+          host.querySelector('[data-asset-status-group]').style.display = 'block';
+          host.querySelector('[data-asset-form-message]').textContent = '';
+
+          assetForm.elements.name.value = asset.name || '';
+          assetForm.elements.asset_type.value = asset.asset_type || 'server';
+          assetForm.elements.criticality.value = asset.criticality || 'medium';
+          assetForm.elements.hostname.value = asset.hostname || '';
+          assetForm.elements.ip_address.value = asset.ip_address || '';
+          assetForm.elements.owner.value = asset.owner || '';
+          assetForm.elements.environment.value = asset.environment || 'production';
+          if (assetForm.elements.status) {
+            assetForm.elements.status.value = asset.status || 'active';
+          }
+          assetForm.elements.tags.value = Array.isArray(asset.tags) ? asset.tags.join(', ') : (asset.tags || '');
+          assetForm.elements.notes.value = asset.notes || '';
+
+          const submitBtn = host.querySelector('[data-asset-form-submit]');
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Update Asset';
+          assetFormDialog.showModal();
+        });
+      });
+
+      host.querySelector('[data-asset-form-cancel]')?.addEventListener('click', () => assetFormDialog.close());
+
+      assetForm?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const submitBtn = host.querySelector('[data-asset-form-submit]');
+        const msg = host.querySelector('[data-asset-form-message]');
+        if (msg) msg.textContent = '';
+
+        const mode = assetForm.dataset.mode || 'create';
+        const assetId = assetForm.dataset.assetId;
+        const data = new FormData(assetForm);
+
+        const rawName = (data.get('name') || '').trim();
+        const rawType = (data.get('asset_type') || 'server').trim();
+        const rawCrit = (data.get('criticality') || 'medium').trim();
+        const rawHostname = (data.get('hostname') || '').trim();
+        const rawIp = (data.get('ip_address') || '').trim();
+        const rawOwner = (data.get('owner') || '').trim();
+        const rawEnv = (data.get('environment') || 'production').trim();
+        const rawTagsStr = (data.get('tags') || '').trim();
+        const rawNotes = (data.get('notes') || '').trim();
+        const rawStatus = (data.get('status') || 'active').trim();
+
+        const tagsList = rawTagsStr
+          ? rawTagsStr.split(',').map((t) => t.trim()).filter(Boolean)
+          : [];
+
+        const payload = {
+          name: rawName,
+          asset_type: rawType,
+          criticality: rawCrit,
+          hostname: rawHostname || null,
+          ip_address: rawIp || null,
+          owner: rawOwner || null,
+          environment: rawEnv || null,
+          tags: tagsList,
+          notes: rawNotes || null,
+        };
+
+        if (mode === 'edit') {
+          payload.status = rawStatus;
+        }
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = mode === 'edit' ? 'Updating...' : 'Saving...';
+
+        try {
+          if (mode === 'create') {
+            await apiJson('/api/assets', {
+              method: 'POST',
+              body: payload,
+            });
+          } else {
+            await apiJson(`/api/assets/${encodeURIComponent(assetId)}`, {
+              method: 'PUT',
+              body: payload,
+            });
+          }
+
+          tenantAssets = null;
+          tenantAssetsRequest = null;
+          assetFormDialog.close();
+          await renderAssetsRoute(host);
+        } catch (err) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = mode === 'edit' ? 'Update Asset' : 'Save Asset';
+          if (msg) {
+            if (typeof err.detail === 'string') {
+              msg.textContent = err.detail;
+            } else if (Array.isArray(err.detail)) {
+              msg.textContent = err.detail.map((d) => (d.msg ? `${d.loc ? d.loc.slice(1).join('.') + ': ' : ''}${d.msg}` : JSON.stringify(d))).join('; ');
+            } else {
+              msg.textContent = err.message || 'Operation failed';
+            }
+          }
+        }
+      });
+
+      // Decommission Dialog Handler
+      host.querySelectorAll('[data-asset-decommission]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          decommissionForm.reset();
+          const assetId = btn.dataset.assetDecommission;
+          const assetName = btn.dataset.assetName || assetId;
+          decommissionForm.dataset.assetId = assetId;
+          host.querySelector('[data-asset-decommission-title]').textContent = `Decommission ${assetName}?`;
+          host.querySelector('[data-asset-decommission-message]').textContent = '';
+          const submitBtn = host.querySelector('[data-asset-decommission-submit]');
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Decommission';
+          decommissionDialog.showModal();
+        });
+      });
+
+      host.querySelector('[data-asset-decommission-cancel]')?.addEventListener('click', () => decommissionDialog.close());
+
+      decommissionForm?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const assetId = decommissionForm.dataset.assetId;
+        const submitBtn = host.querySelector('[data-asset-decommission-submit]');
+        const msg = host.querySelector('[data-asset-decommission-message]');
+        if (msg) msg.textContent = '';
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Decommissioning...';
+
+        try {
+          await api(`/api/assets/${encodeURIComponent(assetId)}`, {
+            method: 'DELETE',
+          });
+          tenantAssets = null;
+          tenantAssetsRequest = null;
+          decommissionDialog.close();
+          await renderAssetsRoute(host);
+        } catch (err) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Decommission';
+          if (msg) {
+            msg.textContent = typeof err.detail === 'string' ? err.detail : (err.message || 'Decommission failed');
+          }
+        }
+      });
 
       // Request Dialog Handler
       host.querySelectorAll('[data-asset-request]').forEach((btn) => {
@@ -2227,10 +2543,9 @@
         const assetId = requestForm.dataset.assetId;
         const msg = host.querySelector('[data-asset-request-message]');
         try {
-          await api(`/api/assets/${encodeURIComponent(assetId)}/scan-authorization/request`, {
+          await apiJson(`/api/assets/${encodeURIComponent(assetId)}/scan-authorization/request`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ evidence: data.get('evidence') }),
+            body: { evidence: data.get('evidence') },
           });
           tenantAssets = null;
           tenantAssetsRequest = null;
@@ -2263,13 +2578,12 @@
           return;
         }
         try {
-          await api(`/api/assets/${encodeURIComponent(assetId)}/scan-authorization/approve`, {
+          await apiJson(`/api/assets/${encodeURIComponent(assetId)}/scan-authorization/approve`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+            body: {
               verification_notes: notes,
               expires_in_days: parseInt(data.get('expires_in_days'), 10) || 90,
-            }),
+            },
           });
           tenantAssets = null;
           tenantAssetsRequest = null;
@@ -2297,10 +2611,9 @@
         const assetId = revokeForm.dataset.assetId;
         const msg = host.querySelector('[data-asset-revoke-message]');
         try {
-          await api(`/api/assets/${encodeURIComponent(assetId)}/scan-authorization/revoke`, {
+          await apiJson(`/api/assets/${encodeURIComponent(assetId)}/scan-authorization/revoke`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reason: data.get('reason') }),
+            body: { reason: data.get('reason') },
           });
           tenantAssets = null;
           tenantAssetsRequest = null;
