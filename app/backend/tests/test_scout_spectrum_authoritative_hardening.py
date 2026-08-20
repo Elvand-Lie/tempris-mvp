@@ -40,6 +40,7 @@ from models import (
 )
 from routers.auth import get_auth_context, get_current_user
 from routers.scanner import ScannerOutputLimitExceeded, _execute_subprocess_safely, _read_stream_bounded
+from services.cve_intelligence import select_preferred_cvss_assessment
 from services.database import get_db
 from services.edip_engine import auto_classify, bulk_classify
 from services.tes_engine import public_severity
@@ -273,15 +274,26 @@ def test_scout_canonical_vulnerabilities_sql_window_aggregates(db_session, clien
     # CVE 3: Unassessed (0.0 / No CVSS)
     cve3 = CanonicalVulnerability(cve_id="CVE-2024-1111", status="published", description="Unassessed Zero Day")
 
-    db_session.add_all([cve1, cvss1_a, cvss1_b, kev1, cve2, cvss2, cve3])
+    # CVE 4: Multiple assessments with NULL vs real timestamp (both v3.1 Primary) -> Real timestamp wins (9.5 Critical)
+    cve4 = CanonicalVulnerability(cve_id="CVE-2023-9999", status="published", description="Null Timestamp Test")
+    cvss4_null = VulnerabilityCvssAssessment(id="cvss-w-4a", cve_id="CVE-2023-9999", cvss_version="3.1", vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", base_score=8.0, source="NVD", source_role="Primary", source_modified_at=None)
+    cvss4_real = VulnerabilityCvssAssessment(id="cvss-w-4b", cve_id="CVE-2023-9999", cvss_version="3.1", vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", base_score=9.5, source="NVD", source_role="Primary", source_modified_at=now)
+
+    # Prove Python resolver selects the real timestamp assessment
+    pref_python = select_preferred_cvss_assessment([cvss4_null, cvss4_real])
+    assert pref_python is not None
+    assert pref_python.id == "cvss-w-4b"
+    assert pref_python.base_score == 9.5
+
+    db_session.add_all([cve1, cvss1_a, cvss1_b, kev1, cve2, cvss2, cve3, cve4, cvss4_null, cvss4_real])
     db_session.commit()
 
     resp = client.get("/api/scout/vulnerabilities")
     assert resp.status_code == 200
     meta = resp.json()["meta"]
-    assert meta["catalog_total"] == 3
-    assert meta["critical_count"] == 1
-    assert meta["cvss_coverage_count"] == 2
+    assert meta["catalog_total"] == 4
+    assert meta["critical_count"] == 2  # 9.8 (Log4j) and 9.5 (CVE-2023-9999)
+    assert meta["cvss_coverage_count"] == 3
     assert meta["kev_count"] == 1
     assert meta["ransomware_count"] == 1
 
