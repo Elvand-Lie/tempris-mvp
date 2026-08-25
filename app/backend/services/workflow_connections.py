@@ -40,6 +40,7 @@ from services.exposure_links import (
 from services.kev_loader import _finding_to_dict
 from services.tes_engine import calculate_finding_tes
 from services.customer_posture import build_customer_posture, is_open
+from services.cve_intelligence import build_global_intelligence_summary
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -174,6 +175,7 @@ def build_workflow_readiness(db: Session, tenant_id: str) -> dict:
         (row, asset_id) for row in open_findings
         for asset_id in links.get(row.id, set())
     ]
+    linked_exposure_findings = sorted({row for row, _ in linked_exposures}, key=lambda row: row.id)
 
     def count_sss(key: str) -> int:
         return sum(1 for row in open_findings if (row.sss_data or {}).get(key))
@@ -195,6 +197,14 @@ def build_workflow_readiness(db: Session, tenant_id: str) -> dict:
             "decisions_with_rationale": sum(1 for row in decisions.values() if (row.rationale or "").strip()),
             "applicable": len(open_findings),
             "source": "EDIP explicit analyst decision",
+            # Confirmed-exposure-scoped treatment coverage. EdipDecision rows are
+            # persisted analyst decisions only (SPECTRUM endpoint); auto EDIP
+            # recommendations are never persisted as decisions.
+            "confirmed_exposure_treatment": {
+                "recorded": sum(1 for row in linked_exposure_findings if row.id in decisions),
+                "applicable": len(linked_exposure_findings),
+                "source": "persisted analyst EDIP decision (SPECTRUM) over confirmed open exposures",
+            },
         },
         "business_impact": {
             "recorded": count_sss("business_impact"),
@@ -292,6 +302,7 @@ def build_workflow_overview(db: Session, tenant_id: str) -> dict:
         "exposure": build_exposure_coverage(db, tenant_id),
         "deadlines": build_deadline_summary(db, tenant_id),
         "workflow": build_workflow_readiness(db, tenant_id),
+        "global_intelligence": build_global_intelligence_summary(db),
         "assurance": {
             "standard_assessments_recorded": controls,
             "grc_state_recorded": bool(grc_states),

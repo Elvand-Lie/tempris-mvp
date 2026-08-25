@@ -87,13 +87,13 @@ def e2e_server(tmp_path_factory):
 
     # 2. Canonical CVE with CVSS 9.8 and KEV
     cve1 = CanonicalVulnerability(
-        cve_id="CVE-2021-44228",
+        cve_id="CVE-2026-9998",
         status="published",
         description="Apache Log4j2 JNDI Remote Code Execution",
     )
     kev1 = CisaKevEntry(
         id="kev-e2e-1",
-        cve_id="CVE-2021-44228",
+        cve_id="CVE-2026-9998",
         vendor_project="Apache",
         product="Log4j",
         vulnerability_name="Apache Log4j2 RCE",
@@ -101,7 +101,7 @@ def e2e_server(tmp_path_factory):
     )
     cvss1 = VulnerabilityCvssAssessment(
         id="cvss-e2e-1",
-        cve_id="CVE-2021-44228",
+        cve_id="CVE-2026-9998",
         cvss_version="3.1",
         vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
         base_score=9.8,
@@ -111,13 +111,19 @@ def e2e_server(tmp_path_factory):
 
     # 3. Unassessed CVE with NO CVSS score
     cve2 = CanonicalVulnerability(
-        cve_id="CVE-2024-9999",
+        cve_id="CVE-2026-9999",
         status="published",
         description="Zero-day Candidate Without Formal Score",
     )
 
     db.add_all([asset, auth, cve1, kev1, cvss1, cve2])
     db.commit()
+
+    import services.database
+    old_db_engine = services.database.engine
+    old_db_session_local = services.database.SessionLocal
+    services.database.engine = engine
+    services.database.SessionLocal = Session
 
     def override_get_db():
         session = Session()
@@ -140,7 +146,7 @@ def e2e_server(tmp_path_factory):
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
 
-    timeout = 20.0
+    timeout = 25.0
     start_time = time.time()
     while not server.started and time.time() - start_time < timeout:
         time.sleep(0.05)
@@ -156,6 +162,8 @@ def e2e_server(tmp_path_factory):
     server.should_exit = True
     thread.join(timeout=2.0)
     app.dependency_overrides.clear()
+    services.database.engine = old_db_engine
+    services.database.SessionLocal = old_db_session_local
     engine.dispose()
 
     if old_env is None:
@@ -164,6 +172,8 @@ def e2e_server(tmp_path_factory):
         os.environ["SCOUT_ACTIVE_SCANNING_ENABLED"] = old_env
 
 
+@pytest.mark.e2e
+@pytest.mark.slow
 def test_scout_browser_real_e2e_flow(e2e_server):
     """Executes full browser end-to-end assertions in headless Chromium with strict mock interception."""
     from middleware.rate_limit import _buckets
@@ -254,11 +264,12 @@ def test_scout_browser_real_e2e_flow(e2e_server):
 
         for _ in range(5):
             intel_tab_btn.click()
-            page.wait_for_timeout(100)
+            page.wait_for_selector(".tmx-tag-cve", timeout=5000)
             scans_tab_btn.click()
-            page.wait_for_timeout(100)
+            page.wait_for_selector("select[data-scout-asset-select]", timeout=5000)
 
         # Return to External Scans and verify exactly 1 asset selector
+        page.wait_for_selector("select[data-scout-asset-select]", timeout=5000)
         asset_selects_final = page.query_selector_all("select[data-scout-asset-select]")
         assert len(asset_selects_final) == 1
 
@@ -284,8 +295,8 @@ def test_scout_browser_real_e2e_flow(e2e_server):
 
         # 9. Verify Vulnerability table rendered canonical CVEs
         page_text = page.content()
-        assert "CVE-2021-44228" in page_text, "CVE-2021-44228 must appear in Vulnerability Intelligence"
-        assert "CVE-2024-9999" in page_text, "CVE-2024-9999 must appear in Vulnerability Intelligence"
+        assert "CVE-2026-9998" in page_text, "CVE-2026-9998 must appear in Vulnerability Intelligence"
+        assert "CVE-2026-9999" in page_text, "CVE-2026-9999 must appear in Vulnerability Intelligence"
 
         # 10. Verify neutral N/A rendering for unscored CVE
         neutral_statuses = page.query_selector_all(".tmx-status-neutral")
@@ -304,6 +315,8 @@ def test_scout_browser_real_e2e_flow(e2e_server):
         browser.close()
 
 
+@pytest.mark.e2e
+@pytest.mark.slow
 def test_assets_inventory_browser_crud_and_auth_flow(e2e_server):
     """Playwright Browser E2E test validating complete Asset Inventory CRUD and Scan Auth boundaries.
 
@@ -375,7 +388,7 @@ def test_assets_inventory_browser_crud_and_auth_flow(e2e_server):
 
         # Submit create form
         page.click('dialog[data-asset-form-dialog] button[data-asset-form-submit]')
-        page.wait_for_timeout(800)
+        page.wait_for_function("() => !document.querySelector('dialog[data-asset-form-dialog][open]')", timeout=5000)
 
         # Modal should close and new asset row should appear in table
         assert not page.query_selector("dialog[data-asset-form-dialog][open]"), "Create modal must close on success"
@@ -404,7 +417,7 @@ def test_assets_inventory_browser_crud_and_auth_flow(e2e_server):
         # Update name
         page.fill('dialog[data-asset-form-dialog] input[name="name"]', "Internal Staging Proxy V2")
         page.click('dialog[data-asset-form-dialog] button[data-asset-form-submit]')
-        page.wait_for_timeout(800)
+        page.wait_for_function("() => !document.querySelector('dialog[data-asset-form-dialog][open]')", timeout=5000)
 
         assert not page.query_selector("dialog[data-asset-form-dialog][open]")
         page.wait_for_selector('#tempris-extension-host tr:has-text("Internal Staging Proxy V2")', timeout=5000)
@@ -420,7 +433,8 @@ def test_assets_inventory_browser_crud_and_auth_flow(e2e_server):
 
         # Confirm decommission
         page.click('dialog[data-asset-decommission-dialog] button[data-asset-decommission-submit]')
-        page.wait_for_timeout(1000)
+        page.wait_for_function("() => !document.querySelector('dialog[data-asset-decommission-dialog][open]')", timeout=5000)
+        page.wait_for_function("() => !document.querySelector('#tempris-extension-host')?.textContent?.includes('Internal Staging Proxy V2')", timeout=5000)
 
         assert not page.query_selector("dialog[data-asset-decommission-dialog][open]")
         # Verify asset row is removed from active list

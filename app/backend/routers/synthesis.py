@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from services.entitlements import require_module
 from services.workflow_connections import build_exposure_coverage, build_module_health
 from services.customer_posture import SCOPE_VERSION, build_customer_posture
+from services.cve_intelligence import build_global_intelligence_summary
 
 router = APIRouter(dependencies=[Depends(require_module("SYNTHESIS"))])
 
@@ -67,6 +68,7 @@ def get_dashboard_data(db: Session = None, tenant_id: str = "tempris"):
             "module_health": module_health,
             "alerts": alerts,
             "final_update": final_update,
+            "global_intelligence": build_global_intelligence_summary(db),
             "_stats": stats,  # pass through for snapshot
         }
     finally:

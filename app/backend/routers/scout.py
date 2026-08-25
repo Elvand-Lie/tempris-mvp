@@ -7,6 +7,7 @@ from services.database import get_db
 from models import CanonicalVulnerability, CisaKevEntry, Finding, ScanFinding, ScanJob, VulnerabilityCvssAssessment
 from routers.auth import get_auth_context, get_current_user
 from services.cve_intelligence import (
+    build_global_intelligence_summary,
     resolve_vulnerability_intelligence,
     select_preferred_cvss_assessment,
     validate_and_normalize_cve,
@@ -344,6 +345,11 @@ def get_scout_stats(db: Session = Depends(get_db), user = Depends(get_current_us
             "stored_tenant_records": posture["total_stored_finding_count"],
             "label_note": "Reference records are not confirmed customer exposure.",
         },
+        # Canonical global intelligence aggregates (shared with SYNTHESIS).
+        # Additive: legacy top-level Finding stats above are retained for the
+        # SCOUT sidebar; global_intelligence is the only authoritative source
+        # for catalogue-level CVE / KEV / CVSS / ransomware numbers.
+        "global_intelligence": build_global_intelligence_summary(db),
         "customer_scan_activity": {
             "scan_runs": jobs.count(),
             "completed_runs": jobs.filter(ScanJob.status == "completed").count(),

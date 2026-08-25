@@ -46,6 +46,77 @@ CVSS_VERSION_RANK = {
 }
 
 
+def build_global_intelligence_summary(db: Session) -> dict:
+    """Canonical GLOBAL vulnerability intelligence aggregates.
+
+    Sourced exclusively from the canonical intelligence spine:
+    - CanonicalVulnerability        -> canonical CVE identities
+    - CisaKevEntry                  -> CISA KEV catalogue membership
+    - CisaKevEntry.ransomware flag  -> ransomware campaign linkage
+    - VulnerabilityCvssAssessment   -> authoritative CVSS coverage
+
+    Tenant Finding rows (including Finding.priority / Finding.ransomware
+    legacy flags) are NEVER used here.  These are global catalogue numbers,
+    not customer exposure counts.
+    """
+    canonical_total = db.query(CanonicalVulnerability).count()
+    kev_total = db.query(CisaKevEntry).count()
+    kev_ransomware = db.query(CisaKevEntry).filter(
+        CisaKevEntry.known_ransomware_campaign_use.in_(["Known", "known"])
+    ).count()
+
+    assessed_cves = {
+        row[0]
+        for row in db.query(VulnerabilityCvssAssessment.cve_id).distinct().all()
+    }
+    cvss_coverage = {
+        "assessed_canonical_cves": len(assessed_cves),
+        "canonical_cves": canonical_total,
+        "pct": round(len(assessed_cves) / canonical_total * 100, 1) if canonical_total else None,
+    }
+
+    # Exact preferred-assessment critical count: a CVE counts only when its
+    # preferred authoritative assessment (same deterministic policy as the
+    # per-finding resolver) scores >= 9.0.  Bounded work: candidate CVEs are
+    # those with ANY assessment >= 9.0; their full assessment sets are then
+    # resolved with the shared selection policy.
+    candidate_ids = {
+        row[0]
+        for row in db.query(VulnerabilityCvssAssessment.cve_id)
+        .filter(VulnerabilityCvssAssessment.base_score >= 9.0)
+        .distinct()
+        .all()
+    }
+    cvss_critical = 0
+    if candidate_ids:
+        candidate_rows = (
+            db.query(VulnerabilityCvssAssessment)
+            .filter(VulnerabilityCvssAssessment.cve_id.in_(candidate_ids))
+            .all()
+        )
+        by_cve: dict[str, list[VulnerabilityCvssAssessment]] = {}
+        for row in candidate_rows:
+            by_cve.setdefault(row.cve_id, []).append(row)
+        for assessments in by_cve.values():
+            preferred = select_preferred_cvss_assessment(assessments)
+            if preferred is not None and float(preferred.base_score) >= 9.0:
+                cvss_critical += 1
+
+    return {
+        "scope": "global_vulnerability_intelligence",
+        "scope_note": (
+            "Global catalogue intelligence. Not customer exposure; "
+            "tenant Finding statistics are intentionally excluded."
+        ),
+        "canonical_cves": canonical_total,
+        "cisa_kev_entries": kev_total,
+        "ransomware_linked_kev_entries": kev_ransomware,
+        "cvss_critical_canonical_cves": cvss_critical,
+        "cvss_coverage": cvss_coverage,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def validate_and_normalize_cve(cve_input: str) -> str:
     """Validate and normalize a CVE string to canonical uppercase 'CVE-YYYY-NNNN'.
 

@@ -93,7 +93,7 @@ def test_legacy_frontend_serves_native_style_module_extension_and_branding():
     assert 'src="/extensions/tempris-bootstrap.js?v=20260816c"' in index.text
     assert index.text.index('src="/extensions/tempris-bootstrap.js?v=20260816c"') < index.text.index('src="/assets/index-DUrFdX-d.js?v=20260816d"')
     assert 'src="/extensions/tempris-sss-ui.js?v=20260816c"' in index.text
-    assert 'src="/extensions/tempris-modules.js?v=20260816c"' in index.text
+    assert 'src="/extensions/tempris-modules.js?v=20260817a"' in index.text
     assert 'href="/extensions/tempris-modules.css?v=20260816c"' in index.text
     assert script.status_code == 200
     assert script.headers["cache-control"] == "no-store, max-age=0"

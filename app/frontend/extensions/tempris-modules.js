@@ -1895,12 +1895,26 @@
     connections.className = 'tmx-connection-summary';
     const exposure = workflowOverview?.exposure;
     const readiness = workflowOverview?.workflow;
-    connections.innerHTML = exposure
-      ? `<div><strong>Asset-linked exposure</strong><span>${escapeHtml(exposure.asset_linked_count)} / ${escapeHtml(exposure.open_finding_count)} open findings</span></div>
-        <div><strong>TES coverage</strong><span>${escapeHtml(exposure.scored_asset_linked_count)} scored | ${escapeHtml(exposure.aggregate_tes ?? 'Unavailable')}</span></div>
-        <div><strong>CISA exposure</strong><span>${escapeHtml(exposure.asset_linked_cisa_kev_count)} asset-linked KEV findings</span></div>
-        <div><strong>Workflow records</strong><span>${escapeHtml(readiness?.owners?.recorded ?? 0)} owners | ${escapeHtml(readiness?.edip?.decisions_with_rationale ?? 0)} explained EDIP decisions</span></div>`
-      : '<div><strong>Connections</strong><span>Loading recorded workflow coverage...</span></div>';
+    if (exposure) {
+      const confirmed = exposure.asset_linked_count ?? 0;
+      const scored = exposure.scored_asset_linked_count ?? 0;
+      const tes = exposure.aggregate_tes;
+      const tesCoverage = `${scored}/${confirmed} confirmed exposures scored`;
+      const tesText = tes === null || tes === undefined ? `N/A · ${tesCoverage}` : `${tes} · ${tesCoverage}`;
+      const owners = readiness?.owners || {};
+      const treatment = readiness?.edip?.confirmed_exposure_treatment || {};
+      const globalIntel = workflowOverview?.global_intelligence;
+      const kevCatalogue = globalIntel ? ` · global catalogue: ${globalIntel.cisa_kev_entries} entries` : '';
+      connections.innerHTML = `
+        <div><strong>Confirmed exposure</strong><span>${escapeHtml(confirmed)} open confirmed customer exposure${confirmed === 1 ? '' : 's'}</span></div>
+        <div><strong>Needs classification</strong><span>${escapeHtml(exposure.mapping_required_count ?? 0)} records awaiting analyst asset mapping</span></div>
+        <div><strong>Reference intelligence</strong><span>${escapeHtml(exposure.catalog_intelligence_count ?? 0)} reference-only records — not customer exposure</span></div>
+        <div><strong>Tenant TES</strong><span>${escapeHtml(tesText)}</span></div>
+        <div><strong>CISA KEV exposure</strong><span>${escapeHtml(exposure.asset_linked_cisa_kev_count ?? 0)} confirmed exposure${(exposure.asset_linked_cisa_kev_count ?? 0) === 1 ? '' : 's'} resolving to CISA KEV${escapeHtml(kevCatalogue)}</span></div>
+        <div><strong>Workflow completeness</strong><span>Ownership ${escapeHtml(owners.recorded ?? 0)}/${escapeHtml(owners.applicable ?? 0)} exposed assets · EDIP treatment ${escapeHtml(treatment.recorded ?? 0)}/${escapeHtml(treatment.applicable ?? 0)} confirmed exposures</span></div>`;
+    } else {
+      connections.innerHTML = '<div><strong>Connections</strong><span>Loading recorded workflow coverage...</span></div>';
+    }
 
     const healthMap = new Map((workflowOverview?.module_health || []).map((row) => [row.name, row]));
     grid.className = 'tmx-module-grid';
@@ -1926,6 +1940,44 @@
       });
       grid.append(item);
     });
+  }
+
+  function decorateGlobalIntelligenceWidget() {
+    if (window.location.pathname !== '/' || !localStorage.getItem(TOKEN_KEY)) return;
+    const heading = [...document.querySelectorAll('#root h2')]
+      .find((node) => node.textContent.includes('CISA KEV Intelligence Feed'));
+    if (!heading) return;
+    const panel = heading.closest('.glass-panel');
+    const grid = panel?.querySelector('.grid');
+    if (!grid) return;
+
+    const globalIntel = workflowOverview?.global_intelligence;
+    if (!globalIntel) {
+      if (!workflowOverview && !workflowRequest) {
+        loadWorkflowOverview().then(schedule).catch(() => { workflowOverview = { unavailable: true }; schedule(); });
+      }
+      return; // leave the legacy widget untouched until canonical data arrives
+    }
+
+    const fingerprint = `tmx-intel:${globalIntel.generated_at || ''}`;
+    if (grid.dataset.tmxCanonicalIntel === fingerprint) return;
+    grid.dataset.tmxCanonicalIntel = fingerprint;
+    grid.className = 'grid grid-cols-2 md:grid-cols-4 gap-4';
+    const coverage = globalIntel.cvss_coverage || {};
+    const coverageNote = coverage.canonical_cves
+      ? `CVSS assessments cover ${coverage.assessed_canonical_cves}/${coverage.canonical_cves} canonical CVEs (${coverage.pct ?? 'N/A'}%)`
+      : 'No authoritative CVSS assessments ingested yet';
+    const tile = (value, label, tone, title) => `
+      <div class="bg-surface border border-border p-4 rounded-xl text-center" title="${escapeHtml(title)}">
+        <span class="text-3xl font-black ${tone}">${escapeHtml(value)}</span>
+        <p class="text-xs text-text-muted mt-1 font-medium uppercase tracking-wider">${escapeHtml(label)}</p>
+      </div>`;
+    grid.innerHTML = `
+      ${tile(globalIntel.canonical_cves ?? 0, 'Canonical CVEs', 'text-primary-500', 'CanonicalVulnerability identities in the global intelligence spine')}
+      ${tile(globalIntel.cisa_kev_entries ?? 0, 'CISA KEV entries', 'text-danger', 'CisaKevEntry catalogue rows — global intelligence, not customer exposure')}
+      ${tile(globalIntel.ransomware_linked_kev_entries ?? 0, 'Ransomware linked', 'text-warning', 'KEV entries with known_ransomware_campaign_use = Known')}
+      ${tile(globalIntel.cvss_critical_canonical_cves ?? 0, 'CVSS critical', 'text-danger', 'Canonical CVEs whose preferred authoritative CVSS assessment is >= 9.0')}
+      <p class="col-span-2 md:col-span-4 text-xs text-text-muted text-center" data-tempris-intel-note>${escapeHtml(coverageNote)} · Global catalogue intelligence — not customer exposure.</p>`;
   }
 
   function decorateVdp() {
@@ -3362,6 +3414,7 @@
     decorateBranding();
     ensureNavigation();
     decorateSynthesisPanel();
+    decorateGlobalIntelligenceWidget();
     decorateVdp();
     renderCurrentRoute();
   }

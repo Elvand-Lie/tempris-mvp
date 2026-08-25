@@ -22,7 +22,7 @@ spec.loader.exec_module(mig_013)
 
 
 @pytest.fixture()
-def test_db_path(tmp_path):
+def mig_013_db_url(tmp_path):
     db_file = tmp_path / "test_mig_013.db"
     url = f"sqlite:///{db_file.resolve().as_posix()}"
     engine = create_engine(url)
@@ -69,25 +69,25 @@ def test_db_path(tmp_path):
     engine.dispose()
 
 
-def test_migration_013_dry_run_apply_and_idempotent(test_db_path):
+def test_migration_013_dry_run_apply_and_idempotent(mig_013_db_url):
     # 1. Dry run
-    dry_res = mig_013.migrate(test_db_path, dry_run=True)
+    dry_res = mig_013.migrate(mig_013_db_url, dry_run=True)
     assert dry_res["dry_run"] is True
     assert dry_res["changed"] is True
 
     # 2. Apply
-    apply_res = mig_013.migrate(test_db_path, dry_run=False)
+    apply_res = mig_013.migrate(mig_013_db_url, dry_run=False)
     assert apply_res["changed"] is True
     assert apply_res["table_created"] == "asset_scan_authorizations"
     assert "asset_id" in apply_res["columns_added"]
 
     # 3. Idempotent re-run
-    re_res = mig_013.migrate(test_db_path, dry_run=False)
+    re_res = mig_013.migrate(mig_013_db_url, dry_run=False)
     assert re_res["changed"] is False
     assert re_res["after"]["schema_complete"] is True
 
     # 4. Verify table and columns exist
-    engine = create_engine(test_db_path)
+    engine = create_engine(mig_013_db_url)
     inspector = inspect(engine)
     assert "asset_scan_authorizations" in inspector.get_table_names()
     cols = {c["name"] for c in inspector.get_columns("scan_jobs")}
