@@ -237,7 +237,7 @@ db_changed=0
 trap - ERR
 rm -rf "`$stage" "`$archive"
 "@
-        $remoteScript | & $ssh -o BatchMode=yes -o ConnectTimeout=15 "$SshUser@$VpsHost" "sed '1s/^\xef\xbb\xbf//' | tr -d '\r' | bash -s"
+        $remoteScript | & $ssh -o BatchMode=yes -o ConnectTimeout=15 "$SshUser@$VpsHost" "perl -pe 's/^\xef\xbb\xbf// if $. == 1' | tr -d '\r' | bash -s"
         if ($LASTEXITCODE -ne 0) { throw "Remote release failed; source rollback was attempted." }
         Write-Host "Released $commit to $SshUser@$VpsHost." -ForegroundColor Green
     }
