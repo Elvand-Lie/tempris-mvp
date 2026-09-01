@@ -162,6 +162,9 @@ def clean_database():
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM audit_events WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
                 cur.execute("DELETE FROM asset_scan_authorizations WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
+                cur.execute("DELETE FROM asset_exposures WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
+                cur.execute("DELETE FROM asset_applicability_reviews WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
+                cur.execute("DELETE FROM findings WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
                 cur.execute("DELETE FROM assets WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
                 cur.execute("DELETE FROM collectors WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
                 # Clean any non-fixture memberships and users
