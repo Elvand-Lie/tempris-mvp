@@ -1,0 +1,30 @@
+{
+  "id": "PYSEC-2024-100",
+  "summary": "Withdrawn advisory for example-package",
+  "details": "This advisory has been withdrawn.",
+  "aliases": ["CVE-2024-1234"],
+  "modified": "2024-05-15T00:00:00Z",
+  "published": "2024-03-16T00:00:00Z",
+  "withdrawn": "2024-05-15T00:00:00Z",
+  "database_specific": {},
+  "references": [],
+  "affected": [
+    {
+      "package": {
+        "ecosystem": "PyPI",
+        "name": "example-package",
+        "purl": "pkg:pypi/example-package"
+      },
+      "ranges": [
+        {
+          "type": "ECOSYSTEM",
+          "events": [
+            {"introduced": "0"},
+            {"fixed": "2.1.0"}
+          ]
+        }
+      ]
+    }
+  ],
+  "schema_version": "1.6.0"
+}

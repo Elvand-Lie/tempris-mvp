@@ -1,0 +1,44 @@
+{
+  "id": "GHSA-no-cve-link",
+  "summary": "Denial of service in unrelated-lib",
+  "details": "unrelated-lib is vulnerable to denial of service via crafted input. No CVE has been assigned.",
+  "aliases": [],
+  "related": ["GHSA-xxxx-yyyy-zzzz"],
+  "modified": "2024-05-01T00:00:00Z",
+  "published": "2024-04-20T00:00:00Z",
+  "database_specific": {
+    "severity": "MODERATE",
+    "github_reviewed": true
+  },
+  "references": [
+    {
+      "type": "ADVISORY",
+      "url": "https://github.com/advisories/GHSA-no-cve-link"
+    }
+  ],
+  "affected": [
+    {
+      "package": {
+        "ecosystem": "npm",
+        "name": "unrelated-lib",
+        "purl": "pkg:npm/unrelated-lib"
+      },
+      "ranges": [
+        {
+          "type": "ECOSYSTEM",
+          "events": [
+            {"introduced": "1.0.0"},
+            {"fixed": "1.2.3"}
+          ]
+        }
+      ]
+    }
+  ],
+  "schema_version": "1.6.0",
+  "severity": [
+    {
+      "type": "CVSS_V3",
+      "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+    }
+  ]
+}

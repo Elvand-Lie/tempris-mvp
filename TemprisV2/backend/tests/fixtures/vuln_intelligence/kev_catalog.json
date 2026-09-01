@@ -1,0 +1,32 @@
+{
+  "title": "Known Exploited Vulnerabilities Catalog",
+  "catalogVersion": "2024.04.15",
+  "dateReleased": "2024-04-15T00:00:00.0000Z",
+  "count": 2,
+  "vulnerabilities": [
+    {
+      "cveID": "CVE-2024-1234",
+      "vendorProject": "Example Corp",
+      "product": "Example Product",
+      "vulnerabilityName": "Example Product SQL Injection Vulnerability",
+      "dateAdded": "2024-04-01",
+      "shortDescription": "Example Product contains a SQL injection vulnerability allowing remote code execution.",
+      "requiredAction": "Apply mitigations per vendor instructions or discontinue use.",
+      "dueDate": "2024-04-22",
+      "knownRansomwareCampaignUse": "Known",
+      "notes": "https://example.com/security/CVE-2024-1234"
+    },
+    {
+      "cveID": "CVE-2024-5678",
+      "vendorProject": "Widget Inc",
+      "product": "Widget Library",
+      "vulnerabilityName": "Widget Library Buffer Overflow",
+      "dateAdded": "2024-03-15",
+      "shortDescription": "Widget Library contains a heap buffer overflow allowing remote code execution.",
+      "requiredAction": "Apply updates per vendor instructions.",
+      "dueDate": "2024-04-05",
+      "knownRansomwareCampaignUse": "Unknown",
+      "notes": ""
+    }
+  ]
+}

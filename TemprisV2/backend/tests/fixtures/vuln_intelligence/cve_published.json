@@ -1,0 +1,119 @@
+{
+  "dataType": "CVE_RECORD",
+  "dataVersion": "5.1",
+  "cveMetadata": {
+    "cveId": "CVE-2024-1234",
+    "assignerOrgId": "f0f0f0f0-f0f0-f0f0-f0f0-f0f0f0f0f0f0",
+    "assignerShortName": "example-cna",
+    "state": "PUBLISHED",
+    "datePublished": "2024-03-15T12:00:00.000Z",
+    "dateUpdated": "2024-04-01T08:30:00.000Z",
+    "dateReserved": "2024-01-10T00:00:00.000Z"
+  },
+  "containers": {
+    "cna": {
+      "providerMetadata": {
+        "orgId": "f0f0f0f0-f0f0-f0f0-f0f0-f0f0f0f0f0f0",
+        "shortName": "example-cna",
+        "dateUpdated": "2024-04-01T08:30:00.000Z"
+      },
+      "title": "SQL Injection in Example Product",
+      "descriptions": [
+        {
+          "lang": "en",
+          "value": "A SQL injection vulnerability exists in Example Product versions prior to 2.1.0 allowing remote attackers to execute arbitrary SQL commands via the search parameter.",
+          "supportingMedia": []
+        }
+      ],
+      "affected": [
+        {
+          "vendor": "Example Corp",
+          "product": "Example Product",
+          "versions": [
+            {
+              "version": "0",
+              "lessThan": "2.1.0",
+              "status": "affected",
+              "versionType": "semver"
+            }
+          ],
+          "defaultStatus": "unaffected"
+        }
+      ],
+      "metrics": [
+        {
+          "format": "CVSS",
+          "scenarios": [{"lang": "en", "value": "GENERAL"}],
+          "cvssV3_1": {
+            "version": "3.1",
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            "baseScore": 9.8,
+            "baseSeverity": "CRITICAL",
+            "attackVector": "NETWORK",
+            "attackComplexity": "LOW",
+            "privilegesRequired": "NONE",
+            "userInteraction": "NONE",
+            "scope": "UNCHANGED",
+            "confidentialityImpact": "HIGH",
+            "integrityImpact": "HIGH",
+            "availabilityImpact": "HIGH"
+          }
+        }
+      ],
+      "references": [
+        {
+          "url": "https://example.com/security/CVE-2024-1234",
+          "name": "Vendor Advisory",
+          "tags": ["vendor-advisory"]
+        }
+      ],
+      "problemTypes": [
+        {
+          "descriptions": [
+            {
+              "lang": "en",
+              "description": "CWE-89 SQL Injection",
+              "cweId": "CWE-89",
+              "type": "CWE"
+            }
+          ]
+        }
+      ]
+    },
+    "adp": [
+      {
+        "providerMetadata": {
+          "orgId": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+          "shortName": "CISA-ADP",
+          "dateUpdated": "2024-04-02T10:00:00.000Z"
+        },
+        "title": "CISA ADP Vulnrichment",
+        "metrics": [
+          {
+            "other": {
+              "type": "ssvc",
+              "content": {
+                "id": "CVE-2024-1234",
+                "role": "CISA Coordinator",
+                "timestamp": "2024-04-02T10:00:00.000Z",
+                "version": "2.0.3",
+                "options": [
+                  {"Exploitation": "active"},
+                  {"Automatable": "yes"},
+                  {"Technical Impact": "total"}
+                ]
+              }
+            }
+          }
+        ],
+        "affected": [
+          {
+            "vendor": "Example Corp",
+            "product": "Example Product",
+            "cpes": ["cpe:2.3:a:example_corp:example_product:*:*:*:*:*:*:*:*"]
+          }
+        ]
+      }
+    ]
+  }
+}

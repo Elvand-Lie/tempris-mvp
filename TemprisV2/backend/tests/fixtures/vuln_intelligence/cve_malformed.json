@@ -1,0 +1,21 @@
+{
+  "dataType": "CVE_RECORD",
+  "dataVersion": "5.1",
+  "_comment": "Malformed: invalid CVE ID format (missing year segment), should be rejected by validation",
+  "cveMetadata": {
+    "cveId": "CVE-INVALID",
+    "assignerOrgId": "d4d4d4d4-d4d4-d4d4-d4d4-d4d4d4d4d4d4",
+    "assignerShortName": "malformed-cna",
+    "state": "PUBLISHED",
+    "datePublished": "2024-01-01T00:00:00.000Z"
+  },
+  "containers": {
+    "cna": {
+      "providerMetadata": {
+        "orgId": "d4d4d4d4-d4d4-d4d4-d4d4-d4d4d4d4d4d4",
+        "shortName": "malformed-cna"
+      },
+      "title": "This should be rejected"
+    }
+  }
+}

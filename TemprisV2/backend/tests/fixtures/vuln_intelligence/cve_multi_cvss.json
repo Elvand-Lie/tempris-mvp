@@ -1,0 +1,72 @@
+{
+  "dataType": "CVE_RECORD",
+  "dataVersion": "5.1",
+  "cveMetadata": {
+    "cveId": "CVE-2024-5678",
+    "assignerOrgId": "c3c3c3c3-c3c3-c3c3-c3c3-c3c3c3c3c3c3",
+    "assignerShortName": "multi-cvss-cna",
+    "state": "PUBLISHED",
+    "datePublished": "2024-02-20T10:00:00.000Z",
+    "dateUpdated": "2024-05-10T14:00:00.000Z",
+    "dateReserved": "2024-01-05T00:00:00.000Z"
+  },
+  "containers": {
+    "cna": {
+      "providerMetadata": {
+        "orgId": "c3c3c3c3-c3c3-c3c3-c3c3-c3c3c3c3c3c3",
+        "shortName": "multi-cvss-cna",
+        "dateUpdated": "2024-05-10T14:00:00.000Z"
+      },
+      "title": "Buffer Overflow in Widget Library",
+      "descriptions": [
+        {
+          "lang": "en",
+          "value": "A heap buffer overflow in Widget Library before 5.0 allows remote code execution."
+        }
+      ],
+      "affected": [
+        {
+          "vendor": "Widget Inc",
+          "product": "Widget Library",
+          "versions": [
+            {
+              "version": "0",
+              "lessThan": "5.0",
+              "status": "affected",
+              "versionType": "semver"
+            }
+          ]
+        }
+      ],
+      "metrics": [
+        {
+          "format": "CVSS",
+          "scenarios": [{"lang": "en", "value": "GENERAL"}],
+          "cvssV3_1": {
+            "version": "3.1",
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:H/A:H",
+            "baseScore": 7.5,
+            "baseSeverity": "HIGH"
+          }
+        },
+        {
+          "format": "CVSS",
+          "scenarios": [{"lang": "en", "value": "GENERAL"}],
+          "cvssV4_0": {
+            "version": "4.0",
+            "vectorString": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:P/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
+            "baseScore": 8.3,
+            "baseSeverity": "HIGH"
+          }
+        }
+      ],
+      "references": [
+        {
+          "url": "https://widget.example.com/security/advisories/2024-001",
+          "name": "Widget Security Advisory"
+        }
+      ]
+    },
+    "adp": []
+  }
+}

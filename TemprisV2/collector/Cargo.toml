@@ -1,0 +1,46 @@
+[package]
+name = "tempris-collector"
+version = "0.2.0"
+edition = "2021"
+authors = ["Tempris Team"]
+description = "Tempris V2 Internal Asset Reachability Collector for Windows"
+
+[lib]
+name = "tempris_collector"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1.40", features = ["full"] }
+tokio-tungstenite = { version = "0.26", features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+ed25519-dalek = { version = "2.1", features = ["rand_core", "serde"] }
+rand = "0.8"
+base64 = "0.22"
+hex = "0.4"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dirs = "5.0"
+thiserror = "2.0"
+anyhow = "1.0"
+eframe = { version = "0.30", default-features = false, features = ["default_fonts", "glow"] }
+egui = "0.30"
+
+[target.'cfg(windows)'.dependencies]
+quick-xml = "0.37"
+winapi = { version = "0.3", features = [
+    "shellapi", "synchapi", "handleapi", "processthreadsapi",
+    "errhandlingapi", "winuser", "sddl", "aclapi", "accctrl",
+    "winbase", "taskschd", "oaidl", "oleauto", "combaseapi",
+    "objbase", "winerror", "securitybaseapi", "wincrypt", "winnt",
+    "wtypesbase"
+] }
+
+[dev-dependencies]
+tokio = { version = "1.40", features = ["full", "test-util"] }
+wiremock = "0.6"

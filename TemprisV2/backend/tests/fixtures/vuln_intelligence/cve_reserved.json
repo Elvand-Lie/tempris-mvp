@@ -1,0 +1,12 @@
+{
+  "dataType": "CVE_RECORD",
+  "dataVersion": "5.1",
+  "cveMetadata": {
+    "cveId": "CVE-2024-9999",
+    "assignerOrgId": "a1a1a1a1-a1a1-a1a1-a1a1-a1a1a1a1a1a1",
+    "assignerShortName": "reserved-cna",
+    "state": "RESERVED",
+    "dateReserved": "2024-06-01T00:00:00.000Z"
+  },
+  "containers": {}
+}

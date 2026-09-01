@@ -1,0 +1,29 @@
+{
+  "dataType": "CVE_RECORD",
+  "dataVersion": "5.1",
+  "cveMetadata": {
+    "cveId": "CVE-2023-0001",
+    "assignerOrgId": "b2b2b2b2-b2b2-b2b2-b2b2-b2b2b2b2b2b2",
+    "assignerShortName": "rejected-cna",
+    "state": "REJECTED",
+    "datePublished": "2023-01-15T00:00:00.000Z",
+    "dateRejected": "2023-06-20T12:00:00.000Z",
+    "dateReserved": "2022-12-01T00:00:00.000Z"
+  },
+  "containers": {
+    "cna": {
+      "providerMetadata": {
+        "orgId": "b2b2b2b2-b2b2-b2b2-b2b2-b2b2b2b2b2b2",
+        "shortName": "rejected-cna",
+        "dateUpdated": "2023-06-20T12:00:00.000Z"
+      },
+      "rejectedReasons": [
+        {
+          "lang": "en",
+          "value": "This CVE was rejected because it was a duplicate of CVE-2023-0002."
+        }
+      ],
+      "replacedBy": ["CVE-2023-0002"]
+    }
+  }
+}

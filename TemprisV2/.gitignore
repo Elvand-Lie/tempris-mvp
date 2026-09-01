@@ -1,0 +1,31 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+backend/.venv/
+.venv/
+node_modules/
+dist/
+build/
+collector/target/
+collector/live_config.json
+collector/config.json
+*.log
+
+# Generated review, evidence, and local tooling output
+*.zip
+discussion-bundles/
+GPT Web Review*/
+Vulnerability Intelligence Hardening QA/
+evaluator-state.json
+generator-state.json
+backend/sprint*_live_evidence.json
+frontend/test-results/
+frontend/playwright-report/
+graphify-out/
+workDocs/
