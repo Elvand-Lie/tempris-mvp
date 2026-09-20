@@ -48,7 +48,7 @@ def test_login_success_and_jwt_claim_integrity(client: TestClient):
 
     # Strict 6-claim verification (session-bound shape: jti names the
     # persisted user_sessions row; sub is the user UUID)
-    expected_claims = {"sub", "tenant_id", "role", "iat", "exp", "jti"}
+    expected_claims = {"sub", "tenant_id", "role", "iat", "exp", "jti", "email"}
     assert set(decoded.keys()) == expected_claims
     assert decoded["sub"] == str(user_id)
     assert decoded["tenant_id"] == str(TENANT_A)
