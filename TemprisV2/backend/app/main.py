@@ -21,6 +21,8 @@ from app.routes.vuln_intelligence import router as vuln_intelligence_router
 from app.routes.exposure import router as exposure_router
 from app.routes.intake import router as intake_router
 from app.routes.spectrum import router as spectrum_router
+from app.routes.edip import router as edip_router
+from app.routes.standard import router as standard_router
 from app.routes.scout import router as scout_router
 from app.target_validator import TargetValidationError
 from app.vuln_intelligence.sync_engine import run_sync_loop
@@ -107,6 +109,8 @@ app.include_router(vuln_intelligence_router)
 app.include_router(exposure_router)
 app.include_router(intake_router)
 app.include_router(spectrum_router)
+app.include_router(edip_router)
+app.include_router(standard_router)
 app.include_router(scout_router)
 
 frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"

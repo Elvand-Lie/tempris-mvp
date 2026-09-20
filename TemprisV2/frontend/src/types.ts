@@ -8,7 +8,7 @@ export type AssetStatus = 'active' | 'decommissioned';
 export type ReachabilityStatus = 'unverified' | 'verified' | 'unreachable';
 export type AuthorizationStatus = 'pending' | 'approved' | 'revoked' | 'expired';
 export type UserRole = 'analyst' | 'admin' | 'superadmin';
-export type ActiveTab = 'assets' | 'collectors' | 'scout' | 'spectrum' | 'org';
+export type ActiveTab = 'assets' | 'collectors' | 'scout' | 'spectrum' | 'edip' | 'standard' | 'org';
 
 export type ScoutProfile = 'SERVICE_DISCOVERY' | 'VULNERABILITY_ASSESSMENT';
 

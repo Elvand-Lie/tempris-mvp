@@ -169,31 +169,42 @@ def clean_database():
                 # the findings DELETE below cannot see the referenced rows
                 # removed per-tenant any other way. TRUNCATE clears the whole
                 # table without firing row triggers (test DB only).
-                # P0-06/P0-08 (019/021/022): SSS history is DB-enforced
-                # immutable and derivations/override-bindings/attestations all
-                # FK-reference chapter5_approvals, whose own trigger forbids
-                # DELETE and whose audit is FK-pinned to it — the whole cluster
-                # must be cleared in one atomic TRUNCATE statement (test DB
-                # only; TRUNCATE does not fire row triggers).
+                # P0-06/P0-08 + Ch.6/7/8/9 (019/021/022/025/026/030/031/032):
+                # PostgreSQL's TRUNCATE FK check is STRUCTURAL, not row-based
+                # — every mutually-referencing table must truncate in ONE
+                # statement. The approvals cluster (SSS history, override
+                # bindings, attestations — all FK-pinned to
+                # chapter5_approvals), the Ch.7 spectrum workflow (handoffs
+                # now carry the EDIP CONSUMED extension), the Ch.8 EDIP
+                # decision/verification/binding rows, and the Ch.9 standard
+                # rows (evidence FK-references edip_verifications) form one
+                # connected FK cluster (test DB only; TRUNCATE fires no row
+                # triggers). standard_* catalogs (frameworks/controls/rules)
+                # are platform-curated reference data seeded by migration and
+                # stay.
                 cur.execute(
-                    "TRUNCATE non_cve_sss_proposals, non_cve_sss_derivations, "
+                    "TRUNCATE standard_control_evidence, grc_exceptions, "
+                    "standard_policies, standard_control_assessments, "
+                    "standard_submission_records, standard_obligations, "
+                    "standard_incident_rule_evaluations, "
+                    "standard_incident_revisions, standard_incidents, "
+                    "edip_accepted_risk_bindings, edip_verifications, "
+                    "edip_decisions, "
+                    "spectrum_workflow_history, spectrum_strike_requests, "
+                    "spectrum_edip_handoffs, spectrum_exposure_workflow, "
+                    "non_cve_sss_proposals, non_cve_sss_derivations, "
                     "non_cve_classifications, non_cve_sss_override_proposals, "
                     "chapter5_approvals, chapter5_approval_audit, "
                     "exposure_non_exploitation_attestations;"
                 )
                 cur.execute("TRUNCATE identity_boundary_audit, tenant_identity_boundary;")
-                # Ch.6/Ch.7 (025/026): intake rows FK-reference
-                # assets/findings/asset_exposures (RESTRICT-composite), and
-                # spectrum workflow rows FK-reference asset_exposures — both
-                # clusters must be cleared before the exposure/finding deletes
-                # below (test DB only).
+                # Ch.6 (025): intake rows FK-reference
+                # assets/findings/asset_exposures (RESTRICT-composite) —
+                # cleared before the exposure/finding deletes below (test DB
+                # only).
                 cur.execute(
                     "TRUNCATE intake_record_events, intake_records, "
                     "intake_connector_registrations;"
-                )
-                cur.execute(
-                    "TRUNCATE spectrum_workflow_history, spectrum_strike_requests, "
-                    "spectrum_edip_handoffs, spectrum_exposure_workflow;"
                 )
                 cur.execute("DELETE FROM audit_events WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
                 # Sessions (migration 024): FK ON DELETE CASCADE would clear
@@ -239,7 +250,7 @@ def clean_database():
                     ON CONFLICT (tenant_id) DO UPDATE
                     SET package_id = 'CORE_ASSETS', module_overrides = '{}'::jsonb, version = 1;
                 """, (str(TENANT_A), str(TENANT_B)))
-                cur.execute("UPDATE modules SET status = 'active' WHERE id IN ('ASSETS', 'SPECTRUM');")
+                cur.execute("UPDATE modules SET status = 'active' WHERE id IN ('ASSETS', 'SPECTRUM', 'EDIP', 'STANDARD');")
             conn.commit()
             seed_fixture_auth_data(conn)
 

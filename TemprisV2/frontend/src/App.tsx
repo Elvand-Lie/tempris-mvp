@@ -28,6 +28,8 @@ import { OrganizationConsole } from './components/OrganizationConsole';
 import { PlatformAdminConsole } from './components/PlatformAdminConsole';
 import { ScoutDashboard } from './components/ScoutDashboard';
 import { SpectrumWorkbench } from './components/SpectrumWorkbench';
+import { EdipWorkbench } from './edip/EdipWorkbench';
+import { StandardConsole } from './standard/StandardConsole';
 
 // Dedicated platform login-context tenant (Tempris Platform Control).
 // The operational Tempris tenant remains 11111111-1111-1111-1111-111111111111.
@@ -112,6 +114,8 @@ const AppShell: React.FC = () => {
 
   const hasAssetsModule = effectiveModules.includes('ASSETS');
   const hasSpectrumModule = effectiveModules.includes('SPECTRUM');
+  const hasEdipModule = effectiveModules.includes('EDIP');
+  const hasStandardModule = effectiveModules.includes('STANDARD');
   const isPlatformRoute = applicationRoute !== 'tenant';
   const isPlatformAuthority = Boolean(
     user?.is_platform_admin && activeTenant?.id === PLATFORM_TENANT_ID
@@ -779,6 +783,18 @@ const AppShell: React.FC = () => {
             <SpectrumWorkbench />
           ) : (
             <ModuleNotEntitled module="SPECTRUM" />
+          )
+        ) : activeTab === 'edip' ? (
+          hasEdipModule ? (
+            <EdipWorkbench />
+          ) : (
+            <ModuleNotEntitled module="EDIP" />
+          )
+        ) : activeTab === 'standard' ? (
+          hasStandardModule ? (
+            <StandardConsole />
+          ) : (
+            <ModuleNotEntitled module="STANDARD" />
           )
         ) : (
           role === 'superadmin' ? (
