@@ -24,6 +24,7 @@ from app.speak import service
 from app.speak.errors import (
     ArtifactIntegrityError,
     LlmUnavailableError,
+    PromptInjectionBlockedError,
     ReportNotFoundError,
     ReportStateError,
     ScopeValidationError,
@@ -82,6 +83,7 @@ _STATUS_BY_ERROR = {
     ScopeValidationError: status.HTTP_422_UNPROCESSABLE_ENTITY,
     ArtifactIntegrityError: status.HTTP_409_CONFLICT,
     LlmUnavailableError: status.HTTP_503_SERVICE_UNAVAILABLE,
+    PromptInjectionBlockedError: status.HTTP_422_UNPROCESSABLE_ENTITY,
 }
 
 
@@ -364,15 +366,19 @@ def speak_chat(
     With no configured provider — or an unreachable/malformed one — it
     fails closed: 'unavailable', never invented numbers (the V1 mock-LLM
     fallback is a named defect class and is retired). No session or message
-    rows are written; the only write is the tenant's own audit event."""
+    rows are written; the only write is the tenant's own audit event.
+
+    The snapshot is committed BEFORE the provider call: the connection pool
+    is bounded, so no pooled connection is held across the outbound LLM
+    round trip; the audit event takes its own short transaction after."""
     try:
         with get_db_connection() as conn:
             _snapshot_boundary(conn)
-            result = service.speak_chat(
-                conn, auth.tenant_id, message=payload.message,
-                actor_id=auth.actor_id, actor_role=auth.role,
-            )
+            context = service.build_chat_context(conn, auth.tenant_id)
             conn.commit()
-            return result
+        return service.complete_chat(
+            context, message=payload.message,
+            actor_id=auth.actor_id, actor_role=auth.role,
+        )
     except SpeakError as e:
         raise _http_error(e)

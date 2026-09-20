@@ -25,6 +25,7 @@ Binding rules implemented here:
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -35,11 +36,13 @@ from psycopg.rows import dict_row
 from app.audit import record_audit_event
 from app.ciso import service as ciso_service
 from app.config import get_speak_llm_config
+from app.db import get_db_connection
 from app.exposure.tes_read_model import _jsonify, get_exposure_tes
 from app.speak import llm, render
 from app.speak.errors import (
     ArtifactIntegrityError,
     LlmUnavailableError,
+    PromptInjectionBlockedError,
     ReportNotFoundError,
     ReportStateError,
     ScopeValidationError,
@@ -726,23 +729,78 @@ def export_report(
     }
 
 
-def speak_chat(
-    conn: psycopg.Connection,
-    tenant_id: uuid.UUID,
+def build_chat_context(conn: psycopg.Connection, tenant_id: uuid.UUID) -> dict:
+    """Chat phase 1 — the coherent read-only snapshot, built inside the
+    caller's REPEATABLE READ boundary and committed before the provider
+    call. The pool is bounded (max 10); NO connection may be held across
+    the outbound LLM round trip, so the context is fully materialized
+    here and the connection returns to the pool before phase 2."""
+    as_of = datetime.now(timezone.utc)
+    payload, source_refs = ciso_service.build_executive_summary(
+        conn, tenant_id, as_of=as_of
+    )
+    return {
+        "tenant_id": tenant_id,
+        "wire_payload": _jsonify(payload),
+        "source_refs": _jsonify(source_refs),
+    }
+
+
+# The V1 SPEAK input guardrail (SEC-I2), kept per the frozen Ch.11/Ch.12
+# boundary: instruction-override attempts are rejected input, never prompt
+# material. Matched against the raw message BEFORE any provider call.
+_INJECTION_PATTERNS = (
+    r"(?i)ignore\s+(all\s+)?(previous|above|prior)\s+(instructions|prompts|context)",
+    r"(?i)disregard\s+(all\s+)?(previous|above|prior)",
+    r"(?i)you\s+are\s+now\s+(?:a|an|in)",
+    r"(?i)system\s*prompt\s*:",
+    r"(?i)\[\s*SYSTEM\s*\]",
+    r"(?i)```\s*system",
+    r"(?i)reveal\s+your\s+(system\s+)?prompt",
+    r"(?i)output\s+the\s+raw\s+data",
+    r"(?i)raw\s+instructions",
+    r"(?i)dan\s+mode",
+    r"(?i)do\s+anything\s+now",
+    r"(?i)jailbreak",
+    r"(?i)override\s+(prompt|system)",
+    r"(?i)(ignore|bypass)\s+(guidelines|rules|filter|safety|constraints)",
+)
+
+
+def guardrail_user_message(message: str) -> str:
+    """The chat input guardrail: strip control characters, then block known
+    instruction-override patterns. Raises PromptInjectionBlockedError — a
+    422 rejected input, never prompt material (an audit-free client-input
+    failure, exactly like any other 422)."""
+    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", message)
+    for pattern in _INJECTION_PATTERNS:
+        if re.search(pattern, cleaned):
+            raise PromptInjectionBlockedError(
+                "Prompt injection attempt blocked by SPEAK guardrails."
+            )
+    return cleaned
+
+
+def complete_chat(
+    context: dict,
     *,
     message: str,
     actor_id: str,
     actor_role: str,
 ) -> dict:
-    """The system's only LLM surface (PRD Ch.11 rule 6). One coherent
-    read-only view of THIS tenant's authoritative state (the Ch.10 executive
-    summary, read inside the caller's boundary) is handed to the model as
+    """Chat phases 2+3 — the system's only LLM surface (PRD Ch.11 rule 6).
+    The message is guardrailed, then handed with the committed snapshot
+    (``context``, built by :func:`build_chat_context`) to the model as
     DATA; the answer comes back labeled INTERPRETATION with server-built
-    citations — the exact source objects the model was given, never what the
-    model claims. No session rows, no message rows; the only write is the
-    tenant's own audit-chain event. With no configured provider it fails
-    CLOSED: 'unavailable', never invented numbers (the V1 mock-LLM fallback
-    is a named defect class and is retired)."""
+    citations — the exact source objects the model was given, never what
+    the model claims. No session rows, no message rows; the only write is
+    the tenant's own audit-chain event, in its own short transaction taken
+    AFTER the provider call returns (no pooled connection is ever held
+    across the outbound round trip). With no configured provider it fails
+    CLOSED: 'unavailable', never invented numbers (the V1 mock-LLM
+    fallback is a named defect class and is retired)."""
+    message = guardrail_user_message(message)
+
     config = get_speak_llm_config()
     if config is None:
         raise LlmUnavailableError(
@@ -750,25 +808,23 @@ def speak_chat(
             "and never invents content (PRD Ch.11 rule 6)"
         )
 
-    as_of = datetime.now(timezone.utc)
-    payload, source_refs = ciso_service.build_executive_summary(
-        conn, tenant_id, as_of=as_of
-    )
-    wire_payload = _jsonify(payload)
+    wire_payload = context["wire_payload"]
     messages = llm.build_chat_messages(message, wire_payload)
     answer = llm.chat_completion(messages, config=config)
 
-    record_audit_event(
-        conn, tenant_id,
-        actor_id=actor_id, actor_role=actor_role,
-        event_name="speak.chat_completed",
-        details={
-            "model": config.model,
-            "message_chars": len(message),
-            "context": "executive_summary",
-            "cited_exposures": len(source_refs.get("exposures", [])),
-        },
-    )
+    with get_db_connection() as conn:
+        record_audit_event(
+            conn, context["tenant_id"],
+            actor_id=actor_id, actor_role=actor_role,
+            event_name="speak.chat_completed",
+            details={
+                "model": config.model,
+                "message_chars": len(message),
+                "context": "executive_summary",
+                "cited_exposures": len(context["source_refs"].get("exposures", [])),
+            },
+        )
+        conn.commit()
     return {
         "answer": answer,
         "model": config.model,
@@ -778,5 +834,5 @@ def speak_chat(
             "source of record — verify against the sealed reports."
         ),
         "as_of": wire_payload.get("as_of"),
-        "citations": _jsonify(source_refs),
+        "citations": context["source_refs"],
     }

@@ -46,3 +46,12 @@ class LlmUnavailableError(SpeakError):
     rendered seeded numbers is a named defect class and is retired)."""
 
     code = "llm_unavailable"
+
+
+class PromptInjectionBlockedError(SpeakError):
+    """The chat message matched the prompt-injection guardrail (the V1
+    SPEAK input guardrail, kept per the Ch.11/Ch.12 boundary). Blocked
+    BEFORE any provider call or state read — an instruction-override
+    attempt is a rejected input, never prompt material."""
+
+    code = "prompt_injection_blocked"
