@@ -1235,24 +1235,30 @@ class TestSnapshotCoherence:
     def _snapshot_caller(self, exposure_id):
         """Mimics the public route boundary: establish REPEATABLE READ before
         the first query, let the service read + audit inside that transaction,
-        then commit at the application boundary (rollback on failure)."""
+        then commit at the application boundary. A concurrent audit append
+        restarts the whole snapshot once, matching the public route."""
         from app import config as app_config
 
-        conn = psycopg.connect(app_config.DATABASE_URL)
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
-            snapshot = get_scoring_inputs(
-                conn, TENANT_A, exposure_id,
-                actor_id="admin-a", actor_role="admin",
-            )
-            conn.commit()
-            return snapshot
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+        for attempt in range(2):
+            conn = psycopg.connect(app_config.DATABASE_URL, row_factory=dict_row)
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
+                snapshot = get_scoring_inputs(
+                    conn, TENANT_A, exposure_id,
+                    actor_id="admin-a", actor_role="admin",
+                )
+                conn.commit()
+                return snapshot
+            except psycopg.errors.SerializationFailure:
+                conn.rollback()
+                if attempt:
+                    raise
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
 
     def test_mid_read_write_cannot_create_mixed_time_response(self):
         """Deterministic interleaving through the caller boundary: the snapshot
@@ -1298,9 +1304,10 @@ class TestSnapshotCoherence:
         assert e1 == [] and e2 == []
 
         snapshot = result_holder["snapshot"]
-        # The BI committed mid-read is NOT in the snapshot: no mixed-time row.
-        assert snapshot["business_impact"] is None
-        # Re-reading now (new snapshot) sees it — proving the write committed.
+        # The first snapshot is discarded after its audit-chain conflict; the
+        # retry is coherent and sees the committed BI rather than mixing times.
+        assert snapshot["business_impact"]["value"] == Decimal("7.0000")
+        # A separate read sees the same committed value.
         with get_db_connection() as conn:
             assert si.current_business_impact(conn, TENANT_A, exposure_id) is not None
         # The audit event committed through the caller's boundary.

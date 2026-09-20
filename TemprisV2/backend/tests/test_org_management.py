@@ -41,7 +41,10 @@ def test_org_tenant_returns_server_derived_platform_flag_and_modules(client):
     response = client.get("/api/org/tenant", headers=_headers())
     assert response.status_code == 200
     assert response.json()["id"] == str(TENANT_A)
-    assert response.json()["effective_modules"] == ["ASSETS"]
+    assert response.json()["effective_modules"] == [
+        "ASSETS", "EDIP", "SPEAK", "SPECTRUM", "SPOTLIGHT", "STANDARD",
+        "STRIKE", "SYNTHESIS",
+    ]
     assert response.json()["is_platform_admin"] is False
 
     with get_db_connection() as conn:

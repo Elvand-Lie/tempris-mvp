@@ -10,7 +10,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
-from psycopg.errors import ForeignKeyViolation
+from psycopg.errors import ForeignKeyViolation, SerializationFailure
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.audit import record_audit_event
@@ -639,17 +639,27 @@ def get_exposure_scoring_inputs(
     never commits or rolls back the connection.
     """
     try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
-            snapshot = get_scoring_inputs(
-                conn, auth.tenant_id, exposure_id,
-                actor_id=auth.actor_id, actor_role=auth.role,
-            )
-            conn.commit()
-            return snapshot
+        for attempt in range(2):
+            try:
+                with get_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
+                    snapshot = get_scoring_inputs(
+                        conn, auth.tenant_id, exposure_id,
+                        actor_id=auth.actor_id, actor_role=auth.role,
+                    )
+                    conn.commit()
+                    return snapshot
+            except SerializationFailure:
+                if attempt:
+                    raise
     except (ExposureNotFoundError, TenantMismatchError):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exposure not found")
+    except SerializationFailure:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "snapshot_retry_exhausted", "retry": True},
+        )
 
 
 # ---------------------------------------------------------------------------

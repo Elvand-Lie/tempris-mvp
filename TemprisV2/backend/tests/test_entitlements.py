@@ -6,8 +6,13 @@ from app.db import get_db_connection
 from app.services.entitlements import resolve_effective_modules
 from tests.conftest import TENANT_A, TENANT_B
 
+CORE_ASSETS_MODULES = {
+    "ASSETS", "EDIP", "SPEAK", "SPECTRUM", "SPOTLIGHT", "STANDARD",
+    "STRIKE", "SYNTHESIS",
+}
+
 def test_resolve_effective_modules_base_package():
-    """Test 1: Tenant with CORE_ASSETS base package and {} overrides resolves {'ASSETS'}."""
+    """CORE_ASSETS resolves every module shipped in the package."""
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -18,10 +23,10 @@ def test_resolve_effective_modules_base_package():
         conn.commit()
 
         effective = resolve_effective_modules(conn, TENANT_A)
-        assert effective == {"ASSETS"}
+        assert effective == CORE_ASSETS_MODULES
 
 def test_resolve_effective_modules_explicit_false_override():
-    """Test 2: Tenant with CORE_ASSETS and {"ASSETS": false} override resolves set() (empty)."""
+    """A false override removes only that module from the package."""
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -32,7 +37,7 @@ def test_resolve_effective_modules_explicit_false_override():
         conn.commit()
 
         effective = resolve_effective_modules(conn, TENANT_A)
-        assert effective == set()
+        assert effective == CORE_ASSETS_MODULES - {"ASSETS"}
 
 def test_resolve_effective_modules_explicit_true_override():
     """Test 3: Tenant with an empty package and {"ASSETS": true} override resolves {'ASSETS'}."""
@@ -65,9 +70,9 @@ def test_resolve_effective_modules_disabled_catalogue_module():
             """, (str(TENANT_A),))
         conn.commit()
 
-        # Both base package and true override must be excluded because ASSETS module status is disabled
+        # ASSETS is excluded regardless of package or override; sibling modules remain.
         effective = resolve_effective_modules(conn, TENANT_A)
-        assert effective == set()
+        assert effective == CORE_ASSETS_MODULES - {"ASSETS"}
 
 def test_resolve_effective_modules_inactive_tenant():
     """Test 5: Disabled tenant resolves set() regardless of entitlement configuration."""

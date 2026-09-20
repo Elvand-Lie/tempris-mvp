@@ -281,6 +281,20 @@ def record_audit_event(
                 # Lost the append race: undo only this insert and re-chain
                 # from the (advanced) head of the tenant's chain.
                 cur.execute("ROLLBACK TO SAVEPOINT audit_chain_append")
+                cur.execute("SHOW transaction_isolation")
+                isolation_row = cur.fetchone()
+                isolation = (
+                    isolation_row["transaction_isolation"]
+                    if isinstance(isolation_row, dict)
+                    else isolation_row[0]
+                )
+                if isolation != "read committed":
+                    # REPEATABLE READ/SERIALIZABLE cannot observe the winner's
+                    # new chain head. The transaction owner must retry from a
+                    # fresh snapshot instead of repeating a provably stale read.
+                    raise psycopg.errors.SerializationFailure(
+                        "audit chain advanced during a repeatable-read transaction"
+                    ) from exc
 
     raise RuntimeError(
         f"audit chain append did not converge after {_MAX_CHAIN_APPEND_ATTEMPTS} attempts"

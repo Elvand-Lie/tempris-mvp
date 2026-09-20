@@ -785,7 +785,14 @@ def supersede_exposures_for_asset(
             )
         superseded = [AssetExposure.model_validate(r) for r in cur.fetchall()]
 
-        affected_findings: set[uuid.UUID] = set()
+        # Lock/update every affected finding before appending audit events.
+        # Confirmation already holds the finding lock before it enters the
+        # tenant audit chain; matching that order prevents a finding↔audit
+        # deadlock when decommission races confirmation on another asset.
+        affected_findings = {exposure.finding_id for exposure in superseded}
+        for finding_id in sorted(affected_findings, key=str):
+            _derive_finding_rollup_status(cur, tenant_id, finding_id)
+
         for exposure in superseded:
             record_audit_event(
                 conn=conn,
@@ -803,11 +810,6 @@ def supersede_exposures_for_asset(
                     "taxonomy_class": taxonomy_class,
                 },
             )
-            affected_findings.add(exposure.finding_id)
-
-        for finding_id in affected_findings:
-            _derive_finding_rollup_status(cur, tenant_id, finding_id)
-
         return superseded
 
 
