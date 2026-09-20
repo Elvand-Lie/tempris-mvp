@@ -8,6 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.auth import AuthContext, get_auth_context, require_roles, require_module
 from app.audit import record_audit_event
 from app.db import get_db_connection
+from app.exposure.exceptions import BoundAssetError
+from app.exposure.identity_boundary import assert_asset_not_identity_boundary
+from app.exposure.service import supersede_exposures_for_asset
 from app.schemas import (
     AssetCreate,
     AssetUpdate,
@@ -707,7 +710,29 @@ def decommission_asset(
                 )
 
             if existing["status"] == "decommissioned":
+                # Idempotent: supersession already ran in the first decommission;
+                # re-run is a harmless no-op on any straggler current exposure.
+                supersede_exposures_for_asset(
+                    conn,
+                    auth.tenant_id,
+                    id,
+                    actor_id=auth.actor_id,
+                    actor_role=auth.role,
+                    reason="asset decommissioned (idempotent re-run)",
+                )
                 return dict(existing)
+
+            # P0-07 (§3.6.6 #7): a bound asset cannot be decommissioned until
+            # the binding is replaced or cleared — rejected before ANY change
+            # (no partial decommission). The migration-020 BEFORE-UPDATE
+            # trigger backstops this guard for raw-SQL writers.
+            try:
+                assert_asset_not_identity_boundary(cur, auth.tenant_id, id)
+            except BoundAssetError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=str(e),
+                )
 
             # In same transaction: mark decommissioned and revoke active authorizations
             cur.execute(
@@ -734,6 +759,19 @@ def decommission_asset(
                 (str(id), str(auth.tenant_id))
             )
             decommissioned_asset = dict(cur.fetchone())
+
+            # Exposure lifecycle authority: decommissioning is an audited
+            # supersession transition — current exposures stop being current in
+            # this same transaction; history is retained and reactivation never
+            # revives a superseded episode.
+            supersede_exposures_for_asset(
+                conn,
+                auth.tenant_id,
+                id,
+                actor_id=auth.actor_id,
+                actor_role=auth.role,
+                reason="asset decommissioned",
+            )
 
             record_audit_event(
                 conn=conn,

@@ -364,17 +364,16 @@ class TestGroup5FindingsAndApplicabilityApiEndpoints:
         assert events[0]["details"]["reason"] == payload["reason"]
         assert str(events[0]["asset_id"]) == str(asset_id)
 
-        # Case 2: Explicit reviewed_by
+        # Case 2: Client-supplied reviewed_by is rejected (actor identity is server-owned)
         payload2 = {
             "finding_id": finding_id,
             "asset_id": asset_id,
             "applicability": "NOT_APPLICABLE",
-            "reviewed_by": "custom-analyst",
+            "reviewed_by": "spoofed-actor",
             "reason": "Feature flag disabled in production",
         }
         res2 = client.post("/api/exposure/reviews", headers=auth_headers_tenant_a_analyst, json=payload2)
-        assert res2.status_code == 201
-        assert res2.json()["reviewed_by"] == "custom-analyst"
+        assert res2.status_code == 422
 
     def test_assertion_5_7_list_reviews_filtering(
         self, client: TestClient, auth_headers_tenant_a_admin
@@ -486,10 +485,11 @@ class TestGroup6ConfirmationResolutionAndCanonicalExposureApi:
         assert res.status_code == 400
         assert "not active" in res.json()["detail"].lower()
 
-    def test_assertion_6_4_closed_finding_rejection(
+    def test_assertion_6_4_closed_finding_confirmation_reuses_finding(
         self, client: TestClient, auth_headers_tenant_a_admin
     ):
-        """Assertion 6.4: POST /api/exposure/confirm on a closed finding returns 400 Bad Request."""
+        """Assertion 6.4 (P0-01): finding status is never an input — confirming on a
+        closed finding succeeds (finding reuse across terminal roll-up states)."""
         f_res = client.post("/api/exposure/findings", headers=auth_headers_tenant_a_admin, json={"title": "Closed Finding Check", "severity": "high"})
         finding_id = f_res.json()["id"]
         client.post(f"/api/exposure/findings/{finding_id}/close", headers=auth_headers_tenant_a_admin)
@@ -500,13 +500,17 @@ class TestGroup6ConfirmationResolutionAndCanonicalExposureApi:
             headers=auth_headers_tenant_a_admin,
             json={"finding_id": finding_id, "asset_id": asset_id, "evidence": {"proof": "valid"}},
         )
-        assert res.status_code == 400
-        assert "not open" in res.json()["detail"].lower()
+        assert res.status_code == 200
+        assert res.json()["status"] == "confirmed"
+        assert res.headers["x-exposure-outcome"] == "created"
+        assert res.json()["finding_id"] == finding_id
 
-    def test_assertion_6_5_idempotent_reconfirmation(
+    def test_assertion_6_5_idempotent_reconfirmation_returns_committed_episode(
         self, client: TestClient, auth_headers_tenant_a_admin
     ):
-        """Assertion 6.5: Calling POST /api/exposure/confirm repeatedly updates existing confirmed exposure without duplicates."""
+        """Assertion 6.5 (P0-01): repeated confirmation idempotently returns the
+        existing current episode unchanged — evidence and provenance are never
+        overwritten; the outcome header distinguishes created vs replay."""
         f_res = client.post("/api/exposure/findings", headers=auth_headers_tenant_a_admin, json={"title": "Reconfirmation Finding", "severity": "high"})
         finding_id = f_res.json()["id"]
         asset_id = str(create_asset_in_db(TENANT_A, "asset-reconfirm-1"))
@@ -517,6 +521,7 @@ class TestGroup6ConfirmationResolutionAndCanonicalExposureApi:
             json={"finding_id": finding_id, "asset_id": asset_id, "evidence": {"round": 1}},
         )
         assert res1.status_code == 200
+        assert res1.headers["x-exposure-outcome"] == "created"
         exp_id1 = res1.json()["id"]
 
         res2 = client.post(
@@ -525,19 +530,25 @@ class TestGroup6ConfirmationResolutionAndCanonicalExposureApi:
             json={"finding_id": finding_id, "asset_id": asset_id, "evidence": {"round": 2}},
         )
         assert res2.status_code == 200
+        assert res2.headers["x-exposure-outcome"] == "replay"
         exp_id2 = res2.json()["id"]
 
         assert exp_id1 == exp_id2
-        assert res2.json()["evidence"] == {"round": 2}
+        # Committed evidence and actor provenance survive the replay untouched
+        assert res2.json()["evidence"] == {"round": 1}
+        assert res2.json()["confirmed_by"] == "admin-a"
 
         # Check current exposures count
         current_res = client.get("/api/exposure/current", headers=auth_headers_tenant_a_admin)
         assert len(current_res.json()) == 1
 
-    def test_assertion_6_6_resolve_exposure_via_api_and_actor_default(
+    def test_assertion_6_6_public_resolve_route_removed_fails_closed(
         self, client: TestClient, auth_headers_tenant_a_admin
     ):
-        """Assertion 6.6: POST /api/exposure/resolve/{id} updates exposure, defaults actor, returns 200, and emits exposure.resolved."""
+        """Assertion 6.6 (audit round 2): the public terminal-transition route
+        is REMOVED for Phase 0 — 'resolved' needs the Chapter 8 verified-closure
+        intent and 'false_positive' needs a Chapter 6/7 applicability decision;
+        neither owner exists, so no user route may transition an exposure."""
         f_res = client.post("/api/exposure/findings", headers=auth_headers_tenant_a_admin, json={"title": "Resolve Finding", "severity": "high"})
         finding_id = f_res.json()["id"]
         asset_id = str(create_asset_in_db(TENANT_A, "asset-resolve-1"))
@@ -549,25 +560,25 @@ class TestGroup6ConfirmationResolutionAndCanonicalExposureApi:
         )
         exp_id = conf_res.json()["id"]
 
-        # Resolve without explicit resolved_by (defaults to admin-a)
-        res = client.post(
-            f"/api/exposure/resolve/{exp_id}",
-            headers=auth_headers_tenant_a_admin,
-            json={"status": "resolved", "resolution_reason": "Vulnerability patched and verified"},
-        )
-        assert res.status_code == 200
-        data = res.json()
-        assert data["status"] == "resolved"
-        assert data["resolved_by"] == "admin-a"
-        assert data["resolved_at"] is not None
-        assert data["resolution_reason"] == "Vulnerability patched and verified"
+        # Any terminal-transition request fails closed (route removed)
+        for body in (
+            {"status": "resolved", "resolution_reason": "patched"},
+            {"status": "false_positive", "resolution_reason": "not applicable"},
+            {},
+        ):
+            res = client.post(
+                f"/api/exposure/resolve/{exp_id}",
+                headers=auth_headers_tenant_a_admin,
+                json=body,
+            )
+            assert res.status_code == 404, body
 
-        # Verify audit event
-        events = fetch_audit_events(TENANT_A, "exposure.resolved")
-        assert len(events) >= 1
-        assert events[0]["details"]["exposure_id"] == exp_id
-        assert events[0]["details"]["status"] == "resolved"
-        assert events[0]["details"]["reason"] == "Vulnerability patched and verified"
+        # Nothing transitioned — the exposure stays current, provenance intact
+        still_current = client.get(
+            f"/api/exposure/current?asset_id={asset_id}", headers=auth_headers_tenant_a_admin
+        )
+        assert len(still_current.json()) == 1
+        assert still_current.json()[0]["exposure_id"] == exp_id
 
     def test_assertion_6_7_canonical_current_exposures_api(
         self, client: TestClient, auth_headers_tenant_a_admin
@@ -679,10 +690,11 @@ class TestGroup6ConfirmationResolutionAndCanonicalExposureApi:
         returned_asset_ids = {item["asset_id"] for item in items}
         assert returned_asset_ids == {a1_id, a2_id, a3_id}
 
-    def test_assertion_6_11_dynamic_asset_lifecycle_transition(
+    def test_assertion_6_11_decommission_supersedes_and_reactivation_never_revives(
         self, client: TestClient, auth_headers_tenant_a_admin
     ):
-        """Assertion 6.11: Deactivating an asset removes it from GET /api/exposure/current; reactivating restores it without exposure mutation."""
+        """Assertion 6.11 (P0-01): asset decommission supersedes current exposures
+        atomically (with audit); reactivating the asset never revives them."""
         f_res = client.post("/api/exposure/findings", headers=auth_headers_tenant_a_admin, json={"title": "Dynamic Lifecycle Finding", "severity": "critical"})
         finding_id = f_res.json()["id"]
         asset_id = create_asset_in_db(TENANT_A, "asset-dynamic-life", "10.10.10.10")
@@ -700,26 +712,36 @@ class TestGroup6ConfirmationResolutionAndCanonicalExposureApi:
         cur1 = client.get(f"/api/exposure/current?asset_id={asset_id}", headers=auth_headers_tenant_a_admin)
         assert len(cur1.json()) == 1
 
-        # Decommission the asset in database
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("UPDATE assets SET status = 'decommissioned' WHERE id = %s;", (str(asset_id),))
-            conn.commit()
+        # Decommission through the API (same transaction: asset + supersession + audits)
+        decom_res = client.post(f"/api/assets/{asset_id}/decommission", headers=auth_headers_tenant_a_admin)
+        assert decom_res.status_code == 200
+        assert decom_res.json()["status"] == "decommissioned"
 
-        # Verify immediately removed from current exposures
+        # Removed from current exposures AND superseded in storage
         cur2 = client.get(f"/api/exposure/current?asset_id={asset_id}", headers=auth_headers_tenant_a_admin)
         assert len(cur2.json()) == 0
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT status, resolved_by FROM asset_exposures WHERE id = %s;",
+                    (str(exposure_id),),
+                )
+                row = cur.fetchone()
+        assert row["status"] == "superseded"
+        assert row["resolved_by"] == "admin-a"
 
-        # Reactivate asset in database
+        # Supersession audit committed in the same transaction
+        events = fetch_audit_events(TENANT_A, "exposure.superseded")
+        assert any(e["details"].get("exposure_id") == str(exposure_id) for e in events)
+
+        # Reactivate the asset directly: the superseded episode is never revived
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("UPDATE assets SET status = 'active' WHERE id = %s;", (str(asset_id),))
             conn.commit()
 
-        # Verify immediately restored without exposure mutation
         cur3 = client.get(f"/api/exposure/current?asset_id={asset_id}", headers=auth_headers_tenant_a_admin)
-        assert len(cur3.json()) == 1
-        assert cur3.json()[0]["exposure_id"] == exposure_id
+        assert len(cur3.json()) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -805,28 +827,23 @@ class TestGroup7MultiTenantDefenseAndCrossTenantRejection:
         )
         assert res2.status_code == 404
 
-    def test_assertion_7_4_cross_tenant_resolution_rejection(
+    def test_assertion_7_4_terminal_transition_route_absent_for_every_tenant(
         self, client: TestClient, auth_headers_tenant_a_admin, auth_headers_tenant_b_admin
     ):
-        """Assertion 7.4: Tenant B attempting to resolve Tenant A's exposure returns 404 Not Found."""
-        f_a_res = client.post("/api/exposure/findings", headers=auth_headers_tenant_a_admin, json={"title": "FA", "severity": "low"})
-        fa_id = f_a_res.json()["id"]
-        aa_id = str(create_asset_in_db(TENANT_A, "asset-a-res"))
-
-        conf_res = client.post(
-            "/api/exposure/confirm",
+        """Assertion 7.4 (audit round 2): the resolve route is removed for all
+        tenants — no cross-tenant terminal-transition surface exists at all."""
+        res_a = client.post(
+            f"/api/exposure/resolve/{uuid.uuid4()}",
             headers=auth_headers_tenant_a_admin,
-            json={"finding_id": fa_id, "asset_id": aa_id, "evidence": {"p": 1}},
+            json={"status": "false_positive"},
         )
-        exp_id = conf_res.json()["id"]
-
-        # Tenant B attempt to resolve Tenant A's exposure
-        res = client.post(
-            f"/api/exposure/resolve/{exp_id}",
+        res_b = client.post(
+            f"/api/exposure/resolve/{uuid.uuid4()}",
             headers=auth_headers_tenant_b_admin,
-            json={"status": "resolved", "resolution_reason": "Malicious resolve attempt"},
+            json={"status": "resolved"},
         )
-        assert res.status_code == 404
+        assert res_a.status_code == 404
+        assert res_b.status_code == 404
 
     def test_assertion_7_5_cross_tenant_canonical_query_isolation(
         self, client: TestClient, auth_headers_tenant_a_admin, auth_headers_tenant_b_admin
@@ -946,7 +963,17 @@ class TestGroup8DocumentationScopeBoundingAndFreezeSafety:
             "/api/exposure/findings/{finding_id}/close",
             "/api/exposure/reviews",
             "/api/exposure/confirm",
-            "/api/exposure/resolve/{exposure_id}",
             "/api/exposure/current",
+            "/api/exposure/{exposure_id}/reachability",
+            "/api/exposure/{exposure_id}/reachability/{record_id}/revoke",
+            "/api/exposure/{exposure_id}/business-impact",
+            "/api/exposure/{exposure_id}/exploitation-evidence",
+            "/api/exposure/{exposure_id}/exploitation-evidence/{record_id}/revoke",
+            "/api/exposure/{exposure_id}/scoring-inputs",
+            # P0-05 — CVE TES read model (PRD-000 v1.11 §3.3.6):
+            "/api/exposure/{exposure_id}/tes",
+            "/api/exposure/findings/{finding_id}/tes-summary",
+            # P0-06 — manual SSS proposal boundary (PRD-000 v1.11 §3.6.2 path 3):
+            "/api/exposure/findings/{finding_id}/sss-proposals",
         }
         assert set(exposure_routes) == expected_routes

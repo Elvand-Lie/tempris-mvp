@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -58,14 +58,41 @@ class MassWithdrawalExceededError(Exception):
 
 @dataclass
 class ArchiveLimits:
-    """Resource and safety limits for archive decompression."""
+    """Resource and safety limits for archive decompression.
+
+    Conservative shared defaults (P1-02 review): 500 MB compressed / 2 GB
+    expanded / 500k files / 100:1 ratio / 300 s cumulative extraction —
+    these are the bounds every consumer inherited before P1-02 and the
+    correct bounds for the small, bounded in-memory artifacts (KEV catalog,
+    daily EPSS CSV, OSV zips). The CVE/cvelistV5 staged bootstrap (the one
+    ~300 MB compressed → ~3 GB expanded consumer) overrides via the
+    CVE_ARCHIVE_LIMITS preset — the shared defaults are NOT resized around
+    that single consumer (out-of-scope sources keep their behavior).
+    """
     max_compressed_bytes: int = 500 * 1024 * 1024       # 500 MB max compressed archive
     max_expanded_bytes: int = 2 * 1024 * 1024 * 1024    # 2 GB max total uncompressed
     max_file_count: int = 500_000                       # 500k files max
     max_entry_bytes: int = 50 * 1024 * 1024             # 50 MB max per entry
     max_compression_ratio: float = 100.0                # 100:1 max ratio
     min_ratio_threshold_bytes: int = 1 * 1024 * 1024    # 1 MB min uncompressed to enforce ratio
-    extraction_timeout_seconds: float = 300.0           # 300 seconds timeout
+    extraction_timeout_seconds: float = 300.0           # cumulative extraction budget
+
+
+# CVE/cvelistV5-only preset (P1-02 review fix): the real catalog is ~300 MB
+# compressed expanding to ~3 GB across ~280k files (ratio ~10:1). Caps carry
+# 2x margin over that reality; per-entry ratio/count/size guards are
+# UNCHANGED so genuinely hostile archives still fail closed; the cumulative
+# extraction timeout covers a one-time ~3 GB staged extraction at a
+# conservative >= 2 MB/s sustained rate. Only CveFetchClient uses this.
+CVE_ARCHIVE_LIMITS = ArchiveLimits(
+    max_compressed_bytes=600 * 1024 * 1024,       # 600 MB compressed (2x)
+    max_expanded_bytes=6 * 1024 * 1024 * 1024,    # 6 GB expanded (2x)
+    max_file_count=500_000,                        # cvelistV5 ~280k files
+    max_entry_bytes=50 * 1024 * 1024,
+    max_compression_ratio=100.0,
+    min_ratio_threshold_bytes=1 * 1024 * 1024,
+    extraction_timeout_seconds=1800.0,             # one-time 3 GB stage
+)
 
 
 
@@ -260,7 +287,12 @@ class SyncState:
     last_successful_at: Optional[datetime] = None
     last_attempted_at: Optional[datetime] = None
     last_error: Optional[str] = None
+    # Operational last-attempt pointer: advances on success AND on failure
+    # (the failed attempt's snapshot). Never authoritative for resolvers.
     last_snapshot_id: Optional[str] = None
+    # Authoritative last-good generation pointer (migration 009): advances
+    # only on successful import. EPSS/KEV resolvers bind to THIS.
+    last_good_snapshot_id: Optional[str] = None
     consecutive_failures: int = 0
     is_healthy: bool = True
     config: Any = None
@@ -268,20 +300,151 @@ class SyncState:
     updated_at: Optional[datetime] = None
 
 
+# ---------------------------------------------------------------------------
+# P0-03 resolver result types (PRD-000 v1.8 §3.5 #2, §3.3.3)
+# ---------------------------------------------------------------------------
+
+# Stable, distinct reason codes for the CVE intelligence resolvers (P0-03).
+# These are contract values: consumers (including the future P0-04 TES engine)
+# may match on them, so they must never be renamed casually.
+CVSS_MISSING_CVE = "cvss_missing_cve"
+CVSS_NO_AUTHORITATIVE_ASSESSMENT = "cvss_no_authoritative_assessment"
+CVSS_AUTHORITY_AMBIGUOUS = "cvss_authority_ambiguous"
+EPSS_MISSING_SYNC_STATE = "epss_missing_sync_state"
+EPSS_UNHEALTHY = "epss_unhealthy"
+EPSS_NEVER_IMPORTED = "epss_never_imported"
+EPSS_STALE = "epss_stale"
+EPSS_MISSING_SNAPSHOT = "epss_missing_snapshot"
+EPSS_NO_OBSERVATION = "epss_no_observation"
+KEV_MISSING_SYNC_STATE = "kev_missing_sync_state"
+KEV_UNHEALTHY = "kev_unhealthy"
+KEV_NEVER_IMPORTED = "kev_never_imported"
+KEV_STALE = "kev_stale"
+KEV_MISSING_SNAPSHOT = "kev_missing_snapshot"
+
+# Freshness window (PRD §3.3.3, locked v1.8): a feed observation is fresh only
+# when the last successful import is no more than 48 hours old. Exactly 48
+# hours is fresh; beyond is stale. This is a policy constant, deliberately
+# decoupled from the mutable sync_interval_seconds scheduling value.
+FEED_FRESHNESS_WINDOW = timedelta(hours=48)
+
+
+@dataclass(frozen=True)
+class ResolverProvenance:
+    """Feed-health provenance shared by the EPSS and KEV resolvers.
+
+    ``freshness_age_seconds`` is the age of the last successful import at the
+    evaluation instant (as_of), and is None only when the import never ran.
+
+    The two snapshot pointers are deliberately distinct:
+      * ``last_snapshot_id`` — operational last-ATTEMPT metadata (a failed
+        import advances it); never authoritative.
+      * ``last_good_snapshot_id`` — the authoritative last-good generation
+        the resolver actually bound to.
+    """
+    source: str
+    is_healthy: Optional[bool] = None
+    last_successful_at: Optional[datetime] = None
+    last_snapshot_id: Optional[str] = None
+    last_good_snapshot_id: Optional[str] = None
+    freshness_age_seconds: Optional[float] = None
+
+
 @dataclass
-class TesResolution:
-    """Result of the deterministic TES-input CVSS resolver."""
+class CvssAuthorityResolution:
+    """Result of the deterministic CVSS authority resolver (PRD §3.5 #2).
+
+    Selection: is_current rows only -> newest supported version
+    (4.0 > 3.1 > 3.0 > 2.0) -> within version CNA > NVD > ADP
+    (structural container_role) -> more than one surviving row is a
+    fail-closed ambiguity, never tie-broken.
+
+    Unscoreable results carry ``reason_code`` (one of the CVSS_* constants)
+    and a human-readable ``reason``. When ambiguous, ``ambiguous_rows``
+    carries the full provenance of every surviving winning row so the data
+    defect is inspectable.
+    """
     cve_id: str
-    resolved_score: Optional[Decimal] = None
-    resolved_vector: Optional[str] = None
-    resolved_severity: Optional[str] = None
-    resolved_assessor: Optional[str] = None
-    resolution_tier: Optional[str] = None  # 'cna' | 'nvd' | None
-    unscoreable_reason: Optional[str] = None
+    assessment_id: Optional[str] = None
+    version: Optional[str] = None
+    role: Optional[str] = None              # 'cna' | 'nvd' | 'adp'
+    assessor: Optional[str] = None
+    provider_org_id: Optional[str] = None
+    scenario: Optional[str] = None
+    score: Optional[Decimal] = None
+    severity: Optional[str] = None
+    vector: Optional[str] = None
+    source: Optional[str] = None            # 'cve' | 'nvd'
+    source_record_id: Optional[str] = None
+    created_at: Optional[datetime] = None
+    is_current: Optional[bool] = None
+    ambiguous_rows: Optional[list[dict]] = None
+    reason_code: Optional[str] = None
+    reason: Optional[str] = None
 
     @property
     def is_scoreable(self) -> bool:
-        return self.resolved_score is not None
+        return self.score is not None
+
+
+@dataclass(frozen=True)
+class EpssFreshnessResolution:
+    """Structured EPSS freshness resolver result (P0-03).
+
+    ``state`` is 'fresh' | 'unknown'; ``reason_code`` is None for fresh and a
+    stable EPSS_* constant otherwise. The TES EPSS ladder is P0-04's — this
+    resolver returns the observation and its provenance only.
+
+    ``snapshot_id`` is the authoritative last-good generation the observation
+    is bound to (never the operational last-attempt pointer).
+    """
+    cve_id: str
+    state: str                                   # 'fresh' | 'unknown'
+    reason_code: Optional[str] = None
+    reason: Optional[str] = None
+    score: Optional[Decimal] = None
+    percentile: Optional[Decimal] = None
+    model_version: Optional[str] = None
+    score_date: Optional[date] = None
+    source_record_id: Optional[str] = None
+    snapshot_id: Optional[str] = None
+    provenance: Optional[ResolverProvenance] = None
+
+    @property
+    def is_fresh(self) -> bool:
+        return self.state == "fresh"
+
+
+@dataclass(frozen=True)
+class KevTernaryResolution:
+    """Ternary KEV resolver result (P0-03): listed / not_listed / unknown.
+
+    ``listed``/``not_listed`` require a fresh, healthy feed whose consulted
+    membership is bound to the exact authoritative last-good snapshot
+    (``last_good_snapshot_id``). Absence on a stale/unhealthy feed or one
+    without a last-good generation is ``unknown`` — never silently
+    "not listed".
+
+    ``snapshot_id`` is the authoritative last-good generation consulted (also
+    set on fresh ``not_listed`` results), never the operational last-attempt
+    pointer.
+    """
+    cve_id: str
+    state: str                                   # 'listed' | 'not_listed' | 'unknown'
+    reason_code: Optional[str] = None
+    reason: Optional[str] = None
+    entry_id: Optional[str] = None
+    declared_cve_id: Optional[str] = None
+    resolved_cve_id: Optional[str] = None
+    known_ransomware: Optional[str] = None
+    date_added: Optional[date] = None
+    source_record_id: Optional[str] = None
+    snapshot_id: Optional[str] = None
+    provenance: Optional[ResolverProvenance] = None
+
+    @property
+    def is_unknown(self) -> bool:
+        return self.state == "unknown"
 
 
 @dataclass

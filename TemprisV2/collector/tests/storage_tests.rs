@@ -432,7 +432,7 @@ fn test_v01_migration_success() {
         "https://sandbox.tempris.tech/v2-assets"
     );
     assert_eq!(migrated_state.public_key, pub_b64);
-    assert_eq!(migrated_state.collector_version, "0.2.0");
+    assert_eq!(migrated_state.collector_version, env!("CARGO_PKG_VERSION"));
     assert_eq!(migrated_key.as_bytes(), raw_secret);
 
     // Verify V0.2 storage exists and can be reloaded directly

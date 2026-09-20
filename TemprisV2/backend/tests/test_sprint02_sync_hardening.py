@@ -138,9 +138,13 @@ class TestDeliverable1BoundedBootstrapExhaustion:
     """Tests for Assertions 1.1 through 1.7."""
 
     def test_assertion_1_1_cursor_unchanged_on_mid_bootstrap_interruption(self):
-        """Assertion 1.1: If ingestion is interrupted mid-bootstrap, sync_state.cursor_value remains unchanged from previous committed state."""
+        """Assertion 1.1: If ingestion is interrupted mid-sync, sync_state.cursor_value remains unchanged from previous committed state.
+
+        (P1-02 review: NVD cursors are now structured positional windows, so
+        the outage cursor is a valid window — the intent is unchanged: a
+        fetch outage fails the run and leaves the cursor untouched.)"""
         with get_db_connection() as conn:
-            update_sync_state(conn, "nvd", cursor_value="stable-v1", success=True)
+            update_sync_state(conn, "nvd", cursor_value="2026-09-01T00:00:00.000", success=True)
             conn.commit()
 
             # Create adapter that fails on fetch during bootstrap
@@ -152,7 +156,7 @@ class TestDeliverable1BoundedBootstrapExhaustion:
             assert outcome.success is False
 
             state = get_sync_state(conn, "nvd")
-            assert state.cursor_value == "stable-v1"
+            assert state.cursor_value == "2026-09-01T00:00:00.000"
 
     def test_assertion_1_2_bounded_bootstrap_batches(self):
         """Assertion 1.2: Bounded bootstrap fetches ingest at most batch_size records per cycle."""
@@ -214,21 +218,29 @@ class TestDeliverable1BoundedBootstrapExhaustion:
             assert state2.cursor_value == "target-sha"
 
     def test_assertion_1_5_and_1_6_cursor_promotion_on_exhaustion(self):
-        """Assertions 1.5 & 1.6: sync_state stores continuation cursor while is_exhausted=False, and promotes incremental cursor when is_exhausted=True."""
+        """Assertions 1.5 & 1.6: sync_state stores continuation cursor while
+        is_exhausted=False, and promotes incremental cursor when
+        is_exhausted=True.
+
+        P1-02: uses the non-atomic `cve` source. Atomic-artifact sources
+        (kev/epss) now drain the whole artifact inside ONE run/snapshot and
+        never persist intermediate continuation cursors (single-batch
+        per-run behavior for them is asserted in the P1-02 suite).
+        """
         c1 = json.dumps({"phase": "bootstrap", "offset": 100})
         b1 = FetchResult(records=[{"cve_id": "CVE-2026-0003"}], cursor_after=c1, is_bootstrap=True, is_exhausted=False)
         b2 = FetchResult(records=[{"cve_id": "CVE-2026-0004"}], cursor_after="final-incremental-cursor", is_bootstrap=True, is_exhausted=True)
-        adapter = MockMultiBatchAdapter("kev", [b1, b2])
+        adapter = MockMultiBatchAdapter("cve", [b1, b2])
 
         with get_db_connection() as conn:
-            update_sync_state(conn, "kev", cursor_value=None, success=True)
+            update_sync_state(conn, "cve", cursor_value=None, success=True)
             conn.commit()
 
             sync_source(conn, adapter)
-            assert get_sync_state(conn, "kev").cursor_value == c1
+            assert get_sync_state(conn, "cve").cursor_value == c1
 
             sync_source(conn, adapter)
-            assert get_sync_state(conn, "kev").cursor_value == "final-incremental-cursor"
+            assert get_sync_state(conn, "cve").cursor_value == "final-incremental-cursor"
 
     def test_assertion_1_7_intermediate_batch_failure_rolls_back_and_freezes_cursor(self):
         """Assertion 1.7: Intermediate batch failures roll back record writes in that batch and leave continuation cursor byte-for-byte unchanged."""
@@ -311,11 +323,13 @@ class TestDeliverable2FullSnapshotAbsenceAndReactivation:
 
             class KevMockAdapter:
                 source_name = "kev"
-                def __init__(self):
-                    self.batches = [b1, b2]
+                def __init__(self, batches):
+                    self.batches = list(batches)
                     self.idx = 0
                 def fetch(self, conn, cursor, **kw):
-                    res = self.batches[self.idx]
+                    # Resume via the engine's in-memory continuation cursor:
+                    # each round pops the next batch in sequence.
+                    res = self.batches[self.idx] if self.idx < len(self.batches) else FetchResult(records=[], cursor_after=cursor, is_exhausted=True)
                     self.idx += 1
                     return res
                 def validate_batch(self, records): return True, None
@@ -324,18 +338,13 @@ class TestDeliverable2FullSnapshotAbsenceAndReactivation:
                     res = process_kev_entry(conn, record, snapshot_id=snapshot_id)
                     return True, res.is_new_revision, None
 
-            adapter = KevMockAdapter()
-            # Run Batch 1
-            out1 = sync_source(conn, adapter)
-            assert out1.success is True
-            # All 5 MUST still be active after batch 1!
-            for i in range(1, 6):
-                assert get_kev_entry(conn, f"CVE-2026-100{i}").is_active is True
-
-            # Run Batch 2 (Exhaustion)
+            adapter = KevMockAdapter([b1, b2])
+            # P1-02: kev is an atomic-artifact source — ONE run drains b1+b2
+            # inside one shared snapshot; absence reconciliation executes
+            # exactly once, at artifact exhaustion (end of the same run).
             with patch("app.vuln_intelligence.sync_engine.reconcile_full_snapshot_absence", wraps=reconcile_full_snapshot_absence) as spy_reconcile:
-                out2 = sync_source(conn, adapter)
-                assert out2.success is True
+                out1 = sync_source(conn, adapter)
+                assert out1.success is True
                 spy_reconcile.assert_called_once()
 
             # Now CVE-2026-1001..1004 are active, CVE-2026-1005 MUST be inactive and have withdrawn_at set!
@@ -344,6 +353,25 @@ class TestDeliverable2FullSnapshotAbsenceAndReactivation:
             k5 = get_kev_entry(conn, "CVE-2026-1005")
             assert k5.is_active is False
             assert k5.withdrawn_at is not None
+
+            # P1-02: a NON-exhausted artifact never reconciles — a partial
+            # catalog with missing ids must not withdraw anything.
+            partial = FetchResult(
+                records=[
+                    {"cveID": "CVE-2026-1001", "vendorProject": "V", "product": "P", "vulnerabilityName": "N", "dateAdded": "2026-09-01"},
+                ],
+                cursor_after=json.dumps({"phase": "bootstrap", "entry_offset": 1}),
+                is_bootstrap=True,
+                is_exhausted=False,
+                seen_ids=["CVE-2026-1001"],
+            )
+            partial_adapter = KevMockAdapter([partial])
+            with patch("app.vuln_intelligence.sync_engine.reconcile_full_snapshot_absence", wraps=reconcile_full_snapshot_absence) as spy_no_reconcile:
+                out2 = sync_source(conn, partial_adapter)
+                assert out2.success is True
+                spy_no_reconcile.assert_not_called()
+            assert get_kev_entry(conn, "CVE-2026-1002").is_active is True
+            assert get_kev_entry(conn, "CVE-2026-1005").is_active is False  # unchanged from the earlier full-snapshot reconcile
 
     def test_assertion_2_3_inactive_kev_omitted_from_read_queries(self):
         """Assertion 2.3: Inactive KEV entries are omitted from list_cves, search_vulnerabilities, and get_composed_cve_detail."""

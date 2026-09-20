@@ -1,0 +1,21 @@
+TEMPRIS COLLECTOR — NMAP AND NPCAP EXTERNAL PREREQUISITE NOTICE
+
+1. External Prerequisite Boundary:
+   Nmap and Npcap are external operator/customer prerequisites only.
+   Tempris does NOT bundle, host, download, provision, update, redistribute,
+   or accept Nmap or Npcap as signed managed-manifest or offline artifact components.
+
+2. Licensing and Distribution Policy:
+   Tempris does NOT hold an OEM redistribution license for Nmap or Npcap.
+   Consequently, no Nmap or Npcap binary, installer, or driver is bundled in
+   any Tempris package, hosted update repository, or release artifact.
+
+3. Customer / Operator Responsibility:
+   Customers and system operators who wish to use network discovery or port scanning
+   features must obtain, license, and install official copies of Nmap and Npcap directly
+   from their official distributors (https://nmap.org and https://npcap.com).
+
+4. Tempris Integration:
+   Tempris Collector only discovers and validates existing, locally installed
+   Nmap and Npcap installations on the host. Tempris will never automatically
+   download, install, or update Nmap or Npcap.

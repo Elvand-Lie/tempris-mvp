@@ -179,3 +179,36 @@ async def test_terminate_tenant_sessions_awaitable_close_proves_completion_befor
     assert terminated == [col_id]
     assert close_completed is True
     assert registry.get_session(col_id) is None
+
+
+@pytest.mark.asyncio
+async def test_collector_version_captured_from_scout_capabilities():
+    """Test that collector_version in SCOUT_CAPABILITIES is captured and sanitized onto the session."""
+    import json
+    registry = CollectorRegistry()
+    col_id = uuid.uuid4()
+    ws_mock = AsyncMock()
+
+    # Simulate incoming message frames
+    incoming = [
+        json.dumps({
+            "type": "SCOUT_CAPABILITIES",
+            "capabilities": {
+                "nmap": {"available": True, "version": "7.94"},
+                "nuclei": {"available": False},
+                "collector_version": "0.3.0",
+            }
+        }),
+        json.dumps({"type": "HEARTBEAT", "timestamp": "2026-09-05T12:00:00Z"}),
+    ]
+    ws_mock.receive_text.side_effect = incoming
+
+    session = registry.register_session(collector_id=col_id, tenant_id=TENANT_A, websocket=ws_mock)
+
+    # Intercepted receive_text should swallow SCOUT_CAPABILITIES, populate version, and return HEARTBEAT
+    received = await ws_mock.receive_text()
+    assert json.loads(received)["type"] == "HEARTBEAT"
+    assert session.collector_version == "0.3.0"
+    assert registry.get_collector_version(col_id) == "0.3.0"
+    assert session.capabilities["nmap"]["available"] is True
+

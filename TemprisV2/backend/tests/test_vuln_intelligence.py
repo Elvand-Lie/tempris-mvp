@@ -37,6 +37,8 @@ from app.vuln_intelligence.models import (
     SourceRecord,
     SyncSnapshot,
     SyncState,
+    CVSS_AUTHORITY_AMBIGUOUS,
+    CVSS_MISSING_CVE,
     validate_cve_id,
 )
 from app.vuln_intelligence.repository import (
@@ -48,7 +50,7 @@ from app.vuln_intelligence.repository import (
     get_source_record_revisions,
     upsert_cvss_assessment,
     get_cvss_assessments,
-    resolve_tes_cvss,
+    resolve_cvss_authority,
     upsert_cve_relationship,
     get_cve_relationships,
     upsert_cve_affected,
@@ -482,7 +484,7 @@ class TestTesResolver:
             ))
             upsert_cvss_assessment(conn, CvssAssessment(
                 cve_id="CVE-2024-1234", source="cve",
-                assessor="example-cna", cvss_version="3.1",
+                assessor="example-cna", cvss_version="3.1", container_role="cna",
                 vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
                 base_score=Decimal("9.8"), base_severity="CRITICAL",
                 scenario="GENERAL",
@@ -490,18 +492,18 @@ class TestTesResolver:
             # Also add NVD — should be ignored when CNA exists
             upsert_cvss_assessment(conn, CvssAssessment(
                 cve_id="CVE-2024-1234", source="nvd",
-                assessor="nvd@nist.gov", cvss_version="3.1",
+                assessor="nvd@nist.gov", cvss_version="3.1", container_role="nvd",
                 vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
                 base_score=Decimal("9.1"), base_severity="CRITICAL",
                 scenario="GENERAL",
             ))
             conn.commit()
 
-            res = resolve_tes_cvss(conn, "CVE-2024-1234")
-            assert res.resolution_tier == "cna"
-            assert res.resolved_score == Decimal("9.8")
-            assert res.resolved_assessor == "example-cna"
-            assert res.unscoreable_reason is None
+            res = resolve_cvss_authority(conn, "CVE-2024-1234")
+            assert res.role == "cna"
+            assert res.score == Decimal("9.8")
+            assert res.assessor == "example-cna"
+            assert res.reason_code is None
 
     def test_tier2_nvd_fallback(self):
         """When no CNA CVSS 3.1 but NVD has one → use NVD."""
@@ -514,20 +516,22 @@ class TestTesResolver:
             # Only NVD assessment (no CNA 3.1)
             upsert_cvss_assessment(conn, CvssAssessment(
                 cve_id="CVE-2024-1234", source="nvd",
-                assessor="nvd@nist.gov", cvss_version="3.1",
+                assessor="nvd@nist.gov", cvss_version="3.1", container_role="nvd",
                 vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
                 base_score=Decimal("9.1"), base_severity="CRITICAL",
                 scenario="GENERAL",
             ))
             conn.commit()
 
-            res = resolve_tes_cvss(conn, "CVE-2024-1234")
-            assert res.resolution_tier == "nvd"
-            assert res.resolved_score == Decimal("9.1")
-            assert res.resolved_assessor == "nvd@nist.gov"
+            res = resolve_cvss_authority(conn, "CVE-2024-1234")
+            assert res.role == "nvd"
+            assert res.score == Decimal("9.1")
+            assert res.assessor == "nvd@nist.gov"
 
     def test_unscoreable_no_31(self):
-        """Only CVSS 4.0 available → unscoreable (no version conversion)."""
+        """Only CVSS 4.0 available → 4.0 is the newest generation and IS
+        authoritative under the P0-03 §3.5 #2 ordering (no version conversion
+        ever occurs; the pre-PRD 3.1-only pin is gone)."""
         with get_db_connection() as conn:
             upsert_canonical_vulnerability(conn, CanonicalVulnerability(
                 cve_id="CVE-2024-5678", state="PUBLISHED",
@@ -537,16 +541,18 @@ class TestTesResolver:
             upsert_cvss_assessment(conn, CvssAssessment(
                 cve_id="CVE-2024-5678", source="cve",
                 assessor="multi-cvss-cna", cvss_version="4.0",
+                container_role="cna",
                 vector_string="CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:P/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
                 base_score=Decimal("8.3"), base_severity="HIGH",
                 scenario="GENERAL",
             ))
             conn.commit()
 
-            res = resolve_tes_cvss(conn, "CVE-2024-5678")
-            assert res.unscoreable_reason is not None
-            assert res.resolved_score is None
-            assert res.resolution_tier is None
+            res = resolve_cvss_authority(conn, "CVE-2024-5678")
+            assert res.reason_code is None
+            assert res.score == Decimal("8.3")
+            assert res.version == "4.0"
+            assert res.role == "cna"
 
     def test_unscoreable_ambiguous_cna(self):
         """Two CNA CVSS 3.1 assessments → ambiguous → unscoreable."""
@@ -585,30 +591,33 @@ class TestTesResolver:
             # Assessor matches via org_id
             upsert_cvss_assessment(conn, CvssAssessment(
                 cve_id="CVE-2024-1234", source="cve",
-                assessor="example-cna-org", cvss_version="3.1",
+                assessor="example-cna-org", cvss_version="3.1", container_role="cna",
                 vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
                 base_score=Decimal("9.8"), scenario="GENERAL",
             ))
             # Assessor matches via short_name
             upsert_cvss_assessment(conn, CvssAssessment(
                 cve_id="CVE-2024-1234", source="cve",
-                assessor="example-cna", cvss_version="3.1",
+                assessor="example-cna", cvss_version="3.1", container_role="cna",
                 vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
                 base_score=Decimal("8.8"), scenario="GENERAL",
             ))
             conn.commit()
 
-            res = resolve_tes_cvss(conn, "CVE-2024-1234")
-            assert res.unscoreable_reason is not None
-            assert "Ambiguous" in res.unscoreable_reason
+            res = resolve_cvss_authority(conn, "CVE-2024-1234")
+            assert res.reason_code == CVSS_AUTHORITY_AMBIGUOUS
+            assert res.score is None
+            assert res.ambiguous_rows is not None and len(res.ambiguous_rows) == 2
 
-    def test_unscoreable_cve_not_found(self):
+    def test_missing_cve_reason_code(self):
         with get_db_connection() as conn:
-            res = resolve_tes_cvss(conn, "CVE-9999-0001")
-            assert res.unscoreable_reason == "CVE not found"
+            res = resolve_cvss_authority(conn, "CVE-9999-0001")
+            assert res.reason_code == CVSS_MISSING_CVE
+            assert res.score is None
 
-    def test_cvss_20_30_not_used_for_tes(self):
-        """CVSS 2.0 and 3.0 are available evidence but NOT TES inputs."""
+    def test_cvss_20_30_lowest_generations(self):
+        """CVSS 2.0 and 3.0 are lower-priority generations: they are used only
+        when nothing newer exists (PRD v1.8 §3.5 #2 ordering)."""
         with get_db_connection() as conn:
             upsert_canonical_vulnerability(conn, CanonicalVulnerability(
                 cve_id="CVE-2024-1234", state="PUBLISHED",
@@ -618,21 +627,23 @@ class TestTesResolver:
             # Only CVSS 2.0 and 3.0 — no 3.1
             upsert_cvss_assessment(conn, CvssAssessment(
                 cve_id="CVE-2024-1234", source="nvd",
-                assessor="nvd@nist.gov", cvss_version="2.0",
+                assessor="nvd@nist.gov", cvss_version="2.0", container_role="nvd",
                 vector_string="AV:N/AC:L/Au:N/C:C/I:C/A:N",
                 base_score=Decimal("9.4"), scenario="GENERAL",
             ))
             upsert_cvss_assessment(conn, CvssAssessment(
                 cve_id="CVE-2024-1234", source="nvd",
-                assessor="nvd@nist.gov", cvss_version="3.0",
+                assessor="nvd@nist.gov", cvss_version="3.0", container_role="nvd",
                 vector_string="CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
                 base_score=Decimal("9.1"), scenario="GENERAL",
             ))
             conn.commit()
 
-            res = resolve_tes_cvss(conn, "CVE-2024-1234")
-            assert res.unscoreable_reason is not None
-            assert res.resolved_score is None
+            res = resolve_cvss_authority(conn, "CVE-2024-1234")
+            assert res.version == "3.0"
+            assert res.role == "nvd"
+            assert res.score == Decimal("9.1")
+            assert res.reason_code is None
 
 
 # ===========================================================================

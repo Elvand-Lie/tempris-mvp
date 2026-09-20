@@ -139,4 +139,48 @@ describe('Frontend API & Token Storage', () => {
       status: 404,
     });
   });
+
+  it('launchScoutJob submits only the existing Asset ID and fixed profile', async () => {
+    sessionStorage.setItem(SESSION_STORAGE_KEY, 'valid_bearer_token_123');
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ id: 'job-1' }),
+    });
+
+    await api.launchScoutJob('asset-1', 'SERVICE_DISCOVERY');
+
+    const [url, options] = vi.mocked(global.fetch).mock.calls[0];
+    expect(url).toContain('/api/scout/jobs');
+    expect(options).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ asset_id: 'asset-1', profile: 'SERVICE_DISCOVERY' }),
+    });
+  });
+
+  it('api.checkCollectorUpdate sends POST request to /api/v1/collectors/:id/check-update', async () => {
+    sessionStorage.setItem(SESSION_STORAGE_KEY, 'valid_bearer_token_123');
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        status: 'checking',
+        collector_id: 'c1111111-1111-1111-1111-111111111111',
+        message: 'Toolchain update check dispatched successfully',
+      }),
+    });
+
+    const collectorId = 'c1111111-1111-1111-1111-111111111111';
+    const res = await api.checkCollectorUpdate(collectorId);
+
+    expect(res.status).toBe('checking');
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining(`/api/v1/collectors/${collectorId}/check-update`),
+      expect.objectContaining({
+        method: 'POST',
+      })
+    );
+  });
 });

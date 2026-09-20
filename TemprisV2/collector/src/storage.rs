@@ -265,6 +265,47 @@ pub mod win_file {
             if ret2 != 0 {
                 return Ok(());
             }
+
+            // Fallback for executable files that may be open/locked by a running process:
+            // On Windows NTFS, an open or executing file can be renamed to another name on the same volume,
+            // freeing the original path for replacement.
+            let old_target =
+                target.with_extension(format!("old.{}", &uuid::Uuid::new_v4().to_string()[..8]));
+            let old_target_wide: Vec<u16> = old_target
+                .as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
+            let ret3 = unsafe {
+                MoveFileExW(
+                    target_wide.as_ptr(),
+                    old_target_wide.as_ptr(),
+                    MOVEFILE_WRITE_THROUGH,
+                )
+            };
+            if ret3 != 0 {
+                let ret4 = unsafe {
+                    MoveFileExW(
+                        tmp_wide.as_ptr(),
+                        target_wide.as_ptr(),
+                        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+                    )
+                };
+                if ret4 != 0 {
+                    let _ = std::fs::remove_file(&old_target);
+                    return Ok(());
+                } else {
+                    // Roll back rename if moving tmp to target failed
+                    unsafe {
+                        MoveFileExW(
+                            old_target_wide.as_ptr(),
+                            target_wide.as_ptr(),
+                            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+                        );
+                    }
+                }
+            }
+
             Err(std::io::Error::last_os_error())
         } else {
             let ret = unsafe {
@@ -465,6 +506,8 @@ pub enum StorageError {
     NotFound,
     #[error("Corrupt state JSON: {0}")]
     CorruptStateJson(String),
+    #[error("Corrupt toolchain state JSON: {0}")]
+    CorruptToolchainState(String),
     #[error("Missing or corrupt protected identity blob: {0}")]
     CorruptProtectedIdentity(String),
     #[error("DPAPI encryption/decryption error: {0}")]
@@ -477,6 +520,32 @@ pub enum StorageError {
     MigrationError(String),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+/// Applies Observer Tier DACL (SYSTEM, Admins Full Access; Users Read & Execute).
+pub fn apply_observer_tier_dacl(path: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        win_sec::apply_observer_tier_dacl(path)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+/// Applies Secret Tier DACL (SYSTEM and Administrators full access only; NO OWNER access).
+pub fn apply_secret_tier_dacl(path: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        win_sec::apply_secret_tier_dacl(path)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Ok(())
+    }
 }
 
 /// Atomically writes data to `target_path` via a temporary file, sync, and atomic replacement.
@@ -577,12 +646,28 @@ impl StorageManager {
         self.base_dir.join("staging")
     }
 
+    pub fn tools_dir(&self) -> PathBuf {
+        self.base_dir.join("tools")
+    }
+
+    pub fn component_tools_dir(&self, component: &str, version: &str) -> PathBuf {
+        self.tools_dir().join(component).join(version)
+    }
+
+    pub fn staging_component_dir(&self, component: &str, uuid: &str) -> PathBuf {
+        self.staging_dir().join(format!("{}_{}", component, uuid))
+    }
+
     pub fn bin_dir(&self) -> PathBuf {
         self.base_dir.join("bin")
     }
 
     pub fn state_path(&self) -> PathBuf {
         self.base_dir.join("state.json")
+    }
+
+    pub fn toolchain_state_path(&self) -> PathBuf {
+        self.base_dir.join("toolchain-state.json")
     }
 
     pub fn identity_path(&self) -> PathBuf {
@@ -885,7 +970,7 @@ impl StorageManager {
             server_url,
             public_key: derived_pub,
             enrolled_at,
-            collector_version: "0.2.0".to_string(),
+            collector_version: env!("CARGO_PKG_VERSION").to_string(),
         };
 
         // Save V0.2 state and machine-scoped identity

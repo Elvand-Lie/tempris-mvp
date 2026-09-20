@@ -155,7 +155,7 @@ export const CollectorsTable: React.FC<CollectorsTableProps> = ({
                       <span className="asset-name">{col.name}</span>
                       {col.description && <span className="asset-type-badge">{col.description}</span>}
                       <span className="collector-id-subtext" title={col.id}>
-                        ID: {col.id.slice(0, 8)}...
+                        ID: {col.id.slice(0, 8)}...{col.version ? ` · v${col.version}` : ''}
                       </span>
                     </div>
                   </td>

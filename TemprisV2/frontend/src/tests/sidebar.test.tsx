@@ -10,12 +10,14 @@ describe('Sidebar and module fallback', () => {
     );
     expect(screen.getByRole('button', { name: 'Assets Console' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Collectors Console' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'SCOUT' })).toBeInTheDocument();
 
     rerender(
       <Sidebar activeTab="assets" onTabChange={vi.fn()} effectiveModules={[]} currentRole="analyst" />
     );
     expect(screen.queryByRole('button', { name: 'Assets Console' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Collectors Console' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'SCOUT' })).not.toBeInTheDocument();
   });
 
   it('gates Organization by role independently of module entitlement', () => {

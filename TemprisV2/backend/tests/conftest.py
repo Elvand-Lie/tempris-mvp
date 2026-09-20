@@ -160,8 +160,32 @@ def clean_database():
     def _do_clean():
         with get_db_connection() as conn:
             with conn.cursor() as cur:
+                # P0-06 SSS history is DB-enforced immutable (migration 019:
+                # UPDATE/DELETE rejected, composite FKs RESTRICT findings), so
+                # the findings DELETE below cannot see the referenced rows
+                # removed per-tenant any other way. TRUNCATE clears the whole
+                # table without firing row triggers (test DB only).
+                # P0-06/P0-08 (019/021/022): SSS history is DB-enforced
+                # immutable and derivations/override-bindings/attestations all
+                # FK-reference chapter5_approvals, whose own trigger forbids
+                # DELETE and whose audit is FK-pinned to it — the whole cluster
+                # must be cleared in one atomic TRUNCATE statement (test DB
+                # only; TRUNCATE does not fire row triggers).
+                cur.execute(
+                    "TRUNCATE non_cve_sss_proposals, non_cve_sss_derivations, "
+                    "non_cve_classifications, non_cve_sss_override_proposals, "
+                    "chapter5_approvals, chapter5_approval_audit, "
+                    "exposure_non_exploitation_attestations;"
+                )
+                cur.execute("TRUNCATE identity_boundary_audit, tenant_identity_boundary;")
                 cur.execute("DELETE FROM audit_events WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
+                cur.execute("DELETE FROM scout_observations WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
+                cur.execute("DELETE FROM scout_tool_runs WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
+                cur.execute("DELETE FROM scout_jobs WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
                 cur.execute("DELETE FROM asset_scan_authorizations WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
+                cur.execute("DELETE FROM exposure_exploitation_evidence WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
+                cur.execute("DELETE FROM exposure_business_impact WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
+                cur.execute("DELETE FROM exposure_reachability_evidence WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
                 cur.execute("DELETE FROM asset_exposures WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
                 cur.execute("DELETE FROM asset_applicability_reviews WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
                 cur.execute("DELETE FROM findings WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))

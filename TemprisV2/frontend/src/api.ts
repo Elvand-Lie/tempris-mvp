@@ -25,13 +25,19 @@ import {
   EntitlementUpdatePayload,
   PendingUser,
   CatalogueData,
+  ScoutJob,
+  ScoutObservation,
+  ScoutProfile,
+  ScoutReadiness,
 } from './types';
 
 const AUTH_API_BASE = new URL('api/auth', document.baseURI).pathname;
 const ASSETS_API_BASE = new URL('api/assets', document.baseURI).pathname;
 const COLLECTORS_API_BASE = new URL('api/collectors', document.baseURI).pathname;
+const COLLECTORS_V1_API_BASE = new URL('api/v1/collectors', document.baseURI).pathname;
 const ORG_API_BASE = new URL('api/org', document.baseURI).pathname;
 const PLATFORM_API_BASE = new URL('api/platform', document.baseURI).pathname;
+const SCOUT_API_BASE = new URL('api/scout', document.baseURI).pathname;
 export const SESSION_STORAGE_KEY = 'tempris_bearer_token';
 export const AUTH_UNAUTHORIZED_EVENT = 'tempris:auth_unauthorized';
 
@@ -290,6 +296,21 @@ export const api = {
     });
   },
 
+  getScoutReadiness: (): Promise<ScoutReadiness> => request<ScoutReadiness>(`${SCOUT_API_BASE}/readiness`),
+
+  getScoutJobs: (): Promise<ScoutJob[]> => request<ScoutJob[]>(`${SCOUT_API_BASE}/jobs?limit=50`),
+
+  getScoutJob: (id: string): Promise<ScoutJob> => request<ScoutJob>(`${SCOUT_API_BASE}/jobs/${id}`),
+
+  getScoutObservations: (id: string): Promise<ScoutObservation[]> =>
+    request<ScoutObservation[]>(`${SCOUT_API_BASE}/jobs/${id}/observations`),
+
+  launchScoutJob: (assetId: string, profile: ScoutProfile): Promise<ScoutJob> =>
+    request<ScoutJob>(`${SCOUT_API_BASE}/jobs`, {
+      method: 'POST',
+      body: JSON.stringify({ asset_id: assetId, profile }),
+    }),
+
   // Collector endpoints
   getCollectors: (): Promise<Collector[]> => {
     return request<Collector[]>(COLLECTORS_API_BASE);
@@ -340,6 +361,15 @@ export const api = {
     return request<void>(`${COLLECTORS_API_BASE}/${id}`, {
       method: 'DELETE',
     });
+  },
+
+  checkCollectorUpdate: (id: string): Promise<{ status: string; collector_id: string; message: string }> => {
+    return request<{ status: string; collector_id: string; message: string }>(
+      `${COLLECTORS_V1_API_BASE}/${id}/check-update`,
+      {
+        method: 'POST',
+      }
+    );
   },
 
   // Organization endpoints

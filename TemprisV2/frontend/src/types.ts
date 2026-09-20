@@ -8,7 +8,95 @@ export type AssetStatus = 'active' | 'decommissioned';
 export type ReachabilityStatus = 'unverified' | 'verified' | 'unreachable';
 export type AuthorizationStatus = 'pending' | 'approved' | 'revoked' | 'expired';
 export type UserRole = 'analyst' | 'admin' | 'superadmin';
-export type ActiveTab = 'assets' | 'collectors' | 'org';
+export type ActiveTab = 'assets' | 'collectors' | 'scout' | 'org';
+
+export type ScoutProfile = 'SERVICE_DISCOVERY' | 'VULNERABILITY_ASSESSMENT';
+
+export interface ScoutEngineReadiness {
+  engine: 'nmap' | 'nuclei';
+  state: string;
+  engine_version: string | null;
+  templates_version: string | null;
+}
+
+export interface ScoutCollectorCapability {
+  available: boolean;
+  version: string | null;
+  templates_version?: string | null;
+  status?: string | null;
+  prerequisite_health?: string | null;
+  path?: string | null;
+}
+
+export interface ScoutCollectorReadinessItem {
+  id: string;
+  name: string;
+  enrollment_status: CollectorEnrollmentStatus;
+  operator_status: CollectorOperatorStatus;
+  connected: boolean;
+  version?: string | null;
+  capabilities: {
+    nmap: ScoutCollectorCapability;
+    nuclei: ScoutCollectorCapability;
+  };
+}
+
+export interface ScoutReadiness {
+  engines: ScoutEngineReadiness[];
+  profiles: Record<ScoutProfile, { state: 'ready' | 'blocked'; blockers: string[] }>;
+  collector: { state: string; total: number; connected: number; message: string };
+  collectors_summary?: {
+    total: number;
+    connected: number;
+    active: number;
+    capable: number;
+  };
+  collectors?: ScoutCollectorReadinessItem[];
+}
+
+export interface ScoutSourceHealth extends ScoutEngineReadiness {
+  ordinal: number;
+  exit_code: number | null;
+  stdout_bytes: number;
+  stderr_bytes: number;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface ScoutJob {
+  id: string;
+  asset_id: string;
+  authorization_id: string;
+  profile: ScoutProfile;
+  route?: 'CENTRAL_PUBLIC' | 'COLLECTOR_INTERNAL';
+  collector_id?: string | null;
+  target_type: TargetType;
+  normalized_target: string;
+  network_scope: NetworkScope;
+  status: string;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  source_health: ScoutSourceHealth[];
+}
+
+export interface ScoutObservation {
+  id: string;
+  job_id: string;
+  tool_run_id: string;
+  scanner: 'nmap' | 'nuclei';
+  kind: 'service' | 'template_match';
+  evidence: Record<string, any>;
+  created_at: string;
+  normalized_exposure: null | {
+    exposure_id: string;
+    finding_id: string;
+    canonical_cve_id: string;
+    status: string;
+  };
+}
 
 export type CollectorEnrollmentStatus = 'awaiting_enrollment' | 'enrolled';
 export type CollectorOperatorStatus = 'active' | 'paused' | 'quarantined' | 'revoked';
@@ -27,6 +115,29 @@ export interface PlatformMetadata {
   hostname?: string;
   architecture?: string;
   [key: string]: any;
+}
+
+export interface EngineCapability {
+  available: boolean;
+  version?: string | null;
+  templates_version?: string | null;
+  managed?: boolean | null;
+  status?: string | null;
+  integrity_status?: string | null;
+  path?: string | null;
+  last_checked_at?: string | null;
+  prerequisite_health?: string | null;
+}
+
+export interface CollectorCapabilities {
+  nmap?: EngineCapability | null;
+  nuclei?: EngineCapability | null;
+  nuclei_templates?: EngineCapability | null;
+  collector_version?: string | null;
+  manifest_sequence?: number | null;
+  channel?: string | null;
+  update_status?: 'up_to_date' | 'checking' | 'updating' | 'error' | string | null;
+  last_checked_at?: string | null;
 }
 
 export interface Collector {
@@ -48,6 +159,7 @@ export interface Collector {
   enrolled_at?: string | null;
   revoked_at?: string | null;
   server_url?: string | null;
+  capabilities?: CollectorCapabilities | null;
   created_at: string;
   updated_at: string;
 }

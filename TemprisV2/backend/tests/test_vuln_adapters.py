@@ -55,7 +55,7 @@ from app.vuln_intelligence.repository import (
     get_osv_records_by_cve,
     get_current_source_record,
     get_source_record_revisions,
-    resolve_tes_cvss,
+    resolve_cvss_authority,
     create_sync_snapshot,
     upsert_canonical_vulnerability,
     upsert_cvss_assessment,
@@ -689,10 +689,11 @@ class TestOsvAdapter:
 # ===========================================================================
 
 class TestTesResolverExactMatch:
-    """TES resolver uses exact CNA/NVD matching — no substring inference."""
+    """Resolver (P0-03: resolve_cvss_authority via the deprecated alias) uses
+    exact structural CNA/NVD/ADP roles — no substring inference."""
 
     def test_tier1_exact_cna_org_id_match(self):
-        """CNA matched by exact assigner_org_id."""
+        """CNA matched by structural container_role='cna'."""
         with get_db_connection() as conn:
             upsert_canonical_vulnerability(conn, CanonicalVulnerability(
                 cve_id="CVE-2024-1234", state="PUBLISHED",
@@ -702,17 +703,18 @@ class TestTesResolverExactMatch:
             upsert_cvss_assessment(conn, CvssAssessment(
                 cve_id="CVE-2024-1234", source="cve",
                 assessor="f0f0f0f0-f0f0-f0f0-f0f0-f0f0f0f0f0f0",
+                container_role="cna",
                 cvss_version="3.1",
                 vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
                 base_score=Decimal("9.8"), scenario="GENERAL",
             ))
             conn.commit()
-            res = resolve_tes_cvss(conn, "CVE-2024-1234")
-            assert res.resolution_tier == "cna"
-            assert res.resolved_score == Decimal("9.8")
+            res = resolve_cvss_authority(conn, "CVE-2024-1234")
+            assert res.role == "cna"
+            assert res.score == Decimal("9.8")
 
     def test_tier1_exact_cna_short_name_match(self):
-        """CNA matched by exact assigner_short_name."""
+        """CNA matched by structural container_role='cna'."""
         with get_db_connection() as conn:
             upsert_canonical_vulnerability(conn, CanonicalVulnerability(
                 cve_id="CVE-2024-1234", state="PUBLISHED",
@@ -722,16 +724,20 @@ class TestTesResolverExactMatch:
             upsert_cvss_assessment(conn, CvssAssessment(
                 cve_id="CVE-2024-1234", source="cve",
                 assessor="example-cna",
+                container_role="cna",
                 cvss_version="3.1",
                 vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
                 base_score=Decimal("9.8"), scenario="GENERAL",
             ))
             conn.commit()
-            res = resolve_tes_cvss(conn, "CVE-2024-1234")
-            assert res.resolution_tier == "cna"
+            res = resolve_cvss_authority(conn, "CVE-2024-1234")
+            assert res.role == "cna"
 
     def test_no_substring_matching(self):
-        """Correction 1: ADP assessment with container_role='adp' must NOT match CNA tier."""
+        """ADP assessment with a CNA-like assessor string must NOT match the
+        CNA tier — authority comes from structural container_role only. Under
+        the P0-03 ordering an ADP-only CVE still resolves through the ADP role
+        (the last role in the ladder), never by string inference to 'cna'."""
         with get_db_connection() as conn:
             upsert_canonical_vulnerability(conn, CanonicalVulnerability(
                 cve_id="CVE-2024-1234", state="PUBLISHED",
@@ -749,11 +755,11 @@ class TestTesResolverExactMatch:
                 base_score=Decimal("9.8"), scenario="GENERAL",
             ))
             conn.commit()
-            res = resolve_tes_cvss(conn, "CVE-2024-1234")
-            # Should NOT match CNA tier
-            assert res.resolution_tier != "cna"
-            # Should be unscoreable (no NVD either)
-            assert res.unscoreable_reason is not None
+            res = resolve_cvss_authority(conn, "CVE-2024-1234")
+            # Should NOT match CNA tier — the structural role is adp.
+            assert res.role != "cna"
+            assert res.role == "adp"
+            assert res.score == Decimal("9.8")
 
     def test_tier2_exact_nvd_match(self):
         """NVD tier matches exact container_role='nvd' assessor."""
@@ -772,9 +778,9 @@ class TestTesResolverExactMatch:
                 base_score=Decimal("9.1"), scenario="GENERAL",
             ))
             conn.commit()
-            res = resolve_tes_cvss(conn, "CVE-2024-1234")
-            assert res.resolution_tier == "nvd"
-            assert res.resolved_score == Decimal("9.1")
+            res = resolve_cvss_authority(conn, "CVE-2024-1234")
+            assert res.role == "nvd"
+            assert res.score == Decimal("9.1")
 
     def test_nvd_substring_not_matched(self):
         """Non-NVD assessment containing 'nvd' in assessor must NOT match NVD tier."""
@@ -794,28 +800,31 @@ class TestTesResolverExactMatch:
                 base_score=Decimal("9.1"), scenario="GENERAL",
             ))
             conn.commit()
-            res = resolve_tes_cvss(conn, "CVE-2024-1234")
-            assert res.resolution_tier is None
-            assert res.unscoreable_reason is not None
+            res = resolve_cvss_authority(conn, "CVE-2024-1234")
+            # "custom-nvd-assessor" must NOT match the NVD role by substring;
+            # the structural role is adp, which is what resolution reports.
+            assert res.role != "nvd"
+            assert res.role == "adp"
 
     def test_fail_closed_no_eligible(self):
-        """No eligible CVSS 3.1 GENERAL → unscoreable."""
+        """Only CVSS 4.0 present → 4.0 now wins as the newest generation."""
         with get_db_connection() as conn:
             upsert_canonical_vulnerability(conn, CanonicalVulnerability(
                 cve_id="CVE-2024-1234", state="PUBLISHED",
                 assigner_org_id="org", assigner_short_name="cna",
             ))
-            # Only CVSS 4.0
+            # Only CVSS 4.0 — under the P0-03 §3.5 #2 ordering this IS the
+            # authoritative generation (no 3.1 pin anymore).
             upsert_cvss_assessment(conn, CvssAssessment(
                 cve_id="CVE-2024-1234", source="cve",
-                assessor="cna", cvss_version="4.0",
+                assessor="cna", cvss_version="4.0", container_role="cna",
                 vector_string="CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:P/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
                 base_score=Decimal("8.3"), scenario="GENERAL",
             ))
             conn.commit()
-            res = resolve_tes_cvss(conn, "CVE-2024-1234")
-            assert res.resolved_score is None
-            assert res.unscoreable_reason is not None
+            res = resolve_cvss_authority(conn, "CVE-2024-1234")
+            assert res.score == Decimal("8.3")
+            assert res.role == "cna"
 
     def test_cna_then_nvd_priority(self):
         """When both CNA and NVD have 3.1 GENERAL, CNA wins."""
@@ -826,20 +835,20 @@ class TestTesResolverExactMatch:
             ))
             upsert_cvss_assessment(conn, CvssAssessment(
                 cve_id="CVE-2024-1234", source="cve",
-                assessor="the-cna", cvss_version="3.1",
+                assessor="the-cna", cvss_version="3.1", container_role="cna",
                 vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
                 base_score=Decimal("9.8"), scenario="GENERAL",
             ))
             upsert_cvss_assessment(conn, CvssAssessment(
                 cve_id="CVE-2024-1234", source="nvd",
-                assessor="nvd@nist.gov", cvss_version="3.1",
+                assessor="nvd@nist.gov", cvss_version="3.1", container_role="nvd",
                 vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
                 base_score=Decimal("9.1"), scenario="GENERAL",
             ))
             conn.commit()
-            res = resolve_tes_cvss(conn, "CVE-2024-1234")
-            assert res.resolution_tier == "cna"
-            assert res.resolved_score == Decimal("9.8")
+            res = resolve_cvss_authority(conn, "CVE-2024-1234")
+            assert res.role == "cna"
+            assert res.score == Decimal("9.8")
 
 
 # ===========================================================================
@@ -888,10 +897,10 @@ class TestCrossAdapterIntegration:
             assert "cve" in sources
             assert "nvd" in sources
 
-            # TES resolves to CNA (exact match, not substring)
-            tes = resolve_tes_cvss(conn, "CVE-2024-1234")
-            assert tes.resolution_tier == "cna"
-            assert tes.resolved_score == Decimal("9.8")
+            # Authority resolves to CNA (structural role, not substring)
+            auth = resolve_cvss_authority(conn, "CVE-2024-1234")
+            assert auth.role == "cna"
+            assert auth.score == Decimal("9.8")
 
             # KEV enrichment
             kev = get_kev_entry(conn, "CVE-2024-1234")

@@ -30,6 +30,7 @@ from app.collector_registry import collector_registry
 
 logger = logging.getLogger("collectors_router")
 router = APIRouter(prefix="/api/collectors", tags=["Collectors"])
+v1_router = APIRouter(prefix="/api/v1/collectors", tags=["Collectors v1"])
 
 def _with_derived_collector_fields(collector_row: dict) -> dict:
     cid = collector_row["id"] if isinstance(collector_row["id"], uuid.UUID) else uuid.UUID(str(collector_row["id"]))
@@ -40,12 +41,17 @@ def _with_derived_collector_fields(collector_row: dict) -> dict:
         cid
     )
     req_rate = collector_registry.get_rate(cid)
+    live_ver = collector_registry.get_collector_version(cid)
+    version = live_ver or collector_row.get("version")
+    capabilities = collector_registry.get_collector_capabilities(cid)
     return {
         **collector_row,
+        "version": version,
         "connection_status": conn_status,
         "status": derived_status,
         "req_rate_per_sec": req_rate,
-        "server_url": COLLECTOR_SERVER_URL
+        "server_url": COLLECTOR_SERVER_URL,
+        "capabilities": capabilities,
     }
 
 @router.post(
@@ -231,6 +237,13 @@ def enroll_collector(payload: CollectorEnrollRequest):
     dependencies=[Depends(require_module("ASSETS"))],
     summary="List all collectors for tenant"
 )
+@v1_router.get(
+    "",
+    response_model=List[CollectorResponse],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_module("ASSETS"))],
+    summary="List all collectors for tenant"
+)
 def list_collectors(
     auth: AuthContext = Depends(require_roles(["analyst", "admin", "superadmin"]))
 ):
@@ -248,6 +261,13 @@ def list_collectors(
             return [_with_derived_collector_fields(dict(r)) for r in rows]
 
 @router.get(
+    "/{id}",
+    response_model=CollectorResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_module("ASSETS"))],
+    summary="Get collector details by ID"
+)
+@v1_router.get(
     "/{id}",
     response_model=CollectorResponse,
     status_code=status.HTTP_200_OK,
@@ -572,6 +592,80 @@ async def revoke_collector(
             conn.commit()
 
             return _with_derived_collector_fields(updated)
+
+
+@router.post(
+    "/{id}/check-update",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_module("ASSETS"))],
+    summary="Trigger manual toolchain and prerequisite update check for a collector"
+)
+@v1_router.post(
+    "/{id}/check-update",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_module("ASSETS"))],
+    summary="Trigger manual toolchain and prerequisite update check for a collector"
+)
+async def check_collector_update(
+    id: uuid.UUID,
+    auth: AuthContext = Depends(require_roles(["admin", "superadmin"]))
+):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT * FROM collectors
+                WHERE id = %s AND tenant_id = %s;
+                """,
+                (str(id), str(auth.tenant_id))
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Collector not found"
+                )
+
+    # Invariant F.4: Return 409 Conflict if offline/disconnected
+    if not collector_registry.is_connected(id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Collector is offline"
+        )
+
+    # Invariant F.5: Emit structured audit event collector.check_update
+    with get_db_connection() as conn:
+        record_audit_event(
+            conn=conn,
+            tenant_id=auth.tenant_id,
+            actor_id=auth.actor_id,
+            actor_role=auth.role,
+            event_name="collector.check_update",
+            details={
+                "collector_id": str(id),
+                "user_id": str(auth.user_id) if auth.user_id else None,
+                "triggered_by": auth.actor_id,
+            }
+        )
+        conn.commit()
+
+    # Invariant B.1, B.2: Dispatch typed CHECK_UPDATE frame with zero remote execution vector
+    dispatched = await collector_registry.dispatch_check_update(
+        collector_id=id,
+        tenant_id=auth.tenant_id,
+        force_recheck=True,
+    )
+    if not dispatched:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Collector session disconnected during check dispatch"
+        )
+
+    return {
+        "status": "checking",
+        "collector_id": str(id),
+        "message": "Toolchain update check dispatched successfully"
+    }
 
 
 @router.delete(

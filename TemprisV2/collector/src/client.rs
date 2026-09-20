@@ -223,6 +223,44 @@ impl CollectorClient {
         format!("{}/api/collectors/ws", ws_base)
     }
 
+    /// Runs the shared toolchain provisioning and external prerequisite check routine.
+    pub async fn run_toolchain_provisioning_and_check(&self) {
+        self.log("INFO", "Executing shared toolchain provisioning and prerequisite check...").await;
+
+        if let Some(ref storage) = self.storage {
+            let mgr = crate::toolchain::manager::ToolchainManager::new(storage.clone());
+            match mgr.check_and_apply_update().await {
+                Ok(state) => {
+                    let ready_count = state
+                        .components
+                        .values()
+                        .filter(|c| {
+                            matches!(
+                                c.status,
+                                crate::toolchain::state::ComponentStatus::Installed
+                                    | crate::toolchain::state::ComponentStatus::RolledBack
+                            )
+                        })
+                        .count();
+                    self.log(
+                        "INFO",
+                        &format!(
+                            "Toolchain check complete: {} managed components active",
+                            ready_count
+                        ),
+                    )
+                    .await;
+                }
+                Err(e) => {
+                    self.log("WARN", &format!("Toolchain check/update notice: {}", e))
+                        .await;
+                }
+            }
+        }
+
+        let _ = crate::toolchain::discovery::discover_external_nmap().await;
+    }
+
     pub async fn run_loop(self: Arc<Self>) {
         let collector_id = match self.config.collector_id {
             Some(id) => id,
@@ -358,10 +396,73 @@ impl CollectorClient {
                                                 if status_lower == "paused" {
                                                     self.set_status(ConnectionStatus::Paused).await;
                                                     self.log("WARN", &format!("Authentication SUCCESS for collector {} (status: PAUSED - 0 verification jobs will be executed)", succ_id)).await;
+                                                } else if status_lower == "quarantined" {
+                                                    self.set_status(ConnectionStatus::Quarantined).await;
+                                                    self.log("WARN", &format!("Authentication SUCCESS for collector {} (status: QUARANTINED - 0 verification jobs will be executed)", succ_id)).await;
+                                                } else if status_lower == "revoked" {
+                                                    self.set_status(ConnectionStatus::Revoked).await;
+                                                    self.log("WARN", &format!("Authentication SUCCESS for collector {} (status: REVOKED - 0 verification jobs will be executed)", succ_id)).await;
                                                 } else {
                                                     self.set_status(ConnectionStatus::Connected).await;
                                                     self.log("INFO", &format!("Authentication SUCCESS for collector {} (status: {})", succ_id, status)).await;
                                                 }
+
+                                                // Report capabilities upon AUTH_SUCCESS in non-blocking background task
+                                                let client_clone = Arc::clone(&self);
+                                                let tx_clone = tx_outbound.clone();
+                                                let cap_task = tokio::spawn(async move {
+                                                    let caps = crate::scout_runner::probe_scout_capabilities_with_storage(
+                                                        client_clone.storage.as_ref(),
+                                                    )
+                                                    .await;
+                                                    let cap_frame = ClientFrame::SCOUT_CAPABILITIES {
+                                                        capabilities: caps,
+                                                    };
+                                                    if let Ok(json_cap) = serde_json::to_string(&cap_frame) {
+                                                        let _ = tx_clone.send(Message::Text(json_cap.into())).await;
+                                                    }
+                                                });
+                                                probe_tasks.retain(|t| !t.is_finished());
+                                                probe_tasks.push(cap_task);
+
+                                                // Launch autonomous background scheduler (C.1 - C.6)
+                                                let sched_client = Arc::clone(&self);
+                                                let sched_tx = tx_outbound.clone();
+                                                let sched_task = tokio::spawn(async move {
+                                                    // C.1: Startup check scheduled 5-15s post-auth (using 10s default)
+                                                    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+
+                                                    loop {
+                                                        // C.4: Idle deferral against ScoutJobGuard
+                                                        while crate::scout_runner::ScoutJobGuard::is_active() {
+                                                            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                                                        }
+
+                                                        // Perform shared toolchain provisioning and external prerequisite check
+                                                        sched_client.run_toolchain_provisioning_and_check().await;
+                                                        let caps = crate::scout_runner::probe_scout_capabilities_with_storage(
+                                                            sched_client.storage.as_ref(),
+                                                        )
+                                                        .await;
+                                                        let cap_frame = ClientFrame::SCOUT_CAPABILITIES {
+                                                            capabilities: caps,
+                                                        };
+                                                        if let Ok(json_cap) = serde_json::to_string(&cap_frame) {
+                                                            if sched_tx.send(Message::Text(json_cap.into())).await.is_err() {
+                                                                break;
+                                                            }
+                                                        }
+
+                                                        // C.2, C.3: Periodic interval ~24h (86400s) +/- 30m (1800s) bounded jitter
+                                                        let now_ts = chrono::Utc::now().timestamp();
+                                                        let jitter = (now_ts % 3601) - 1800; // [-1800, +1800]
+                                                        let interval_secs = (86400 + jitter).max(3600) as u64;
+
+                                                        tokio::time::sleep(tokio::time::Duration::from_secs(interval_secs)).await;
+                                                    }
+                                                });
+                                                probe_tasks.retain(|t| !t.is_finished());
+                                                probe_tasks.push(sched_task);
                                             }
                                             Ok(ServerFrame::HEARTBEAT_ACK { timestamp }) => {
                                                 {
@@ -560,6 +661,253 @@ impl CollectorClient {
                                                 });
                                                 probe_tasks.retain(|t| !t.is_finished());
                                                 probe_tasks.push(handle);
+                                            }
+                                            Ok(ServerFrame::SCOUT_JOB {
+                                                job_id,
+                                                engine,
+                                                profile: _,
+                                                target,
+                                                target_type,
+                                                network_scope,
+                                                timeout_seconds,
+                                                expires_at,
+                                            }) => {
+                                                // M1: Reject pre-auth frames fail-closed
+                                                if !authenticated {
+                                                    self.log("WARN", &format!("Ignored pre-auth SCOUT_JOB {} before AUTH_SUCCESS", job_id)).await;
+                                                    continue 'session;
+                                                }
+
+                                                // Check if collector operator status is paused, quarantined, or revoked
+                                                let is_inactive = {
+                                                    let st = self.state.read().await;
+                                                    matches!(st.status, ConnectionStatus::Paused | ConnectionStatus::Quarantined | ConnectionStatus::Revoked)
+                                                };
+                                                if is_inactive {
+                                                    self.log("WARN", &format!("SCOUT_JOB {} rejected: collector is inactive/paused/quarantined/revoked", job_id)).await;
+                                                    let now = Utc::now().to_rfc3339();
+                                                    let rej_frame = ClientFrame::SCOUT_JOB_RESULT {
+                                                        job_id,
+                                                        engine,
+                                                        status: "rejected".to_string(),
+                                                        exit_code: None,
+                                                        stdout: "".to_string(),
+                                                        stderr: "".to_string(),
+                                                        stdout_bytes: 0,
+                                                        stderr_bytes: 0,
+                                                        started_at: now.clone(),
+                                                        completed_at: now,
+                                                        error_message: Some("Collector operator status is not active (paused, quarantined, or revoked)".to_string()),
+                                                    };
+                                                    if let Ok(json_res) = serde_json::to_string(&rej_frame) {
+                                                        let _ = tx_outbound.send(Message::Text(json_res.into())).await;
+                                                    }
+                                                    continue 'session;
+                                                }
+
+                                                // Expiry enforcement
+                                                let is_valid_expiry = match DateTime::parse_from_rfc3339(&expires_at) {
+                                                    Ok(exp_dt) => Utc::now() <= exp_dt.with_timezone(&Utc),
+                                                    Err(_) => false,
+                                                };
+                                                if !is_valid_expiry {
+                                                    self.log("WARN", &format!("SCOUT_JOB {} rejected: missing, unparseable, or expired expires_at '{}'", job_id, expires_at)).await;
+                                                    let now = Utc::now().to_rfc3339();
+                                                    let rej_frame = ClientFrame::SCOUT_JOB_RESULT {
+                                                        job_id,
+                                                        engine,
+                                                        status: "rejected".to_string(),
+                                                        exit_code: None,
+                                                        stdout: "".to_string(),
+                                                        stderr: "".to_string(),
+                                                        stdout_bytes: 0,
+                                                        stderr_bytes: 0,
+                                                        started_at: now.clone(),
+                                                        completed_at: now,
+                                                        error_message: Some(format!("Job rejected: invalid or expired expires_at timestamp '{}'", expires_at)),
+                                                    };
+                                                    if let Ok(json_res) = serde_json::to_string(&rej_frame) {
+                                                        let _ = tx_outbound.send(Message::Text(json_res.into())).await;
+                                                    }
+                                                    continue 'session;
+                                                }
+
+                                                // Scope enforcement: must be internal
+                                                let scope_parsed = match network_scope.to_lowercase().trim() {
+                                                    "internal" => Some(NetworkScope::Internal),
+                                                    _ => None,
+                                                };
+                                                if scope_parsed != Some(NetworkScope::Internal) {
+                                                    self.log("WARN", &format!("SCOUT_JOB {} rejected: network_scope '{}' is not internal", job_id, network_scope)).await;
+                                                    let now = Utc::now().to_rfc3339();
+                                                    let rej_frame = ClientFrame::SCOUT_JOB_RESULT {
+                                                        job_id,
+                                                        engine,
+                                                        status: "rejected".to_string(),
+                                                        exit_code: None,
+                                                        stdout: "".to_string(),
+                                                        stderr: "".to_string(),
+                                                        stdout_bytes: 0,
+                                                        stderr_bytes: 0,
+                                                        started_at: now.clone(),
+                                                        completed_at: now,
+                                                        error_message: Some(format!("Invalid network scope '{}' - only 'internal' is supported", network_scope)),
+                                                    };
+                                                    if let Ok(json_res) = serde_json::to_string(&rej_frame) {
+                                                        let _ = tx_outbound.send(Message::Text(json_res.into())).await;
+                                                    }
+                                                    continue 'session;
+                                                }
+
+                                                // Target syntax & SSRF validation
+                                                let target_type_parsed = TargetType::from_str(&target_type);
+                                                if target_type_parsed.is_none() {
+                                                    self.log("WARN", &format!("SCOUT_JOB {} rejected: unknown target_type '{}'", job_id, target_type)).await;
+                                                    let now = Utc::now().to_rfc3339();
+                                                    let rej_frame = ClientFrame::SCOUT_JOB_RESULT {
+                                                        job_id,
+                                                        engine,
+                                                        status: "rejected".to_string(),
+                                                        exit_code: None,
+                                                        stdout: "".to_string(),
+                                                        stderr: "".to_string(),
+                                                        stdout_bytes: 0,
+                                                        stderr_bytes: 0,
+                                                        started_at: now.clone(),
+                                                        completed_at: now,
+                                                        error_message: Some(format!("Unsupported target_type '{}'", target_type)),
+                                                    };
+                                                    if let Ok(json_res) = serde_json::to_string(&rej_frame) {
+                                                        let _ = tx_outbound.send(Message::Text(json_res.into())).await;
+                                                    }
+                                                    continue 'session;
+                                                }
+
+                                                let pinned_ip_res = crate::safety::resolve_and_pin_safe_target(&target, target_type_parsed.as_ref()).await;
+                                                let pinned_ip = match pinned_ip_res {
+                                                    Ok(ip) => ip,
+                                                    Err(e) => {
+                                                        self.log("WARN", &format!("SCOUT_JOB {} rejected by safety/SSRF validation: {}", job_id, e)).await;
+                                                        let now = Utc::now().to_rfc3339();
+                                                        let rej_frame = ClientFrame::SCOUT_JOB_RESULT {
+                                                            job_id,
+                                                            engine,
+                                                            status: "rejected".to_string(),
+                                                            exit_code: None,
+                                                            stdout: "".to_string(),
+                                                            stderr: "".to_string(),
+                                                            stdout_bytes: 0,
+                                                            stderr_bytes: 0,
+                                                            started_at: now.clone(),
+                                                            completed_at: now,
+                                                            error_message: Some(format!("Target rejected by safety validation: {}", e)),
+                                                        };
+                                                        if let Ok(json_res) = serde_json::to_string(&rej_frame) {
+                                                            let _ = tx_outbound.send(Message::Text(json_res.into())).await;
+                                                        }
+                                                        continue 'session;
+                                                    }
+                                                };
+
+                                                let client_clone = Arc::clone(&self);
+                                                let tx_clone = tx_outbound.clone();
+                                                let engine_clone = engine.clone();
+                                                let target_clone = target.clone();
+                                                let target_type_clone = target_type.clone();
+                                                let handle = tokio::spawn(async move {
+                                                    client_clone.log("INFO", &format!("Executing SCOUT_JOB {} (engine: {}, target: {})", job_id, engine_clone, pinned_ip)).await;
+                                                    let run_res = crate::scout_runner::run_scout_job_with_context(
+                                                        job_id,
+                                                        &engine_clone,
+                                                        &pinned_ip.to_string(),
+                                                        Some(&target_clone),
+                                                        Some(&target_type_clone),
+                                                        timeout_seconds,
+                                                        client_clone.storage.as_ref(),
+                                                    ).await;
+                                                    client_clone.log("INFO", &format!("Completed SCOUT_JOB {} with status '{}' (exit: {:?})", job_id, run_res.status, run_res.exit_code)).await;
+
+                                                    let res_frame = ClientFrame::SCOUT_JOB_RESULT {
+                                                        job_id: run_res.job_id,
+                                                        engine: run_res.engine,
+                                                        status: run_res.status,
+                                                        exit_code: run_res.exit_code,
+                                                        stdout: run_res.stdout,
+                                                        stderr: run_res.stderr,
+                                                        stdout_bytes: run_res.stdout_bytes,
+                                                        stderr_bytes: run_res.stderr_bytes,
+                                                        started_at: run_res.started_at,
+                                                        completed_at: run_res.completed_at,
+                                                        error_message: run_res.error_message,
+                                                    };
+                                                    if let Ok(json_res) = serde_json::to_string(&res_frame) {
+                                                        let _ = tx_clone.send(Message::Text(json_res.into())).await;
+                                                    }
+                                                });
+                                                probe_tasks.retain(|t| !t.is_finished());
+                                                probe_tasks.push(handle);
+                                            }
+                                            Ok(ServerFrame::CHECK_UPDATE(payload)) => {
+                                                if !authenticated {
+                                                    self.log("WARN", "Ignored pre-auth CHECK_UPDATE frame before AUTH_SUCCESS").await;
+                                                    continue 'session;
+                                                }
+
+                                                let is_inactive = {
+                                                    let st = self.state.read().await;
+                                                    matches!(
+                                                        st.status,
+                                                        ConnectionStatus::Quarantined | ConnectionStatus::Revoked
+                                                    )
+                                                };
+                                                if is_inactive {
+                                                    self.log("WARN", "CHECK_UPDATE ignored: collector is quarantined or revoked").await;
+                                                    continue 'session;
+                                                }
+
+                                                let client_clone = Arc::clone(&self);
+                                                let tx_clone = tx_outbound.clone();
+                                                let check_id_opt = payload.check_id;
+                                                let force_opt = payload.force_recheck;
+
+                                                self.log(
+                                                    "INFO",
+                                                    &format!(
+                                                        "Received manual CHECK_UPDATE request (check_id={:?}, force_recheck={:?})",
+                                                        check_id_opt, force_opt
+                                                    ),
+                                                )
+                                                .await;
+
+                                                // D.1, D.2, D.3: Detached non-blocking background task preserving Ping/Pong < 1s latency
+                                                let check_task = tokio::spawn(async move {
+                                                    // C.4: Idle deferral check - wait if a SCOUT scan job is currently executing
+                                                    while crate::scout_runner::ScoutJobGuard::is_active() {
+                                                        client_clone.log("DEBUG", "CHECK_UPDATE deferred: active SCOUT scan job in progress").await;
+                                                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                                    }
+
+                                                    client_clone.log("INFO", "Executing shared toolchain provisioning and external prerequisite recheck...").await;
+
+                                                    // Shared toolchain provisioning & prerequisite check
+                                                    client_clone.run_toolchain_provisioning_and_check().await;
+
+                                                    // A.1 - A.5: Probe truthful redacted capabilities
+                                                    let caps = crate::scout_runner::probe_scout_capabilities_with_storage(
+                                                        client_clone.storage.as_ref(),
+                                                    )
+                                                    .await;
+
+                                                    let cap_frame = ClientFrame::SCOUT_CAPABILITIES {
+                                                        capabilities: caps,
+                                                    };
+                                                    if let Ok(json_cap) = serde_json::to_string(&cap_frame) {
+                                                        let _ = tx_clone.send(Message::Text(json_cap.into())).await;
+                                                        client_clone.log("INFO", "Transmitted updated SCOUT_CAPABILITIES following check").await;
+                                                    }
+                                                });
+                                                probe_tasks.retain(|t| !t.is_finished());
+                                                probe_tasks.push(check_task);
                                             }
                                             Err(e) => {
                                                 warn!("Failed to deserialize server frame (len: {} bytes): {}", text_str.len(), e);

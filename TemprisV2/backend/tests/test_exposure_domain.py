@@ -15,12 +15,12 @@ from app.db import get_db_connection
 from app.exposure.exceptions import (
     AssetNotFoundError,
     EntityNotFoundError,
+    ExposureConflictError,
     ExposureDomainError,
     ExposureNotFoundError,
     FindingNotFoundError,
     InvalidAssetStatusError,
     InvalidEvidenceError,
-    InvalidFindingStatusError,
     TenantMismatchError,
 )
 from app.exposure.models import (
@@ -42,6 +42,7 @@ from app.exposure.service import (
     list_applicability_reviews,
     record_applicability_review,
     resolve_exposure,
+    supersede_exposures_for_asset,
 )
 from migrations.runner import run_migrations
 from tests.conftest import TENANT_A, TENANT_B
@@ -181,10 +182,9 @@ class TestGroup1CanonicalDomainCasesAndLifecycle:
                     finding_id=finding.id,
                     asset_id=asset_id,
                     applicability="REFERENCE",
-                    reviewed_by="analyst-a",
                     reason="Informational reference only",
                 ),
-            )
+                actor_id="analyst-a")
             conn.commit()
 
             exposures = get_canonical_current_exposures(conn, TENANT_A)
@@ -206,10 +206,9 @@ class TestGroup1CanonicalDomainCasesAndLifecycle:
                     finding_id=finding.id,
                     asset_id=asset_id,
                     applicability="NOT_APPLICABLE",
-                    reviewed_by="analyst-a",
                     reason="Server is Linux, not Windows",
                 ),
-            )
+                actor_id="analyst-a")
             conn.commit()
 
             exposures = get_canonical_current_exposures(conn, TENANT_A)
@@ -231,10 +230,9 @@ class TestGroup1CanonicalDomainCasesAndLifecycle:
                     finding_id=finding.id,
                     asset_id=asset_id,
                     applicability="NEEDS_REVIEW",
-                    reviewed_by="analyst-a",
                     reason="Triage in progress",
                 ),
-            )
+                actor_id="analyst-a")
             conn.commit()
 
             exposures = get_canonical_current_exposures(conn, TENANT_A)
@@ -256,10 +254,9 @@ class TestGroup1CanonicalDomainCasesAndLifecycle:
                     finding_id=finding.id,
                     asset_id=asset_id,
                     applicability="APPLICABLE",
-                    reviewed_by="analyst-a",
                     reason="Package version matched, pending confirmation",
                 ),
-            )
+                actor_id="analyst-a")
             conn.commit()
 
             # No confirm_exposure called -> 0 rows in asset_exposures and 0 in canonical query
@@ -289,9 +286,9 @@ class TestGroup1CanonicalDomainCasesAndLifecycle:
                     finding_id=finding.id,
                     asset_id=asset_id,
                     evidence=evidence,
-                    confirmed_by="analyst-a",
                 ),
-            )
+                actor_id="analyst-a",
+                actor_role="analyst").exposure
             conn.commit()
 
             assert exposure.status == "confirmed"
@@ -314,8 +311,11 @@ class TestGroup1CanonicalDomainCasesAndLifecycle:
             assert item.asset_name == "Production Gateway"
             assert item.asset_status == "active"
 
-    def test_assertion_1_8_case_8_confirmed_exposure_with_closed_finding(self):
-        """Case 8: Confirmed exposure with closed Finding is excluded from current exposure query."""
+    def test_assertion_1_8_case_8_finding_with_current_exposure_cannot_close(self):
+        """Case 8 (P0-01, fix 4): a finding holding a current confirmed exposure
+        cannot be closed — the derived roll-up must stay open and consistent
+        with exposure truth, which the current query reports regardless of
+        finding status."""
         with get_db_connection() as conn:
             asset_id = create_test_asset(conn, TENANT_A, name="Auth Server")
             finding = create_finding(
@@ -330,18 +330,23 @@ class TestGroup1CanonicalDomainCasesAndLifecycle:
                     finding_id=finding.id,
                     asset_id=asset_id,
                     evidence={"ciphers": ["DES-CBC3-SHA"]},
-                    confirmed_by="analyst-a",
                 ),
-            )
+                actor_id="analyst-a",
+                actor_role="analyst")
             conn.commit()
 
             assert len(get_canonical_current_exposures(conn, TENANT_A)) == 1
 
-            # Close finding
-            close_finding(conn, TENANT_A, finding.id, closed_by="admin-a", reason="Risk accepted")
-            conn.commit()
+            # Close is rejected while the exposure is current
+            with pytest.raises(ExposureConflictError):
+                close_finding(conn, TENANT_A, finding.id, closed_by="admin-a", reason="Risk accepted")
+            conn.rollback()
 
-            assert len(get_canonical_current_exposures(conn, TENANT_A)) == 0
+            # Roll-up stays open and current truth is unchanged
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute("SELECT status FROM findings WHERE id = %s;", (str(finding.id),))
+                assert cur.fetchone()["status"] == "open"
+            assert len(get_canonical_current_exposures(conn, TENANT_A)) == 1
 
     def test_assertion_1_9_case_9_confirmed_exposure_with_decommissioned_asset(self):
         """Case 9: Confirmed exposure with decommissioned Asset is excluded from current exposure query."""
@@ -359,9 +364,9 @@ class TestGroup1CanonicalDomainCasesAndLifecycle:
                     finding_id=finding.id,
                     asset_id=asset_id,
                     evidence={"component": "log4j-core-2.14.1.jar"},
-                    confirmed_by="analyst-a",
                 ),
-            )
+                actor_id="analyst-a",
+                actor_role="analyst")
             conn.commit()
 
             assert len(get_canonical_current_exposures(conn, TENANT_A)) == 1
@@ -389,9 +394,9 @@ class TestGroup1CanonicalDomainCasesAndLifecycle:
                     finding_id=finding.id,
                     asset_id=asset_id,
                     evidence={"service": "bind9", "version": "9.11"},
-                    confirmed_by="analyst-a",
                 ),
-            )
+                actor_id="analyst-a",
+                actor_role="analyst").exposure
             conn.commit()
 
             assert len(get_canonical_current_exposures(conn, TENANT_A)) == 1
@@ -402,11 +407,11 @@ class TestGroup1CanonicalDomainCasesAndLifecycle:
                 TENANT_A,
                 exposure.id,
                 ExposureResolve(
-                    resolved_by="admin-a",
                     status="resolved",
                     resolution_reason="Patched to bind 9.18",
                 ),
-            )
+                actor_id="admin-a",
+                actor_role="analyst").exposure
             conn.commit()
 
             assert resolved.status == "resolved"
@@ -432,9 +437,9 @@ class TestGroup1CanonicalDomainCasesAndLifecycle:
                     finding_id=finding.id,
                     asset_id=asset_id,
                     evidence={"step": "initial_finding", "class": "CachedIntrospectionResults"},
-                    confirmed_by="analyst-1",
                 ),
-            )
+                actor_id="analyst-1",
+                actor_role="analyst").exposure
             conn.commit()
             assert len(get_canonical_current_exposures(conn, TENANT_A)) == 1
 
@@ -443,8 +448,9 @@ class TestGroup1CanonicalDomainCasesAndLifecycle:
                 conn,
                 TENANT_A,
                 exp1.id,
-                ExposureResolve(resolved_by="analyst-1", status="resolved", resolution_reason="Temporary patch applied"),
-            )
+                ExposureResolve(status="resolved", resolution_reason="Temporary patch applied"),
+                actor_id="analyst-1",
+                actor_role="analyst")
             conn.commit()
             assert len(get_canonical_current_exposures(conn, TENANT_A)) == 0
 
@@ -456,9 +462,9 @@ class TestGroup1CanonicalDomainCasesAndLifecycle:
                     finding_id=finding.id,
                     asset_id=asset_id,
                     evidence={"step": "reintroduced", "diff": "regression in v2.1"},
-                    confirmed_by="analyst-2",
                 ),
-            )
+                actor_id="analyst-2",
+                actor_role="analyst").exposure
             conn.commit()
 
             # Canonical query returns exactly 1 active exposure
@@ -478,8 +484,9 @@ class TestGroup1CanonicalDomainCasesAndLifecycle:
                 assert rows[0]["status"] == "resolved"
                 assert rows[1]["status"] == "confirmed"
 
-    def test_assertion_1_12_dynamic_asset_state_transition(self):
-        """Assertion 1.12: Active -> Decommissioned -> Active dynamically toggles exposure presence in query."""
+    def test_assertion_1_12_decommission_supersedes_and_reactivation_does_not_revive(self):
+        """Assertion 1.12 (P0-01): decommission supersedes current exposures in the
+        same service-owned transition; asset reactivation NEVER revives them."""
         with get_db_connection() as conn:
             asset_id = create_test_asset(conn, TENANT_A, name="Dynamic Asset", status="active")
             finding = create_finding(
@@ -494,28 +501,46 @@ class TestGroup1CanonicalDomainCasesAndLifecycle:
                     finding_id=finding.id,
                     asset_id=asset_id,
                     evidence={"observation": "active trace"},
-                    confirmed_by="analyst-a",
                 ),
-            )
+                actor_id="analyst-a",
+                actor_role="analyst")
             conn.commit()
 
             # 1. Active -> Present
             assert len(get_canonical_current_exposures(conn, TENANT_A)) == 1
 
-            # 2. Decommissioned -> Immediately excluded
-            with conn.cursor() as cur:
-                cur.execute("UPDATE assets SET status = 'decommissioned' WHERE id = %s;", (str(asset_id),))
+            # 2. Decommission through the lifecycle authority -> supersession
+            superseded = supersede_exposures_for_asset(
+                conn,
+                TENANT_A,
+                asset_id,
+                actor_id="admin-a",
+                actor_role="admin",
+                reason="asset decommissioned",
+            )
             conn.commit()
+            assert len(superseded) == 1
+            assert superseded[0].status == "superseded"
             assert len(get_canonical_current_exposures(conn, TENANT_A)) == 0
 
-            # 3. Active -> Immediately reappears without exposure row mutation
+            # 3. Reactivation does NOT revive a superseded episode
             with conn.cursor() as cur:
                 cur.execute("UPDATE assets SET status = 'active' WHERE id = %s;", (str(asset_id),))
             conn.commit()
-            assert len(get_canonical_current_exposures(conn, TENANT_A)) == 1
+            assert len(get_canonical_current_exposures(conn, TENANT_A)) == 0
 
-    def test_assertion_1_13_multi_asset_finding_closure(self):
-        """Assertion 1.13: Multi-Asset Finding closure immediately drops all exposures from canonical query."""
+            # History is retained immutably
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    "SELECT status FROM asset_exposures WHERE tenant_id = %s AND id = %s;",
+                    (str(TENANT_A), str(superseded[0].id)),
+                )
+                assert cur.fetchone()["status"] == "superseded"
+
+    def test_assertion_1_13_multi_asset_finding_closure_rejected_while_current(self):
+        """Assertion 1.13 (P0-01, fix 4): a multi-asset finding holding current
+        confirmed exposures cannot be closed; both exposures stay current and
+        the roll-up stays open."""
         with get_db_connection() as conn:
             asset_a = create_test_asset(conn, TENANT_A, name="Asset A", target_value="10.0.1.1")
             asset_b = create_test_asset(conn, TENANT_A, name="Asset B", target_value="10.0.1.2")
@@ -527,24 +552,30 @@ class TestGroup1CanonicalDomainCasesAndLifecycle:
             confirm_exposure(
                 conn,
                 TENANT_A,
-                ExposureConfirm(finding_id=finding.id, asset_id=asset_a, evidence={"host": "a"}, confirmed_by="analyst-a"),
-            )
+                ExposureConfirm(finding_id=finding.id, asset_id=asset_a, evidence={"host": "a"}),
+                actor_id="analyst-a",
+                actor_role="analyst")
             confirm_exposure(
                 conn,
                 TENANT_A,
-                ExposureConfirm(finding_id=finding.id, asset_id=asset_b, evidence={"host": "b"}, confirmed_by="analyst-a"),
-            )
+                ExposureConfirm(finding_id=finding.id, asset_id=asset_b, evidence={"host": "b"}),
+                actor_id="analyst-a",
+                actor_role="analyst")
             conn.commit()
 
             # Both appear in query
             assert len(get_canonical_current_exposures(conn, TENANT_A)) == 2
 
-            # Close finding
-            close_finding(conn, TENANT_A, finding.id, closed_by="admin-a", reason="Global mitigation deployed")
-            conn.commit()
+            # Close is rejected while current exposures exist
+            with pytest.raises(ExposureConflictError):
+                close_finding(conn, TENANT_A, finding.id, closed_by="admin-a", reason="Global mitigation deployed")
+            conn.rollback()
 
-            # Query returns 0 rows
-            assert len(get_canonical_current_exposures(conn, TENANT_A)) == 0
+            # Query still returns both rows and the finding remains open
+            assert len(get_canonical_current_exposures(conn, TENANT_A)) == 2
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute("SELECT status FROM findings WHERE id = %s;", (str(finding.id),))
+                assert cur.fetchone()["status"] == "open"
 
 
 # ===========================================================================
@@ -610,9 +641,8 @@ class TestGroup2TenantRelationalIntegrityAndCrossTenantDefense:
                         finding_id=finding_a.id,
                         asset_id=asset_b,
                         applicability="APPLICABLE",
-                        reviewed_by="analyst-a",
                     ),
-                )
+                    actor_id="analyst-a")
 
             # Attempt confirmation under Tenant A referencing Tenant B Asset
             with pytest.raises(TenantMismatchError):
@@ -623,9 +653,9 @@ class TestGroup2TenantRelationalIntegrityAndCrossTenantDefense:
                         finding_id=finding_a.id,
                         asset_id=asset_b,
                         evidence={"port": 80},
-                        confirmed_by="analyst-a",
                     ),
-                )
+                    actor_id="analyst-a",
+                    actor_role="analyst")
 
             # Attempt confirmation under Tenant B referencing Tenant A Finding
             with pytest.raises(TenantMismatchError):
@@ -636,9 +666,9 @@ class TestGroup2TenantRelationalIntegrityAndCrossTenantDefense:
                         finding_id=finding_a.id,
                         asset_id=asset_b,
                         evidence={"port": 80},
-                        confirmed_by="analyst-b",
                     ),
-                )
+                    actor_id="analyst-b",
+                    actor_role="analyst")
 
     def test_assertion_2_4_canonical_query_tenant_isolation(self):
         """Assertion 2.4: Canonical exposure query for Tenant A never returns any Tenant B data."""
@@ -649,8 +679,9 @@ class TestGroup2TenantRelationalIntegrityAndCrossTenantDefense:
             confirm_exposure(
                 conn,
                 TENANT_A,
-                ExposureConfirm(finding_id=finding_a.id, asset_id=asset_a, evidence={"env": "a"}, confirmed_by="user-a"),
-            )
+                ExposureConfirm(finding_id=finding_a.id, asset_id=asset_a, evidence={"env": "a"}),
+                actor_id="user-a",
+                actor_role="analyst")
 
             # Seed Tenant B
             asset_b = create_test_asset(conn, TENANT_B, name="Tenant B Server")
@@ -658,8 +689,9 @@ class TestGroup2TenantRelationalIntegrityAndCrossTenantDefense:
             confirm_exposure(
                 conn,
                 TENANT_B,
-                ExposureConfirm(finding_id=finding_b.id, asset_id=asset_b, evidence={"env": "b"}, confirmed_by="user-b"),
-            )
+                ExposureConfirm(finding_id=finding_b.id, asset_id=asset_b, evidence={"env": "b"}),
+                actor_id="user-b",
+                actor_role="analyst")
             conn.commit()
 
             exposures_a = get_canonical_current_exposures(conn, TENANT_A)
@@ -711,7 +743,7 @@ class TestGroup3EvidenceConfirmationIdempotencyAndHistory:
 
             # Service layer validation
             with pytest.raises((InvalidEvidenceError, ValueError)):
-                ExposureConfirm(finding_id=finding.id, asset_id=asset, evidence={}, confirmed_by="analyst")
+                ExposureConfirm(finding_id=finding.id, asset_id=asset, evidence={})
 
             # Direct DB check constraint validation
             with conn.cursor() as cur:
@@ -728,36 +760,46 @@ class TestGroup3EvidenceConfirmationIdempotencyAndHistory:
                     )
             conn.rollback()
 
-    def test_assertion_3_2_idempotent_confirmation_updates_without_duplicates(self):
-        """Assertion 3.2: Repeated confirmation is idempotent, updating evidence without duplicate rows."""
+    def test_assertion_3_2_idempotent_confirmation_returns_committed_episode_unchanged(self):
+        """Assertion 3.2 (P0-01): repeated confirmation idempotently returns the
+        existing current episode WITHOUT mutation — evidence and provenance are
+        never overwritten."""
         with get_db_connection() as conn:
             asset = create_test_asset(conn, TENANT_A)
             finding = create_finding(conn, TENANT_A, FindingCreate(title="F1", severity="medium"))
 
             # First confirmation
-            exp1 = confirm_exposure(
+            result1 = confirm_exposure(
                 conn,
                 TENANT_A,
-                ExposureConfirm(finding_id=finding.id, asset_id=asset, evidence={"v": 1}, confirmed_by="analyst-1"),
-            )
+                ExposureConfirm(finding_id=finding.id, asset_id=asset, evidence={"v": 1}),
+                actor_id="analyst-1",
+                actor_role="analyst")
             conn.commit()
+            exp1 = result1.exposure
+            assert result1.outcome == "created"
+            committed_at = exp1.confirmed_at
 
-            # Second confirmation (idempotent update)
-            exp2 = confirm_exposure(
+            # Second confirmation with different evidence/actor: idempotent replay
+            result2 = confirm_exposure(
                 conn,
                 TENANT_A,
-                ExposureConfirm(finding_id=finding.id, asset_id=asset, evidence={"v": 2, "extra": "info"}, confirmed_by="analyst-2"),
-            )
+                ExposureConfirm(finding_id=finding.id, asset_id=asset, evidence={"v": 2, "extra": "info"}),
+                actor_id="analyst-2",
+                actor_role="analyst")
             conn.commit()
+            exp2 = result2.exposure
+            assert result2.outcome == "replay"
 
             assert exp1.id == exp2.id
-            assert exp2.evidence == {"v": 2, "extra": "info"}
-            assert exp2.confirmed_by == "analyst-2"
+            assert exp2.evidence == {"v": 1}
+            assert exp2.confirmed_by == "analyst-1"
+            assert exp2.confirmed_at == committed_at
 
             exposures = get_canonical_current_exposures(conn, TENANT_A)
             assert len(exposures) == 1
             assert exposures[0].exposure_id == exp1.id
-            assert exposures[0].evidence["v"] == 2
+            assert exposures[0].evidence["v"] == 1
 
     def test_assertion_3_3_applicability_review_history_append_only(self):
         """Assertion 3.3: Applicability review history preserves chronological transitions."""
@@ -770,24 +812,24 @@ class TestGroup3EvidenceConfirmationIdempotencyAndHistory:
             r1 = record_applicability_review(
                 conn,
                 TENANT_A,
-                ReviewCreate(finding_id=finding.id, asset_id=asset, applicability="NEEDS_REVIEW", reviewed_by="user-1", reason="initial"),
-            )
+                ReviewCreate(finding_id=finding.id, asset_id=asset, applicability="NEEDS_REVIEW", reason="initial"),
+                actor_id="user-1")
             conn.commit()
             time.sleep(0.01)
 
             r2 = record_applicability_review(
                 conn,
                 TENANT_A,
-                ReviewCreate(finding_id=finding.id, asset_id=asset, applicability="NOT_APPLICABLE", reviewed_by="user-2", reason="not installed"),
-            )
+                ReviewCreate(finding_id=finding.id, asset_id=asset, applicability="NOT_APPLICABLE", reason="not installed"),
+                actor_id="user-2")
             conn.commit()
             time.sleep(0.01)
 
             r3 = record_applicability_review(
                 conn,
                 TENANT_A,
-                ReviewCreate(finding_id=finding.id, asset_id=asset, applicability="APPLICABLE", reviewed_by="user-3", reason="found in custom path"),
-            )
+                ReviewCreate(finding_id=finding.id, asset_id=asset, applicability="APPLICABLE", reason="found in custom path"),
+                actor_id="user-3")
             conn.commit()
 
             history = list_applicability_reviews(conn, TENANT_A, finding_id=finding.id, asset_id=asset)
@@ -807,13 +849,15 @@ class TestGroup3EvidenceConfirmationIdempotencyAndHistory:
             confirm_exposure(
                 conn,
                 TENANT_A,
-                ExposureConfirm(finding_id=finding.id, asset_id=asset_1, evidence={"port": 8080}, confirmed_by="analyst"),
-            )
+                ExposureConfirm(finding_id=finding.id, asset_id=asset_1, evidence={"port": 8080}),
+                actor_id="analyst",
+                actor_role="analyst")
             confirm_exposure(
                 conn,
                 TENANT_A,
-                ExposureConfirm(finding_id=finding.id, asset_id=asset_2, evidence={"port": 8080}, confirmed_by="analyst"),
-            )
+                ExposureConfirm(finding_id=finding.id, asset_id=asset_2, evidence={"port": 8080}),
+                actor_id="analyst",
+                actor_role="analyst")
             conn.commit()
 
             exposures = get_canonical_current_exposures(conn, TENANT_A, finding_id=finding.id)
@@ -829,8 +873,9 @@ class TestGroup3EvidenceConfirmationIdempotencyAndHistory:
             confirm_exposure(
                 conn,
                 TENANT_A,
-                ExposureConfirm(finding_id=finding.id, asset_id=asset, evidence={"flag": "present"}, confirmed_by="analyst"),
-            )
+                ExposureConfirm(finding_id=finding.id, asset_id=asset, evidence={"flag": "present"}),
+                actor_id="analyst",
+                actor_role="analyst")
             conn.commit()
 
             # Simulate arbitrary scan cycles and other domain activities
@@ -860,9 +905,9 @@ class TestGroup3EvidenceConfirmationIdempotencyAndHistory:
                     finding_id=finding.id,
                     asset_id=asset,
                     evidence={"auth_check": "root:root succeeded"},
-                    confirmed_by="pentester",
                 ),
-            )
+                actor_id="pentester",
+                actor_role="analyst")
             conn.commit()
 
             exposures = get_canonical_current_exposures(conn, TENANT_A, finding_id=finding.id)
@@ -891,9 +936,9 @@ class TestGroup3EvidenceConfirmationIdempotencyAndHistory:
                     finding_id=finding.id,
                     asset_id=asset,
                     evidence={"binary": "/usr/sbin/squid", "version": "4.13"},
-                    confirmed_by="secops",
                 ),
-            )
+                actor_id="secops",
+                actor_role="analyst")
             conn.commit()
 
             exposures = get_canonical_current_exposures(conn, TENANT_A, cve_id=cve_id)
@@ -938,8 +983,9 @@ class TestGroup3EvidenceConfirmationIdempotencyAndHistory:
             confirm_exposure(
                 conn,
                 TENANT_A,
-                ExposureConfirm(finding_id=finding_a.id, asset_id=asset_a, evidence={"tenant": "A"}, confirmed_by="user-a"),
-            )
+                ExposureConfirm(finding_id=finding_a.id, asset_id=asset_a, evidence={"tenant": "A"}),
+                actor_id="user-a",
+                actor_role="analyst")
             conn.commit()
 
             # Tenant A has 1 exposure, Tenant B has 0
@@ -950,8 +996,9 @@ class TestGroup3EvidenceConfirmationIdempotencyAndHistory:
             confirm_exposure(
                 conn,
                 TENANT_B,
-                ExposureConfirm(finding_id=finding_b.id, asset_id=asset_b, evidence={"tenant": "B"}, confirmed_by="user-b"),
-            )
+                ExposureConfirm(finding_id=finding_b.id, asset_id=asset_b, evidence={"tenant": "B"}),
+                actor_id="user-b",
+                actor_role="analyst")
             conn.commit()
 
             res_a = get_canonical_current_exposures(conn, TENANT_A)

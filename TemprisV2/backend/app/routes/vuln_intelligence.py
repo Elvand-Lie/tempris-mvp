@@ -59,7 +59,8 @@ def get_cve_detail(
       - Source provenance (all raw revisions, hashes, timestamps, snapshots)
       - Upstream descriptions from CNA and NVD
       - All independent CVSS assessments across versions and providers
-      - Deterministic TES-input resolution (or explicit unscoreable reason)
+      - Deterministic CVSS authority resolution with full provenance (P0-03,
+        PRD §3.5 #2) — or the explicit stable unscoreable reason code
       - Affected product configurations, CPEs, and version ranges
       - Weaknesses (CWE) and upstream references
       - Exact relationships and replacements
@@ -92,10 +93,8 @@ def search_cves(
     q: Optional[str] = Query(None, description="Search keyword across CVE ID, vendor, product, CWE, OSV package"),
     state: Optional[str] = Query(None, description="Filter by lifecycle state (PUBLISHED, RESERVED, REJECTED)"),
     has_kev: Optional[bool] = Query(None, description="Filter by CISA KEV presence"),
-    min_tes_cvss: Optional[float] = Query(None, description="Minimum deterministic TES-resolved CVSS 3.1 base score"),
-    max_tes_cvss: Optional[float] = Query(None, description="Maximum deterministic TES-resolved CVSS 3.1 base score"),
-    min_cvss: Optional[float] = Query(None, description="Legacy alias for min_tes_cvss"),
-    max_cvss: Optional[float] = Query(None, description="Legacy alias for max_tes_cvss"),
+    min_cvss: Optional[float] = Query(None, description="Minimum resolved CVSS authority base score"),
+    max_cvss: Optional[float] = Query(None, description="Maximum resolved CVSS authority base score"),
     min_epss: Optional[float] = Query(None, description="Minimum EPSS probability score"),
     ecosystem: Optional[str] = Query(None, description="Filter by OSV ecosystem (e.g. npm, PyPI, Go)"),
     limit: int = Query(50, ge=1, le=100, description="Page size"),
@@ -104,18 +103,17 @@ def search_cves(
 ):
     """
     Search indexed normalized vulnerability intelligence.
-    Search is an index over normalized source fields with deterministic single-score TES resolution.
+    Search indexed normalized vulnerability intelligence with CVSS authority
+    filtering (P0-03: intrinsic CVSS is never TES).
     """
-    effective_min_tes = min_tes_cvss if min_tes_cvss is not None else min_cvss
-    effective_max_tes = max_tes_cvss if max_tes_cvss is not None else max_cvss
     with get_db_connection() as conn:
         results = search_vulnerabilities(
             conn,
             q=q,
             state=state,
             has_kev=has_kev,
-            min_tes_cvss=effective_min_tes,
-            max_tes_cvss=effective_max_tes,
+            min_cvss=min_cvss,
+            max_cvss=max_cvss,
             min_epss=min_epss,
             ecosystem=ecosystem,
             limit=limit,

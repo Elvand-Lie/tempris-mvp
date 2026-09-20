@@ -6,7 +6,7 @@ import logging
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, Any
 from fastapi import WebSocket
 from app.db import get_db_connection
 from app.audit import record_audit_event
@@ -30,7 +30,9 @@ class CollectorSession:
         self.operator_status = operator_status
         self.connected_at = datetime.now(timezone.utc)
         self.last_heartbeat_at = datetime.now(timezone.utc)
-        self.in_flight_jobs: Dict[str, asyncio.Future] = {}
+        self.in_flight_jobs: Dict[Any, asyncio.Future] = {}
+        self.capabilities: Optional[dict] = None
+        self.collector_version: Optional[str] = None
         self.message_timestamps: collections.deque = collections.deque()
         self._clock = clock or time.time
 
@@ -83,12 +85,35 @@ class CollectorSession:
         for job_id, future in list(self.in_flight_jobs.items()):
             if not future.done():
                 future.set_result({
-                    "job_id": job_id,
+                    "job_id": str(job_id),
                     "status": "failed",
                     "reachability_status": "unverified",
+                    "error_code": "collector_disconnected",
                     "error_message": error_message
                 })
         self.in_flight_jobs.clear()
+
+        # Update in-flight scout_jobs to collector_disconnected
+        if self.tenant_id and self.collector_id:
+            try:
+                with get_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE scout_jobs
+                            SET status = 'failed',
+                                error_code = 'collector_disconnected',
+                                error_message = 'Collector disconnected during scan',
+                                completed_at = now()
+                            WHERE tenant_id = %s
+                              AND collector_id = %s
+                              AND status = 'running';
+                            """,
+                            (str(self.tenant_id), str(self.collector_id))
+                        )
+                    conn.commit()
+            except Exception as e:
+                logger.warning("Error marking running scout_jobs as collector_disconnected: %s", e)
 
 
 class CollectorRegistry:
@@ -166,6 +191,43 @@ class CollectorRegistry:
             operator_status=operator_status,
             clock=self._clock
         )
+
+        if websocket and hasattr(websocket, "receive_text"):
+            orig_receive_text = websocket.receive_text
+            async def intercepted_receive_text():
+                while True:
+                    msg = await orig_receive_text()
+                    try:
+                        parsed = json.loads(msg)
+                        if isinstance(parsed, dict):
+                            f_type = parsed.get("type")
+                            if f_type == "SCOUT_CAPABILITIES":
+                                caps = parsed.get("capabilities") or {}
+                                session.capabilities = caps
+                                col_ver = caps.get("collector_version")
+                                if col_ver and isinstance(col_ver, str):
+                                    sanitized_ver = "".join(c for c in col_ver if c.isalnum() or c in ".-_")[:64]
+                                    if sanitized_ver:
+                                        session.collector_version = sanitized_ver
+                                        self._persist_collector_version(collector_id, sanitized_ver)
+                                continue
+                            elif f_type == "SCOUT_JOB_RESULT":
+                                self.handle_scout_job_result(collector_id, parsed, session_id=session.session_id)
+                                continue
+                            elif f_type == "HEARTBEAT" and "capabilities" in parsed:
+                                session.capabilities = parsed["capabilities"]
+                                if isinstance(parsed["capabilities"], dict):
+                                    col_ver = parsed["capabilities"].get("collector_version")
+                                    if col_ver and isinstance(col_ver, str):
+                                        sanitized_ver = "".join(c for c in col_ver if c.isalnum() or c in ".-_")[:64]
+                                        if sanitized_ver:
+                                            session.collector_version = sanitized_ver
+                                            self._persist_collector_version(collector_id, sanitized_ver)
+                    except Exception:
+                        pass
+                    return msg
+            websocket.receive_text = intercepted_receive_text
+
         self._sessions[collector_id] = session
         return session
 
@@ -465,6 +527,196 @@ class CollectorRegistry:
             future.set_result(result_payload)
             return True
         return False
+
+    def get_collector_capabilities(self, collector_id: uuid.UUID) -> Optional[dict]:
+        session = self.get_session(collector_id)
+        if session:
+            return session.capabilities
+        return None
+
+    def get_collector_version(self, collector_id: uuid.UUID) -> Optional[str]:
+        session = self.get_session(collector_id)
+        if session and session.collector_version:
+            return session.collector_version
+        return None
+
+    def _persist_collector_version(self, collector_id: uuid.UUID, version: str) -> None:
+        try:
+            from app.db import get_db_connection
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE collectors
+                        SET version = %s, updated_at = now()
+                        WHERE id = %s
+                        """,
+                        (version, str(collector_id)),
+                    )
+                conn.commit()
+        except Exception as e:
+            logger.debug("Could not persist collector %s version %s to DB: %s", collector_id, version, e)
+
+    def handle_scout_job_result(
+        self,
+        collector_id: uuid.UUID,
+        result_payload: dict,
+        session_id: Optional[uuid.UUID] = None
+    ) -> bool:
+        session = self.get_session(collector_id)
+        if not session:
+            logger.warning("unmatched_scout_job_result: collector %s has no active session", collector_id)
+            return False
+
+        if session_id is not None and session.session_id != session_id:
+            logger.warning("unmatched_scout_job_result: session_id mismatch for collector %s", collector_id)
+            return False
+
+        job_id_raw = result_payload.get("job_id")
+        if not job_id_raw:
+            logger.warning("unmatched_scout_job_result: missing job_id in payload")
+            return False
+
+        try:
+            job_uuid = uuid.UUID(str(job_id_raw))
+        except ValueError:
+            job_uuid = None
+
+        # Atomic pop replay guard
+        future = session.in_flight_jobs.pop(job_uuid, None) if job_uuid else None
+        future_str = session.in_flight_jobs.pop(str(job_id_raw), None)
+        matched_future = future or future_str
+
+        if not matched_future or matched_future.done():
+            logger.warning(
+                "unmatched_scout_job_result: job %s not found in session %s in_flight_jobs or already resolved",
+                job_id_raw, session.session_id
+            )
+            return False
+
+        matched_future.set_result(result_payload)
+        return True
+
+    async def dispatch_scout_job(
+        self,
+        collector_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        job_id: uuid.UUID,
+        engine: str,
+        profile: str,
+        target: str,
+        target_type: str,
+        network_scope: str,
+        timeout_seconds: int = 180,
+        expires_at_dt: Optional[datetime] = None,
+    ) -> dict:
+        session = self.get_session(collector_id)
+        if not session or not self.is_connected(collector_id):
+            return {
+                "job_id": str(job_id),
+                "engine": engine,
+                "status": "failed",
+                "error_code": "collector_disconnected",
+                "error_message": "Collector is not connected"
+            }
+        if session.tenant_id != tenant_id:
+            return {
+                "job_id": str(job_id),
+                "engine": engine,
+                "status": "failed",
+                "error_code": "tenant_mismatch",
+                "error_message": "Collector does not belong to the requested tenant"
+            }
+        if session.operator_status != "active":
+            return {
+                "job_id": str(job_id),
+                "engine": engine,
+                "status": "failed",
+                "error_code": "collector_inactive",
+                "error_message": f"Collector operator status is {session.operator_status}"
+            }
+
+        job_uuid = uuid.UUID(str(job_id))
+        job_str = str(job_uuid)
+
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future = loop.create_future()
+        session.in_flight_jobs[job_uuid] = future
+        session.in_flight_jobs[job_str] = future
+
+        if not expires_at_dt:
+            expires_at_dt = datetime.now(timezone.utc) + timedelta(seconds=int(timeout_seconds))
+        expires_at_str = expires_at_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        payload = {
+            "type": "SCOUT_JOB",
+            "job_id": job_str,
+            "engine": engine,
+            "profile": profile,
+            "target": target,
+            "target_type": target_type,
+            "network_scope": network_scope,
+            "timeout_seconds": int(timeout_seconds),
+            "expires_at": expires_at_str,
+        }
+
+        try:
+            await session.websocket.send_text(json.dumps(payload))
+        except Exception as e:
+            session.in_flight_jobs.pop(job_uuid, None)
+            session.in_flight_jobs.pop(job_str, None)
+            return {
+                "job_id": job_str,
+                "engine": engine,
+                "status": "failed",
+                "error_code": "collector_disconnected",
+                "error_message": f"Failed to send frame to collector: {e}"
+            }
+
+        grace_period = 15
+        total_timeout = int(timeout_seconds) + grace_period
+        try:
+            result = await asyncio.wait_for(future, timeout=total_timeout)
+            return result
+        except asyncio.TimeoutError:
+            session.in_flight_jobs.pop(job_uuid, None)
+            session.in_flight_jobs.pop(job_str, None)
+            return {
+                "job_id": job_str,
+                "engine": engine,
+                "status": "failed",
+                "error_code": "collector_timeout",
+                "error_message": f"Collector scan timed out after {total_timeout}s"
+            }
+        finally:
+            session.in_flight_jobs.pop(job_uuid, None)
+            session.in_flight_jobs.pop(job_str, None)
+
+    async def dispatch_check_update(
+        self,
+        collector_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        force_recheck: bool = False,
+    ) -> bool:
+        session = self.get_session(collector_id)
+        if not session or not self.is_connected(collector_id):
+            return False
+        if session.tenant_id != tenant_id:
+            return False
+
+        check_id = str(uuid.uuid4())
+        # Typed ServerFrame::CHECK_UPDATE carrying strictly check_id and force_recheck (Anti-RCE B.1, B.2)
+        payload = {
+            "type": "CHECK_UPDATE",
+            "check_id": check_id,
+            "force_recheck": force_recheck,
+        }
+        try:
+            await session.websocket.send_text(json.dumps(payload))
+            return True
+        except Exception as e:
+            logger.warning("Failed to send CHECK_UPDATE frame to collector %s: %s", collector_id, e)
+            return False
 
 
 # Global singleton registry for process

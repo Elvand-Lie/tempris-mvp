@@ -1,6 +1,15 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CheckUpdatePayload {
+    #[serde(default)]
+    pub check_id: Option<Uuid>,
+    #[serde(default)]
+    pub force_recheck: Option<bool>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[allow(non_camel_case_types)]
@@ -37,6 +46,87 @@ pub enum ServerFrame {
         #[serde(default)]
         timeout_seconds: Option<u64>,
     },
+    SCOUT_JOB {
+        job_id: Uuid,
+        engine: String,
+        profile: String,
+        target: String,
+        target_type: String,
+        network_scope: String,
+        timeout_seconds: u64,
+        expires_at: String,
+    },
+    CHECK_UPDATE(CheckUpdatePayload),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EngineCapability {
+    pub available: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub templates_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub integrity_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_checked_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prerequisite_health: Option<String>,
+}
+
+impl Default for EngineCapability {
+    fn default() -> Self {
+        Self {
+            available: false,
+            version: None,
+            templates_version: None,
+            managed: None,
+            status: None,
+            integrity_status: None,
+            path: None,
+            last_checked_at: None,
+            prerequisite_health: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScoutCapabilities {
+    pub nmap: EngineCapability,
+    pub nuclei: EngineCapability,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nuclei_templates: Option<EngineCapability>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collector_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_sequence: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_checked_at: Option<String>,
+}
+
+impl Default for ScoutCapabilities {
+    fn default() -> Self {
+        Self {
+            nmap: EngineCapability::default(),
+            nuclei: EngineCapability::default(),
+            nuclei_templates: None,
+            collector_version: None,
+            manifest_sequence: None,
+            channel: None,
+            update_status: None,
+            last_checked_at: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +141,24 @@ pub enum ClientFrame {
     },
     HEARTBEAT {
         timestamp: String,
+    },
+    SCOUT_CAPABILITIES {
+        capabilities: ScoutCapabilities,
+    },
+    SCOUT_JOB_RESULT {
+        job_id: Uuid,
+        engine: String,
+        status: String, // "completed" | "failed" | "rejected"
+        #[serde(default)]
+        exit_code: Option<i32>,
+        stdout: String,
+        stderr: String,
+        stdout_bytes: usize,
+        stderr_bytes: usize,
+        started_at: String,
+        completed_at: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error_message: Option<String>,
     },
     VERIFY_TARGET_RESULT {
         job_id: Uuid,
@@ -163,5 +271,90 @@ mod tests {
         assert!(res_json.contains("\"port_reached\":443"));
         assert!(res_json.contains("\"method\":\"tcp_probe\""));
         assert!(res_json.contains("\"status\":\"completed\""));
+
+        let scout_job_json = r#"{"type":"SCOUT_JOB","job_id":"a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d","engine":"nmap","profile":"SERVICE_DISCOVERY","target":"10.0.0.5","target_type":"ip","network_scope":"internal","timeout_seconds":180,"expires_at":"2026-09-05T12:00:00Z"}"#;
+        let scout_frame: ServerFrame = serde_json::from_str(scout_job_json).unwrap();
+        match scout_frame {
+            ServerFrame::SCOUT_JOB {
+                job_id,
+                engine,
+                profile,
+                target,
+                target_type,
+                network_scope,
+                timeout_seconds,
+                expires_at,
+            } => {
+                assert_eq!(job_id.to_string(), "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d");
+                assert_eq!(engine, "nmap");
+                assert_eq!(profile, "SERVICE_DISCOVERY");
+                assert_eq!(target, "10.0.0.5");
+                assert_eq!(target_type, "ip");
+                assert_eq!(network_scope, "internal");
+                assert_eq!(timeout_seconds, 180);
+                assert_eq!(expires_at, "2026-09-05T12:00:00Z");
+            }
+            _ => panic!("Expected SCOUT_JOB"),
+        }
+
+        let cap_frame = ClientFrame::SCOUT_CAPABILITIES {
+            capabilities: ScoutCapabilities {
+                nmap: EngineCapability {
+                    available: true,
+                    version: Some("7.94".to_string()),
+                    templates_version: None,
+                    managed: Some(false),
+                    status: Some("ready".to_string()),
+                    integrity_status: Some("verified".to_string()),
+                    path: Some("[EXTERNAL_NMAP]".to_string()),
+                    last_checked_at: Some("2026-09-05T12:00:00Z".to_string()),
+                    prerequisite_health: Some("healthy".to_string()),
+                },
+                nuclei: EngineCapability {
+                    available: false,
+                    version: None,
+                    templates_version: None,
+                    managed: Some(true),
+                    status: Some("missing".to_string()),
+                    integrity_status: None,
+                    path: None,
+                    last_checked_at: Some("2026-09-05T12:00:00Z".to_string()),
+                    prerequisite_health: None,
+                },
+                nuclei_templates: None,
+                collector_version: Some("0.4.0".to_string()),
+                manifest_sequence: Some(1),
+                channel: Some("stable".to_string()),
+                update_status: Some("up_to_date".to_string()),
+                last_checked_at: Some("2026-09-05T12:00:00Z".to_string()),
+            },
+        };
+        let cap_json = serde_json::to_string(&cap_frame).unwrap();
+        assert!(cap_json.contains("\"type\":\"SCOUT_CAPABILITIES\""));
+        assert!(cap_json.contains("\"available\":true"));
+        assert!(cap_json.contains("\"version\":\"7.94\""));
+        assert!(cap_json.contains("\"path\":\"[EXTERNAL_NMAP]\""));
+        assert!(cap_json.contains("\"collector_version\":\"0.4.0\""));
+        assert!(cap_json.contains("\"manifest_sequence\":1"));
+        assert!(cap_json.contains("\"update_status\":\"up_to_date\""));
+
+        let scout_res = ClientFrame::SCOUT_JOB_RESULT {
+            job_id: Uuid::new_v4(),
+            engine: "nuclei".to_string(),
+            status: "completed".to_string(),
+            exit_code: Some(0),
+            stdout: "{\"template-id\":\"CVE-2024-1234\"}\n".to_string(),
+            stderr: "".to_string(),
+            stdout_bytes: 35,
+            stderr_bytes: 0,
+            started_at: "2026-09-05T12:00:00Z".to_string(),
+            completed_at: "2026-09-05T12:00:05Z".to_string(),
+            error_message: None,
+        };
+        let scout_res_json = serde_json::to_string(&scout_res).unwrap();
+        assert!(scout_res_json.contains("\"type\":\"SCOUT_JOB_RESULT\""));
+        assert!(scout_res_json.contains("\"engine\":\"nuclei\""));
+        assert!(scout_res_json.contains("\"status\":\"completed\""));
+        assert!(scout_res_json.contains("\"stdout_bytes\":35"));
     }
 }

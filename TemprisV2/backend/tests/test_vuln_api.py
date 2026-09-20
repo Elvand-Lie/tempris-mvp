@@ -105,11 +105,15 @@ def seeded_intelligence_data():
             snapshot_id=snapshot_id,
         ))
 
-        # CVSS assessments: CNA Base CVSS 3.1 and NVD Base CVSS 3.1
+        # CVSS assessments: CNA Base CVSS 3.1 and NVD Base CVSS 3.1.
+        # P0-03: structural container_role is required for authority resolution.
         upsert_cvss_assessment(conn, CvssAssessment(
             cve_id="CVE-2023-99901",
             source="cve",
             assessor="apache",
+            assessment_type="cna",
+            container_role="cna",
+            provider_org_id="cna-apache@apache.org",
             cvss_version="3.1",
             vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
             base_score=9.8,
@@ -120,6 +124,9 @@ def seeded_intelligence_data():
             cve_id="CVE-2023-99901",
             source="nvd",
             assessor="nvd@nist.gov",
+            assessment_type="Primary",
+            container_role="nvd",
+            provider_org_id="nvd@nist.gov",
             cvss_version="3.1",
             vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
             base_score=9.8,
@@ -253,10 +260,14 @@ class TestVulnIntelligenceApiRead:
         assert "apache" in assessors
         assert "nvd@nist.gov" in assessors
 
-        # TES resolution
-        assert data["tes_resolution"]["is_scoreable"] is True
-        assert data["tes_resolution"]["resolved_score"] == 9.8
-        assert data["tes_resolution"]["resolution_tier"] == "cna"
+        # CVSS authority resolution (P0-03: intrinsic CVSS is never TES)
+        assert "tes_resolution" not in data
+        auth = data["cvss_authority"]
+        assert auth["is_scoreable"] is True
+        assert auth["score"] == 9.8
+        assert auth["role"] == "cna"
+        assert auth["version"] == "3.1"
+        assert auth["assessor"] == "apache"
 
         # Affected / applicability
         assert len(data["affected"]) == 1

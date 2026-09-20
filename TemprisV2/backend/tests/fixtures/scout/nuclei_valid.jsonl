@@ -1,0 +1,1 @@
+{"template-id":"CVE-2024-0001","matcher-name":"exact-product","type":"http","host":"https://demo.example","matched-at":"https://demo.example/path","info":{"name":"Exact evidence","severity":"high","classification":{"cve-id":["CVE-2024-0001"]}}}

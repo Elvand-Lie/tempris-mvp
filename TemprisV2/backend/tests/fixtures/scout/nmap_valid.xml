@@ -1,0 +1,2 @@
+<?xml version="1.0"?>
+<nmaprun scanner="nmap"><host><address addr="203.0.113.10" addrtype="ipv4"/><hostnames><hostname name="demo.example" type="user"/></hostnames><ports><port protocol="tcp" portid="443"><state state="open" reason="syn-ack"/><service name="https" product="Example CVE-2099-9999 banner" version="1.0"/></port></ports></host></nmaprun>

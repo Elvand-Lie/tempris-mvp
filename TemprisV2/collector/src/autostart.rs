@@ -941,7 +941,12 @@ pub fn handle_uac_helper_cli(action: &str, task_name_override: Option<&str>) -> 
                 if SingleInstanceGuard::is_another_instance_running(None) {
                     let _ = signal_core_shutdown(None);
                     if !wait_for_core_exit(None, std::time::Duration::from_millis(5000)) {
-                        return HelperExitCode::ShutdownTimeout as i32;
+                        let _ = Command::new("schtasks")
+                            .args(&["/End", "/TN", task_name])
+                            .output();
+                        if !wait_for_core_exit(None, std::time::Duration::from_millis(3000)) {
+                            return HelperExitCode::ShutdownTimeout as i32;
+                        }
                     }
                 }
 

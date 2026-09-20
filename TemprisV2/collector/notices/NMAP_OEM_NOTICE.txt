@@ -1,0 +1,10 @@
+TEMPRIS COLLECTOR — NMAP OEM LICENSING & PREREQUISITE NOTICE
+
+Tempris does NOT hold an OEM redistribution license for Nmap or Npcap.
+
+In accordance with Tempris product and legal policy:
+1. No Nmap or Npcap binary executables, libraries, or archives are bundled, hosted,
+   downloaded, or redistributed by Tempris.
+2. Nmap and Npcap are external customer/operator prerequisites only.
+3. The managed toolchain manifest unconditionally rejects Nmap and Npcap components.
+4. Tempris Collector will never automatically provision or update Nmap or Npcap.

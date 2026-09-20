@@ -8,8 +8,10 @@ pub mod lifecycle;
 pub mod logging;
 pub mod protocol;
 pub mod safety;
+pub mod scout_runner;
 pub mod singleton;
 pub mod storage;
+pub mod toolchain;
 pub mod ui;
 pub mod verifier;
 

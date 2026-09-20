@@ -173,5 +173,28 @@ pub async fn enroll_collector(
 
     info!("Saved local configuration to secure V0.2 storage (0 private keys transmitted on the wire).");
 
+    // Attempt offline toolchain package ingestion during enrollment if present
+    let toolchain_mgr = crate::toolchain::manager::ToolchainManager::new(storage_mgr.clone());
+    if let Some(pkg_dir) = toolchain_mgr.find_offline_package_dir() {
+        info!(
+            "Discovered offline toolchain package at '{}', attempting initial provisioning...",
+            pkg_dir.display()
+        );
+        match toolchain_mgr.ingest_offline_package(&pkg_dir).await {
+            Ok(state) => {
+                info!(
+                    "Successfully provisioned toolchain components from offline package during enrollment: {:?}",
+                    state.components.keys().collect::<Vec<_>>()
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Partial readiness notice: offline toolchain package provisioning during enrollment failed: {}. Identity remains securely enrolled.",
+                    e
+                );
+            }
+        }
+    }
+
     Ok((config, signing_key))
 }

@@ -12,12 +12,13 @@ from app.db import init_db, close_db, get_db_connection
 from app.config import VULN_SYNC_ENABLED, VULN_SYNC_CHECK_INTERVAL
 from app.migrations_check import ensure_migrations_applied
 from app.routes.assets import router as assets_router
-from app.routes.collectors import router as collectors_router
+from app.routes.collectors import router as collectors_router, v1_router as collectors_v1_router
 from app.routes.auth import router as auth_router
 from app.routes.org import router as org_router
 from app.routes.platform import router as platform_router
 from app.routes.vuln_intelligence import router as vuln_intelligence_router
 from app.routes.exposure import router as exposure_router
+from app.routes.scout import router as scout_router
 from app.target_validator import TargetValidationError
 from app.vuln_intelligence.sync_engine import run_sync_loop
 from app.vuln_intelligence.sync_adapters import ALL_ADAPTERS
@@ -92,10 +93,12 @@ def health_check():
 app.include_router(auth_router)
 app.include_router(assets_router)
 app.include_router(collectors_router)
+app.include_router(collectors_v1_router)
 app.include_router(org_router)
 app.include_router(platform_router)
 app.include_router(vuln_intelligence_router)
 app.include_router(exposure_router)
+app.include_router(scout_router)
 
 frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 if frontend_dist.is_dir():

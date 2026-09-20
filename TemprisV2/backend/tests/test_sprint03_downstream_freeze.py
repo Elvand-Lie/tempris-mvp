@@ -32,12 +32,15 @@ from app.vuln_intelligence.repository import (
     upsert_cvss_assessment,
     get_cvss_assessments,
     get_composed_cve_detail,
-    resolve_tes_cvss,
-    resolve_tes_cvss_assessment,
+    resolve_cvss_authority,
     search_vulnerabilities,
     upsert_kev_entry,
     upsert_epss_score,
     upsert_source_record,
+)
+from app.vuln_intelligence.models import (
+    CVSS_AUTHORITY_AMBIGUOUS,
+    CVSS_NO_AUTHORITATIVE_ASSESSMENT,
 )
 from app.vuln_intelligence.adapters.cve_adapter import process_cve_record
 from app.vuln_intelligence.adapters.nvd_adapter import process_nvd_cve
@@ -213,10 +216,11 @@ class TestSprint03Deliverable1StructuralProvenance:
             ))
             conn.commit()
 
-            res = resolve_tes_cvss_assessment(conn, cve_id)
-            assert res.resolved_score is None
-            assert res.resolution_tier is None
-            assert res.unscoreable_reason == "No eligible CNA or NVD CVSS 3.1 GENERAL assessment"
+            res = resolve_cvss_authority(conn, cve_id)
+            assert res.score == Decimal("6.1")
+            assert res.version == "3.1"
+            assert res.role == "adp"
+            assert res.reason_code is None
 
     def test_assertion_1_3_nvd_container_role_and_provider_org_id(self):
         """Assertion 1.3: NVD metrics ingestion stores container_role='nvd' and provider_org_id."""
@@ -259,7 +263,7 @@ class TestSprint03Deliverable1StructuralProvenance:
             assert a.provider_org_id == "nvd@nist.gov"
             assert a.base_score == Decimal("9.8")
 
-    def test_assertion_1_4_tes_resolution_selects_cna_even_if_short_name_differs(self):
+    def test_assertion_1_4_authority_resolution_selects_cna_even_if_short_name_differs(self):
         """Assertion 1.4: Deterministic TES resolution selects CNA CVSS 3.1 GENERAL even if assessor string != assigner_short_name."""
         cve_id = "CVE-2024-30005"
         with get_db_connection() as conn:
@@ -282,13 +286,13 @@ class TestSprint03Deliverable1StructuralProvenance:
             ))
             conn.commit()
 
-            res = resolve_tes_cvss_assessment(conn, cve_id)
-            assert res.resolution_tier == "cna"
-            assert res.resolved_score == Decimal("7.5")
-            assert res.resolved_assessor == "cve-coordination-team@vendor.com"
-            assert res.unscoreable_reason is None
+            res = resolve_cvss_authority(conn, cve_id)
+            assert res.role == "cna"
+            assert res.score == Decimal("7.5")
+            assert res.assessor == "cve-coordination-team@vendor.com"
+            assert res.reason_code is None
 
-    def test_assertion_1_5_tes_resolution_tier2_nvd_fallback(self):
+    def test_assertion_1_5_authority_resolution_nvd_role_when_no_cna(self):
         """Assertion 1.5: Deterministic TES resolution falls back to NVD CVSS 3.1 GENERAL (Tier 2) only when 0 CNA present."""
         cve_id = "CVE-2024-30006"
         with get_db_connection() as conn:
@@ -311,10 +315,10 @@ class TestSprint03Deliverable1StructuralProvenance:
             ))
             conn.commit()
 
-            res = resolve_tes_cvss_assessment(conn, cve_id)
-            assert res.resolution_tier == "nvd"
-            assert res.resolved_score == Decimal("7.8")
-            assert res.unscoreable_reason is None
+            res = resolve_cvss_authority(conn, cve_id)
+            assert res.role == "nvd"
+            assert res.score == Decimal("7.8")
+            assert res.reason_code is None
 
     def test_assertion_1_6_ambiguous_multiple_cna_assessments(self):
         """Assertion 1.6: CVE with >1 CNA CVSS 3.1 GENERAL assessments is unscoreable."""
@@ -347,10 +351,10 @@ class TestSprint03Deliverable1StructuralProvenance:
             ))
             conn.commit()
 
-            res = resolve_tes_cvss_assessment(conn, cve_id)
-            assert res.resolved_score is None
-            assert res.resolution_tier is None
-            assert res.unscoreable_reason == "Ambiguous: multiple CNA CVSS 3.1 GENERAL assessments"
+            res = resolve_cvss_authority(conn, cve_id)
+            assert res.score is None
+            assert res.reason_code == CVSS_AUTHORITY_AMBIGUOUS
+            assert res.ambiguous_rows is not None and len(res.ambiguous_rows) == 2
 
     def test_assertion_1_7_ambiguous_multiple_nvd_assessments(self):
         """Assertion 1.7: CVE with >1 NVD CVSS 3.1 GENERAL assessments (and 0 CNA) is unscoreable."""
@@ -385,13 +389,16 @@ class TestSprint03Deliverable1StructuralProvenance:
             ))
             conn.commit()
 
-            res = resolve_tes_cvss_assessment(conn, cve_id)
-            assert res.resolved_score is None
-            assert res.resolution_tier is None
-            assert res.unscoreable_reason == "Ambiguous: multiple NVD CVSS 3.1 GENERAL assessments"
+            res = resolve_cvss_authority(conn, cve_id)
+            assert res.score is None
+            assert res.reason_code == CVSS_AUTHORITY_AMBIGUOUS
+            assert res.ambiguous_rows is not None and len(res.ambiguous_rows) == 2
 
-    def test_assertion_1_8_non_cvss31_assessments_unscoreable_without_conversion(self):
-        """Assertion 1.8: CVE with only CVSS 4.0 or 2.0 is unscoreable under TES."""
+    def test_assertion_1_8_non_cvss31_assessments_scoreable_under_generation_priority(self):
+        """Assertion 1.8 (P0-03 revision): a CVSS 4.0 CNA assessment is the
+        authoritative intrinsic CVSS under the PRD v1.8 §3.5 #2 generation
+        ordering (4.0 > 3.1 > 3.0 > 2.0) — the pre-PRD 3.1-only freeze treated
+        it as unscoreable; the generation-aware resolver scoreable it."""
         cve_id = "CVE-2024-30009"
         with get_db_connection() as conn:
             upsert_canonical_vulnerability(conn, CanonicalVulnerability(
@@ -410,12 +417,17 @@ class TestSprint03Deliverable1StructuralProvenance:
             ))
             conn.commit()
 
-            res = resolve_tes_cvss_assessment(conn, cve_id)
-            assert res.resolved_score is None
-            assert res.unscoreable_reason == "No eligible CNA or NVD CVSS 3.1 GENERAL assessment"
+            res = resolve_cvss_authority(conn, cve_id)
+            assert res.score == Decimal("9.3")
+            assert res.version == "4.0"
+            assert res.role == "cna"
+            assert res.reason_code is None
 
-    def test_assertion_1_9_non_general_scenario_unscoreable(self):
-        """Assertion 1.9: CVE with CNA CVSS 3.1 having non-GENERAL scenario is unscoreable."""
+    def test_assertion_1_9_non_general_scenario_scoreable_no_scenario_filter(self):
+        """Assertion 1.9 (P0-03 revision): the authority resolver applies no
+        GENERAL-scenario filter — a non-GENERAL CNA assessment remains
+        authoritative intrinsic CVSS (the pre-PRD freeze marked it
+        unscoreable; PRD v1.8 §3.5 #2 removes the scenario gate)."""
         cve_id = "CVE-2024-30010"
         with get_db_connection() as conn:
             upsert_canonical_vulnerability(conn, CanonicalVulnerability(
@@ -434,9 +446,11 @@ class TestSprint03Deliverable1StructuralProvenance:
             ))
             conn.commit()
 
-            res = resolve_tes_cvss_assessment(conn, cve_id)
-            assert res.resolved_score is None
-            assert res.unscoreable_reason == "No eligible CNA or NVD CVSS 3.1 GENERAL assessment"
+            res = resolve_cvss_authority(conn, cve_id)
+            assert res.score == Decimal("9.8")
+            assert res.role == "cna"
+            assert res.scenario == "SPECIALIZED"
+            assert res.reason_code is None
 
     def test_assertion_1_10_migration_012_backfill_and_detail_exposure(self):
         """Assertion 1.10: Migration 012 backfill populates container_role and provider_org_id and detail exposes them."""
@@ -479,7 +493,7 @@ class TestSprint03Deliverable2DeterministicSearchFilters:
     """Verifies Assertions 2.1 through 2.6 (VI-QA-08 / GC-9)."""
 
     def test_assertion_2_1_single_score_range_evaluation(self):
-        """Assertion 2.1: CVE with CNA=9.8 and NVD=2.0 evaluates as single score 9.8 and excludes max_tes_cvss=3.0."""
+        """Assertion 2.1: CVE with CNA=9.8 and NVD=2.0 evaluates as single score 9.8 and excludes max_cvss=3.0."""
         cve_id = "CVE-2024-40001"
         with get_db_connection() as conn:
             upsert_canonical_vulnerability(conn, CanonicalVulnerability(
@@ -508,13 +522,13 @@ class TestSprint03Deliverable2DeterministicSearchFilters:
             ))
             conn.commit()
 
-            # Search with min_tes_cvss=9.0 -> matches (9.8 >= 9.0)
-            res_min = search_vulnerabilities(conn, q=cve_id, min_tes_cvss=9.0)
+            # Search with min_cvss=9.0 -> matches (9.8 >= 9.0)
+            res_min = search_vulnerabilities(conn, q=cve_id, min_cvss=9.0)
             cve_ids_min = [item["cve_id"] for item in res_min["items"]]
             assert cve_id in cve_ids_min
 
-            # Search with max_tes_cvss=3.0 -> DOES NOT match (9.8 is not <= 3.0, NVD 2.0 is superseded)
-            res_max = search_vulnerabilities(conn, q=cve_id, max_tes_cvss=3.0)
+            # Search with max_cvss=3.0 -> DOES NOT match (9.8 is not <= 3.0, NVD 2.0 is superseded)
+            res_max = search_vulnerabilities(conn, q=cve_id, max_cvss=3.0)
             cve_ids_max = [item["cve_id"] for item in res_max["items"]]
             assert cve_id not in cve_ids_max
 
@@ -540,14 +554,14 @@ class TestSprint03Deliverable2DeterministicSearchFilters:
                 ))
             conn.commit()
 
-            res = search_vulnerabilities(conn, min_tes_cvss=7.0, max_tes_cvss=9.0)
+            res = search_vulnerabilities(conn, min_cvss=7.0, max_cvss=9.0)
             returned_ids = [item["cve_id"] for item in res["items"]]
             assert cve_in in returned_ids
             assert cve_out_low not in returned_ids
             assert cve_out_high not in returned_ids
 
     def test_assertion_2_1b_exact_point_bound_filter(self):
-        """Assertion 2.1b: Exact point bound min_tes_cvss=9.8 & max_tes_cvss=9.8 matches only exact 9.8."""
+        """Assertion 2.1b: Exact point bound min_cvss=9.8 & max_cvss=9.8 matches only exact 9.8."""
         cve_exact = "CVE-2024-40005"
         cve_other = "CVE-2024-40006"
         with get_db_connection() as conn:
@@ -579,20 +593,23 @@ class TestSprint03Deliverable2DeterministicSearchFilters:
             ))
             conn.commit()
 
-            res = search_vulnerabilities(conn, min_tes_cvss=9.8, max_tes_cvss=9.8)
+            res = search_vulnerabilities(conn, min_cvss=9.8, max_cvss=9.8)
             returned_ids = [item["cve_id"] for item in res["items"]]
             assert cve_exact in returned_ids
             assert cve_other not in returned_ids
 
     def test_assertion_2_2_contradictory_bounds_return_zero_results(self):
-        """Assertion 2.2: Contradictory bounds min_tes_cvss=8.0 & max_tes_cvss=5.0 returns empty items."""
+        """Assertion 2.2: Contradictory bounds min_cvss=8.0 & max_cvss=5.0 returns empty items."""
         with get_db_connection() as conn:
-            res = search_vulnerabilities(conn, min_tes_cvss=8.0, max_tes_cvss=5.0)
+            res = search_vulnerabilities(conn, min_cvss=8.0, max_cvss=5.0)
             assert res["items"] == []
             assert res["total"] == 0
 
-    def test_assertion_2_3_unscoreable_cvss40_only_excluded_from_tes_search(self):
-        """Assertion 2.3: CVE with only CVSS 4.0 = 9.8 is excluded when TES score filters are active."""
+    def test_assertion_2_3_cvss40_only_included_under_generation_priority(self):
+        """Assertion 2.3 (P0-03 revision): a CVE with only CVSS 4.0 = 9.8 is
+        scoreable under the PRD v1.8 §3.5 #2 generation ordering and IS
+        matched when its score falls inside the filter bounds (the pre-PRD
+        3.1-only freeze excluded it)."""
         cve_id = "CVE-2024-40007"
         with get_db_connection() as conn:
             upsert_canonical_vulnerability(conn, CanonicalVulnerability(
@@ -610,9 +627,9 @@ class TestSprint03Deliverable2DeterministicSearchFilters:
             ))
             conn.commit()
 
-            res = search_vulnerabilities(conn, q=cve_id, min_tes_cvss=5.0)
+            res = search_vulnerabilities(conn, q=cve_id, min_cvss=5.0)
             returned_ids = [item["cve_id"] for item in res["items"]]
-            assert cve_id not in returned_ids
+            assert cve_id in returned_ids
 
     def test_assertion_2_4_ambiguous_cna_excluded_from_tes_search(self):
         """Assertion 2.4: CVE with ambiguous CNA assessments is excluded from TES score range search."""
@@ -642,12 +659,12 @@ class TestSprint03Deliverable2DeterministicSearchFilters:
             ))
             conn.commit()
 
-            res = search_vulnerabilities(conn, q=cve_id, min_tes_cvss=1.0)
+            res = search_vulnerabilities(conn, q=cve_id, min_cvss=1.0)
             returned_ids = [item["cve_id"] for item in res["items"]]
             assert cve_id not in returned_ids
 
     def test_assertion_2_5_combined_search_filters_with_active_kev(self):
-        """Assertion 2.5: Multi-filter search (min_tes_cvss, has_kev=True, min_epss) evaluates jointly."""
+        """Assertion 2.5: Multi-filter search (min_cvss, has_kev=True, min_epss) evaluates jointly."""
         cve_match = "CVE-2024-40009"
         cve_withdrawn = "CVE-2024-40010"
         with get_db_connection() as conn:
@@ -682,7 +699,7 @@ class TestSprint03Deliverable2DeterministicSearchFilters:
                 ))
             conn.commit()
 
-            res = search_vulnerabilities(conn, min_tes_cvss=8.0, has_kev=True, min_epss=0.80)
+            res = search_vulnerabilities(conn, min_cvss=8.0, has_kev=True, min_epss=0.80)
             returned_ids = [item["cve_id"] for item in res["items"]]
             assert cve_match in returned_ids
             assert cve_withdrawn not in returned_ids
@@ -691,17 +708,17 @@ class TestSprint03Deliverable2DeterministicSearchFilters:
         """Assertion 2.6: Strict SQL search vs Python resolver 100% equivalence on scores and tiers."""
         with get_db_connection() as conn:
             # Query candidate CVEs with a range filter
-            search_res = search_vulnerabilities(conn, min_tes_cvss=6.0, max_tes_cvss=10.0, limit=50)
+            search_res = search_vulnerabilities(conn, min_cvss=6.0, max_cvss=10.0, limit=50)
             assert search_res["items"], "Search should return items from seeded test set"
 
             for item in search_res["items"]:
                 cve_id = item["cve_id"]
-                py_res = resolve_tes_cvss_assessment(conn, cve_id)
+                py_res = resolve_cvss_authority(conn, cve_id)
                 # Python resolver must be scoreable
-                assert py_res.resolved_score is not None, f"CVE {cve_id} matched in search must be scoreable in Python"
-                assert py_res.unscoreable_reason is None
+                assert py_res.score is not None, f"CVE {cve_id} matched in search must be scoreable in Python"
+                assert py_res.reason_code is None
                 # Score must fall within filter bounds
-                assert Decimal("6.0") <= py_res.resolved_score <= Decimal("10.0")
+                assert Decimal("6.0") <= py_res.score <= Decimal("10.0")
 
 
 # ===========================================================================

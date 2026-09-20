@@ -102,6 +102,7 @@ class CollectorResponse(BaseModel):
     platform_metadata: dict = Field(default_factory=dict)
     req_rate_per_sec: Optional[float] = 0.0
     server_url: Optional[str] = None
+    capabilities: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
 

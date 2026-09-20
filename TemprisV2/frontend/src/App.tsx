@@ -26,6 +26,7 @@ import { ScanAuthModal, ScanAuthMode } from './components/ScanAuthModal';
 import { DecommissionModal } from './components/DecommissionModal';
 import { OrganizationConsole } from './components/OrganizationConsole';
 import { PlatformAdminConsole } from './components/PlatformAdminConsole';
+import { ScoutDashboard } from './components/ScoutDashboard';
 
 // Dedicated platform login-context tenant (Tempris Platform Control).
 // The operational Tempris tenant remains 11111111-1111-1111-1111-111111111111.
@@ -705,7 +706,7 @@ const AppShell: React.FC = () => {
       )}
 
       <main>
-        {(activeTab === 'assets' || activeTab === 'collectors') && !hasAssetsModule ? (
+        {(activeTab === 'assets' || activeTab === 'collectors' || activeTab === 'scout') && !hasAssetsModule ? (
           <ModuleNotEntitled module="ASSETS" />
         ) : activeTab === 'assets' ? (
           <div>
@@ -765,6 +766,12 @@ const AppShell: React.FC = () => {
               onDelete={handleDeleteCollector}
             />
           </div>
+        ) : activeTab === 'scout' ? (
+          <ScoutDashboard
+            assets={assets}
+            authorizations={authorizations}
+            onOpenAssets={() => setActiveTab('assets')}
+          />
         ) : (
           role === 'superadmin' ? (
             <OrganizationConsole />
@@ -827,6 +834,17 @@ const AppShell: React.FC = () => {
         onClose={() => {
           setIsDetailCollectorOpen(false);
           setDetailCollector(null);
+        }}
+        onRefreshCollector={async () => {
+          await loadData();
+          if (detailCollector) {
+            try {
+              const updated = await api.getCollector(detailCollector.id);
+              setDetailCollector(updated);
+            } catch {
+              // ignore
+            }
+          }
         }}
       />
 

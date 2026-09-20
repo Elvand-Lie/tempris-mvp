@@ -48,6 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {expanded && <h2>Tenant Console</h2>}
             {link('assets', '🛡️', 'Assets Console')}
             {link('collectors', '📡', 'Collectors Console')}
+            {link('scout', '🔭', 'SCOUT')}
           </section>
         )}
 

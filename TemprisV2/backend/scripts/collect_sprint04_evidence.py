@@ -36,7 +36,7 @@ from app.vuln_intelligence.repository import (
     get_composed_cve_detail,
     search_vulnerabilities,
     get_source_records_by_cve,
-    resolve_tes_cvss,
+    resolve_cvss_authority,
     create_sync_snapshot,
     complete_sync_snapshot,
     upsert_canonical_vulnerability,
@@ -257,7 +257,7 @@ def run_bounded_evidence_collection():
                         }
                         for a in detail["cvss_assessments"]
                     ],
-                    "tes_resolution": detail["tes_resolution"],
+                    "cvss_authority": detail["cvss_authority"],
                     "has_kev": detail["kev"] is not None,
                     "has_epss": detail["epss"] is not None,
                     "osv_linked_count": len(detail["osv_records"]),

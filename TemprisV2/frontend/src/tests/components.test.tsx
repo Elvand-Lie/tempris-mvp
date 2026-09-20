@@ -51,6 +51,7 @@ vi.mock('../api', async (importOriginal) => {
       releaseCollector: vi.fn(),
       revokeCollector: vi.fn(),
       deleteCollector: vi.fn(),
+      checkCollectorUpdate: vi.fn(),
       getPlatformTenants: vi.fn(),
       getCatalogue: vi.fn(),
     },
@@ -1377,5 +1378,193 @@ describe('Tempris V2 Frontend Components', () => {
     expect(await screen.findByText(/Cannot delete collector: 2 active assets still reference this collector./i)).toBeInTheDocument();
     expect(onSuccess).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('renders distinct state concepts in CollectorDetailModal (H.1, H.6)', () => {
+    const mockCollector: Collector = {
+      id: 'c-test-1111-1111-1111-111111111111',
+      tenant_id: '00000000-0000-0000-0000-000000000001',
+      name: 'SCOUT-PROD-01',
+      description: 'Internal probe',
+      enrollment_status: 'enrolled',
+      operator_status: 'active',
+      connection_status: 'connected',
+      status: 'connected',
+      platform_metadata: { os: 'Windows 11', hostname: 'WIN-HOST-01' },
+      req_rate_per_sec: 0.25,
+      capabilities: {
+        nmap: {
+          available: true,
+          version: '7.94',
+          managed: false,
+          status: 'ready',
+          path: '[EXTERNAL_NMAP]',
+          last_checked_at: '2026-09-06T12:00:00Z',
+          prerequisite_health: 'healthy',
+        },
+        nuclei: {
+          available: true,
+          version: '3.3.0',
+          managed: true,
+          status: 'ready',
+          path: '[MANAGED_NUCLEI]',
+          last_checked_at: '2026-09-06T12:00:00Z',
+        },
+        nuclei_templates: {
+          available: true,
+          version: '10.0.0',
+          managed: true,
+          status: 'ready',
+          path: '[MANAGED_TEMPLATES]',
+        },
+        update_status: 'up_to_date',
+        last_checked_at: '2026-09-06T12:00:00Z',
+      },
+      created_at: '2026-08-28T00:00:00Z',
+      updated_at: '2026-08-28T00:00:00Z',
+    };
+
+    render(
+      <CollectorDetailModal
+        collector={mockCollector}
+        isOpen={true}
+        onClose={vi.fn()}
+      />
+    );
+
+    // H.1: Distinct state concepts
+    expect(screen.getByText(/System & Connection Status/i)).toBeInTheDocument();
+    expect(screen.getByText(/SCOUT Engines & External Prerequisites/i)).toBeInTheDocument();
+    expect(screen.getByText(/External Nmap Prerequisite/i)).toBeInTheDocument();
+    expect(screen.getByText(/Ready \(v7.94\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/\[EXTERNAL_NMAP\]/)).toBeInTheDocument();
+    expect(screen.getByText(/Managed Nuclei Engine/i)).toBeInTheDocument();
+    expect(screen.getByText(/Ready \(v3.3.0\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/\[MANAGED_NUCLEI\]/)).toBeInTheDocument();
+    expect(screen.getByText(/\[MANAGED_TEMPLATES\]/)).toBeInTheDocument();
+
+    // H.6: Update status and timestamp visibly rendered
+    expect(screen.getByText(/Toolchain Update Status/i)).toBeInTheDocument();
+    expect(screen.getByText('up to date')).toBeInTheDocument();
+  });
+
+  it('renders SCOUT PARTIALLY READY — NMAP PREREQUISITE MISSING and nmap.org guidance when Nuclei is ready but Nmap is missing (H.2, H.3)', () => {
+    const partialCollector: Collector = {
+      id: 'c-partial-2222-2222-2222-222222222222',
+      tenant_id: '00000000-0000-0000-0000-000000000001',
+      name: 'PARTIAL-WIN-01',
+      description: 'Host without Nmap',
+      enrollment_status: 'enrolled',
+      operator_status: 'active',
+      connection_status: 'connected',
+      status: 'connected',
+      platform_metadata: { os: 'Windows 10' },
+      req_rate_per_sec: 0.0,
+      capabilities: {
+        nmap: {
+          available: false,
+          managed: false,
+          status: 'missing',
+          path: '[EXTERNAL_NMAP]',
+          prerequisite_health: 'NMAP_MISSING',
+        },
+        nuclei: {
+          available: true,
+          version: '3.3.0',
+          managed: true,
+          status: 'ready',
+          path: '[MANAGED_NUCLEI]',
+        },
+        update_status: 'up_to_date',
+        last_checked_at: '2026-09-06T12:00:00Z',
+      },
+      created_at: '2026-08-28T00:00:00Z',
+      updated_at: '2026-08-28T00:00:00Z',
+    };
+
+    render(
+      <CollectorDetailModal
+        collector={partialCollector}
+        isOpen={true}
+        onClose={vi.fn()}
+      />
+    );
+
+    // H.2: Partial readiness badge rendered
+    expect(screen.getByText('SCOUT PARTIALLY READY — NMAP PREREQUISITE MISSING')).toBeInTheDocument();
+
+    // H.3: Guidance explaining Nmap must be installed from official nmap.org
+    expect(screen.getByText(/External Dependency Requirement: Nmap & Npcap/i)).toBeInTheDocument();
+    expect(screen.getByText(/Nmap and Npcap cannot be downloaded, installed, or redistributed by Tempris/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /nmap\.org/i })).toHaveAttribute('href', 'https://nmap.org');
+  });
+
+  it('renders Check Again button, enables when connected and dispatches checkCollectorUpdate, and disables when offline (H.4, H.5)', async () => {
+    const connectedCollector: Collector = {
+      id: 'c-check-3333-3333-3333-333333333333',
+      tenant_id: '00000000-0000-0000-0000-000000000001',
+      name: 'CHECK-WIN-01',
+      description: null,
+      enrollment_status: 'enrolled',
+      operator_status: 'active',
+      connection_status: 'connected',
+      status: 'connected',
+      platform_metadata: {},
+      req_rate_per_sec: 0.0,
+      capabilities: {
+        update_status: 'up_to_date',
+      },
+      created_at: '2026-08-28T00:00:00Z',
+      updated_at: '2026-08-28T00:00:00Z',
+    };
+
+    vi.mocked(api.checkCollectorUpdate).mockResolvedValueOnce({
+      status: 'checking',
+      collector_id: connectedCollector.id,
+      message: 'Toolchain update check dispatched successfully',
+    });
+
+    const onRefresh = vi.fn();
+
+    const { rerender } = render(
+      <CollectorDetailModal
+        collector={connectedCollector}
+        isOpen={true}
+        onClose={vi.fn()}
+        onRefreshCollector={onRefresh}
+      />
+    );
+
+    // H.4: Check Again button is enabled and triggers manual check API
+    const checkBtn = screen.getByRole('button', { name: /Check Again/i });
+    expect(checkBtn).not.toBeDisabled();
+
+    fireEvent.click(checkBtn);
+
+    await waitFor(() => {
+      expect(api.checkCollectorUpdate).toHaveBeenCalledWith(connectedCollector.id);
+      expect(onRefresh).toHaveBeenCalled();
+    });
+
+    expect(await screen.findByText(/Toolchain update check dispatched successfully/i)).toBeInTheDocument();
+
+    // H.5: Disabled when collector is offline
+    const offlineCollector: Collector = {
+      ...connectedCollector,
+      connection_status: 'offline',
+      status: 'offline',
+    };
+
+    rerender(
+      <CollectorDetailModal
+        collector={offlineCollector}
+        isOpen={true}
+        onClose={vi.fn()}
+      />
+    );
+
+    const checkBtnOffline = screen.getByRole('button', { name: /Check Again/i });
+    expect(checkBtnOffline).toBeDisabled();
+    expect(checkBtnOffline).toHaveAttribute('title', expect.stringContaining('offline'));
   });
 });

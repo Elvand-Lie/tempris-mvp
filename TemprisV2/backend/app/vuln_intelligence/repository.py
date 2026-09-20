@@ -25,19 +25,37 @@ from app.vuln_intelligence.models import (
     AuthorityError,
     CanonicalVulnerability,
     CvssAssessment,
+    CvssAuthorityResolution,
     CveRelationship,
     CveAffected,
     CveAdpEntry,
+    EpssFreshnessResolution,
     EpssScore,
+    FEED_FRESHNESS_WINDOW,
     KevEntry,
+    KevTernaryResolution,
     MassWithdrawalExceededError,
     OsvAlias,
     OsvRecord,
+    ResolverProvenance,
     SourceArtifact,
     SourceRecord,
     SyncSnapshot,
     SyncState,
-    TesResolution,
+    CVSS_AUTHORITY_AMBIGUOUS,
+    CVSS_MISSING_CVE,
+    CVSS_NO_AUTHORITATIVE_ASSESSMENT,
+    EPSS_MISSING_SNAPSHOT,
+    EPSS_MISSING_SYNC_STATE,
+    EPSS_NEVER_IMPORTED,
+    EPSS_NO_OBSERVATION,
+    EPSS_STALE,
+    EPSS_UNHEALTHY,
+    KEV_MISSING_SNAPSHOT,
+    KEV_MISSING_SYNC_STATE,
+    KEV_NEVER_IMPORTED,
+    KEV_STALE,
+    KEV_UNHEALTHY,
     validate_cve_id,
 )
 
@@ -386,92 +404,459 @@ def _row_to_cvss(row: dict) -> CvssAssessment:
 
 
 # ---------------------------------------------------------------------------
-# TES-input CVSS resolver
+# CVSS authority resolver (P0-03, PRD-000 v1.8 §3.5 #2)
 # ---------------------------------------------------------------------------
 
-def resolve_tes_cvss(
+# Newest-generation-first authority ordering (contract, §3.5 #2). Version
+# wins before role: a CVSS 4.0 ADP row beats a CVSS 3.1 CNA row.
+_CVSS_VERSION_PRIORITY = ("4.0", "3.1", "3.0", "2.0")
+_CVSS_ROLE_PRIORITY = ("cna", "nvd", "adp")
+
+
+def _authority_reason(code: str) -> str:
+    """Human-readable text for a stable CVSS resolver reason code."""
+    return {
+        CVSS_MISSING_CVE: "CVE not found",
+        CVSS_NO_AUTHORITATIVE_ASSESSMENT: "No authoritative CVSS assessment for this CVE",
+        CVSS_AUTHORITY_AMBIGUOUS: "Ambiguous: multiple current assessments share the winning version and role",
+    }[code]
+
+
+def resolve_cvss_authority(
     conn: psycopg.Connection,
     cve_id: str,
-) -> TesResolution:
-    """
-    Deterministic TES-input resolver (Sprint 03 - VI-QA-09):
-      1. One unambiguous current general/default Base CVSS 3.1 authored by the
-         assigning CNA container (container_role = 'cna') → use it (Tier 1).
-      2. Else one unambiguous current general/default Base CVSS 3.1 authored by
-         NVD/NIST (container_role = 'nvd' or source = 'nvd') → use it (Tier 2).
-      3. Else → unscoreable with reason.
+) -> CvssAuthorityResolution:
+    """Deterministic CVSS authority resolver (P0-03; PRD-000 v1.8 §3.5 #2).
 
-    CVSS 4.0, 3.0, and 2.0 and ADP containers remain available evidence but are never TES inputs.
-    No CVSS version conversion occurs.
+    Selection over ``cvss_assessments``:
+      1. ``is_current = TRUE`` rows only.
+      2. Highest supported version present: 4.0 > 3.1 > 3.0 > 2.0.
+         Version wins before role — a 4.0 ADP row beats a 3.1 CNA row.
+      3. Within that version, highest authority role present:
+         CNA > NVD > ADP, by structural ``container_role`` only. Assessor,
+         source strings, timestamps and IDs are never used to infer
+         authority or to tie-break.
+      4. If more than one row survives at the winning version+role, the
+         result is unscoreable with the stable reason code
+         ``cvss_authority_ambiguous`` — no fallback to a lower role or
+         version, and no selection by score, scenario, or insertion order.
+
+    No scenario filter is applied: different scenarios legitimately produce
+    the tie the ambiguity rule must detect. No CVSS version conversion
+    occurs. The selected row's complete provenance is returned.
     """
-    # Get the canonical vulnerability
     vuln = get_canonical_vulnerability(conn, cve_id)
     if vuln is None:
-        return TesResolution(cve_id=cve_id, unscoreable_reason="CVE not found")
+        return CvssAuthorityResolution(
+            cve_id=cve_id,
+            reason_code=CVSS_MISSING_CVE,
+            reason=_authority_reason(CVSS_MISSING_CVE),
+        )
 
-    # Get all current CVSS 3.1 assessments with GENERAL scenario
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT * FROM cvss_assessments
-            WHERE cve_id = %s
-              AND cvss_version = '3.1'
-              AND COALESCE(scenario, 'GENERAL') = 'GENERAL'
-              AND is_current = TRUE
-            ORDER BY assessor;
+            SELECT *
+            FROM cvss_assessments
+            WHERE cve_id = %s AND is_current = TRUE;
             """,
             (cve_id,),
         )
         rows = cur.fetchall()
 
     if not rows:
-        return TesResolution(cve_id=cve_id, unscoreable_reason="No eligible CNA or NVD CVSS 3.1 GENERAL assessment")
-
-    # Tier 1: assigning CNA assessment via structural container_role == 'cna'
-    # Fallback to source == 'cve' AND (assessment_type == 'cna' OR assessment_type IS NULL) for backwards compatibility
-    cna_assessments = [
-        r for r in rows
-        if r.get("container_role") == "cna"
-        or (r.get("container_role") is None and r.get("source") == "cve" and r.get("assessment_type") in ("cna", None))
-    ]
-    if len(cna_assessments) == 1:
-        a = cna_assessments[0]
-        return TesResolution(
+        return CvssAuthorityResolution(
             cve_id=cve_id,
-            resolved_score=Decimal(str(a["base_score"])),
-            resolved_vector=a["vector_string"],
-            resolved_severity=a.get("base_severity"),
-            resolved_assessor=a["assessor"],
-            resolution_tier="cna",
+            reason_code=CVSS_NO_AUTHORITATIVE_ASSESSMENT,
+            reason=_authority_reason(CVSS_NO_AUTHORITATIVE_ASSESSMENT),
         )
-    if len(cna_assessments) > 1:
-        return TesResolution(cve_id=cve_id, unscoreable_reason="Ambiguous: multiple CNA CVSS 3.1 GENERAL assessments")
 
-    # Tier 2: NVD assessment via structural container_role == 'nvd' or source == 'nvd'
-    nvd_assessments = [
-        r for r in rows
-        if r.get("container_role") == "nvd"
-        or (r.get("container_role") is None and r.get("source") == "nvd")
-        or (r.get("source") == "nvd")
-    ]
-    if len(nvd_assessments) == 1:
-        a = nvd_assessments[0]
-        return TesResolution(
+    # Step 2: newest supported generation present.
+    versions_present = {r["cvss_version"] for r in rows}
+    winning_version = next(
+        (v for v in _CVSS_VERSION_PRIORITY if v in versions_present), None
+    )
+    if winning_version is None:
+        # cvss_version is schema-constrained to the four supported values,
+        # so this is defensive only.
+        return CvssAuthorityResolution(
             cve_id=cve_id,
-            resolved_score=Decimal(str(a["base_score"])),
-            resolved_vector=a["vector_string"],
-            resolved_severity=a.get("base_severity"),
-            resolved_assessor=a["assessor"],
-            resolution_tier="nvd",
+            reason_code=CVSS_NO_AUTHORITATIVE_ASSESSMENT,
+            reason=_authority_reason(CVSS_NO_AUTHORITATIVE_ASSESSMENT),
         )
-    if len(nvd_assessments) > 1:
-        return TesResolution(cve_id=cve_id, unscoreable_reason="Ambiguous: multiple NVD CVSS 3.1 GENERAL assessments")
 
-    # No eligible tier matched (e.g. only ADP containers)
-    return TesResolution(cve_id=cve_id, unscoreable_reason="No eligible CNA or NVD CVSS 3.1 GENERAL assessment")
+    # Step 3: highest structural authority role within the winning version.
+    version_rows = [r for r in rows if r["cvss_version"] == winning_version]
+    roles_present = {r.get("container_role") for r in version_rows}
+    winning_role = next(
+        (role for role in _CVSS_ROLE_PRIORITY if role in roles_present), None
+    )
+    if winning_role is None:
+        # Missing/unknown structural role: fail closed — authority is never
+        # inferred from source strings.
+        return CvssAuthorityResolution(
+            cve_id=cve_id,
+            reason_code=CVSS_NO_AUTHORITATIVE_ASSESSMENT,
+            reason=(
+                "No authoritative CVSS assessment: current rows lack a "
+                "structural container_role (cna/nvd/adp)"
+            ),
+        )
+
+    winners = [r for r in version_rows if r.get("container_role") == winning_role]
+
+    if len(winners) > 1:
+        # Step 4: fail closed. Ambiguity is a counted data defect, never
+        # silently resolved; provenance of every surviving winner is
+        # returned for inspection. No fallback to a lower role/version.
+        return CvssAuthorityResolution(
+            cve_id=cve_id,
+            version=winning_version,
+            role=winning_role,
+            ambiguous_rows=[{
+                "assessment_id": str(r["id"]),
+                "assessor": r["assessor"],
+                "provider_org_id": r.get("provider_org_id"),
+                "scenario": r.get("scenario"),
+                "score": Decimal(str(r["base_score"])),
+                "vector": r["vector_string"],
+                "source_record_id": str(r["source_record_id"]) if r.get("source_record_id") else None,
+                "created_at": _ts(r.get("created_at")),
+            } for r in winners],
+            reason_code=CVSS_AUTHORITY_AMBIGUOUS,
+            reason=_authority_reason(CVSS_AUTHORITY_AMBIGUOUS),
+        )
+
+    a = winners[0]
+    return CvssAuthorityResolution(
+        cve_id=cve_id,
+        assessment_id=str(a["id"]),
+        version=a["cvss_version"],
+        role=a.get("container_role"),
+        assessor=a["assessor"],
+        provider_org_id=a.get("provider_org_id"),
+        scenario=a.get("scenario"),
+        score=Decimal(str(a["base_score"])),
+        severity=a.get("base_severity"),
+        vector=a["vector_string"],
+        source=a["source"],
+        source_record_id=str(a["source_record_id"]) if a.get("source_record_id") else None,
+        created_at=a.get("created_at"),
+        is_current=a["is_current"],
+    )
 
 
-resolve_tes_cvss_assessment = resolve_tes_cvss
+# ---------------------------------------------------------------------------
+# Feed freshness gate (P0-03, PRD-000 §3.3.3)
+# ---------------------------------------------------------------------------
+
+def _feed_gate(
+    conn: psycopg.Connection,
+    source: str,
+    *,
+    as_of: datetime,
+    missing_code: str,
+    unhealthy_code: str,
+    never_code: str,
+    stale_code: str,
+    snapshot_code: str,
+) -> tuple[bool, str, Optional[SyncState]]:
+    """Shared EPSS/KEV freshness gate over the caller's transaction snapshot.
+
+    Fresh requires ALL of:
+      * sync_state row exists for the source;
+      * ``is_healthy = TRUE`` (a preserved last-good generation under an
+        unhealthy source is retained data, never fresh data);
+      * ``last_successful_at`` is not NULL and ``as_of - last_successful_at
+        <= 48h`` (exactly 48h is fresh; the scheduling interval is never the
+        threshold);
+      * ``last_good_snapshot_id`` is not NULL — the authoritative last-good
+        generation pointer (migration 009). A failed import may advance the
+        operational ``last_snapshot_id`` but never this pointer; with no
+        last-good generation the resolver cannot establish fresh
+        authoritative data.
+
+    Returns (fresh, reason_code, sync_state_row). Coherence: callers must run
+    this and the observation lookup inside one SQL statement or one caller-
+    owned REPEATABLE READ transaction established before the first query —
+    this helper never commits or rolls back.
+    """
+    state = get_sync_state(conn, source)
+    if state is None:
+        return False, missing_code, None
+    if not state.is_healthy:
+        return False, unhealthy_code, state
+    if state.last_successful_at is None:
+        return False, never_code, state
+    last_success = state.last_successful_at
+    if last_success.tzinfo is None:
+        last_success = last_success.replace(tzinfo=timezone.utc)
+    age = (as_of - last_success).total_seconds()
+    if age > FEED_FRESHNESS_WINDOW.total_seconds():
+        return False, stale_code, state
+    if state.last_good_snapshot_id is None:
+        return False, snapshot_code, state
+    return True, "", state
+
+
+def _feed_provenance(state: Optional[SyncState], as_of: datetime) -> ResolverProvenance:
+    """Provenance block shared by the EPSS and KEV resolver results.
+
+    Distinguishes the operational last attempt (``last_snapshot_id``, may
+    point at a failed import) from the authoritative last-good generation
+    (``last_good_snapshot_id``) the resolvers bind to.
+    """
+    if state is None:
+        return ResolverProvenance(source="")
+    last_success = state.last_successful_at
+    if last_success is not None and last_success.tzinfo is None:
+        last_success = last_success.replace(tzinfo=timezone.utc)
+    age = (
+        (as_of - last_success).total_seconds()
+        if last_success is not None
+        else None
+    )
+    return ResolverProvenance(
+        source=state.source,
+        is_healthy=state.is_healthy,
+        last_successful_at=state.last_successful_at,
+        last_snapshot_id=state.last_snapshot_id,
+        last_good_snapshot_id=state.last_good_snapshot_id,
+        freshness_age_seconds=age,
+    )
+
+
+# ---------------------------------------------------------------------------
+# EPSS freshness resolver (P0-03)
+# ---------------------------------------------------------------------------
+
+def resolve_epss_freshness(
+    conn: psycopg.Connection,
+    cve_id: str,
+    *,
+    as_of: Optional[datetime] = None,
+) -> EpssFreshnessResolution:
+    """Structured EPSS resolver returning value, state, freshness and
+    provenance (P0-03). EPSS is ``fresh`` only when the shared feed gate
+    passes AND an ``epss_scores`` row is found whose ``source_record_id``
+    belongs to the feed's exact authoritative ``last_good_snapshot_id``.
+
+    Membership in the authoritative generation is a WHERE filter applied
+    BEFORE ordering: a newer local row from a failed, partial, running, or
+    unrelated snapshot can never hide the intact last-good observation, and
+    a non-authoritative newer row is never a mismatch signal by itself.
+    Within the authoritative generation the newest observation wins.
+
+    Exactly 48 hours is fresh; beyond 48 hours is stale. The scheduling
+    interval is never the freshness threshold. Unknown states carry stable
+    EPSS_* reason codes. The TES EPSS ladder is P0-04's — no rung value is
+    assigned here.
+
+    ``as_of`` defaults to the server UTC clock; tests pass it explicitly for
+    determinism. No commit / rollback: reads share the caller's transaction.
+    """
+    as_of = as_of or datetime.now(timezone.utc)
+    if as_of.tzinfo is None:
+        as_of = as_of.replace(tzinfo=timezone.utc)
+
+    fresh, code, state = _feed_gate(
+        conn, "epss",
+        as_of=as_of,
+        missing_code=EPSS_MISSING_SYNC_STATE,
+        unhealthy_code=EPSS_UNHEALTHY,
+        never_code=EPSS_NEVER_IMPORTED,
+        stale_code=EPSS_STALE,
+        snapshot_code=EPSS_MISSING_SNAPSHOT,
+    )
+    provenance = _feed_provenance(state, as_of)
+    if not fresh:
+        return EpssFreshnessResolution(
+            cve_id=cve_id,
+            state="unknown",
+            reason_code=code,
+            reason=_FEED_REASON_TEXT[code],
+            provenance=provenance,
+        )
+
+    # Generation filter FIRST, ordering SECOND: only observations whose
+    # source record belongs to the exact authoritative last-good snapshot
+    # are candidates at all. Rows from failed/partial/running/unrelated
+    # snapshots are excluded by the WHERE, not outranked.
+    good_snapshot_id = state.last_good_snapshot_id
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT ep.cve_id, ep.score, ep.percentile, ep.model_version,
+                   ep.score_date, ep.source_record_id,
+                   sr.snapshot_id
+            FROM epss_scores ep
+            JOIN vuln_source_records sr ON sr.id = ep.source_record_id
+            WHERE ep.cve_id = %s
+              AND sr.snapshot_id = %s
+            ORDER BY ep.score_date DESC, ep.created_at DESC
+            LIMIT 1;
+            """,
+            (cve_id, good_snapshot_id),
+        )
+        row = cur.fetchone()
+
+    if row is None:
+        # The feed is fresh and healthy, but this CVE has no observation
+        # inside the authoritative generation.
+        return EpssFreshnessResolution(
+            cve_id=cve_id,
+            state="unknown",
+            reason_code=EPSS_NO_OBSERVATION,
+            reason=_FEED_REASON_TEXT[EPSS_NO_OBSERVATION],
+            provenance=provenance,
+        )
+
+    return EpssFreshnessResolution(
+        cve_id=cve_id,
+        state="fresh",
+        score=Decimal(str(row["score"])),
+        percentile=Decimal(str(row["percentile"])),
+        model_version=row.get("model_version"),
+        score_date=row.get("score_date"),
+        source_record_id=str(row["source_record_id"]) if row.get("source_record_id") else None,
+        snapshot_id=str(row["snapshot_id"]),
+        provenance=provenance,
+    )
+
+
+# ---------------------------------------------------------------------------
+# KEV ternary resolver (P0-03, PRD-000 v1.8 §3.3.3)
+# ---------------------------------------------------------------------------
+
+def resolve_kev_status(
+    conn: psycopg.Connection,
+    cve_id: str,
+    *,
+    as_of: Optional[datetime] = None,
+) -> KevTernaryResolution:
+    """Ternary KEV resolver: exactly one of listed / not_listed / unknown.
+
+    ``listed`` or ``not_listed`` requires the shared feed gate (healthy,
+    last successful import ≤ 48h old) AND a non-null authoritative
+    ``last_good_snapshot_id``. Membership is then evaluated strictly INSIDE
+    that exact authoritative snapshot generation:
+
+      * an active matching entry whose source record belongs to the last-good
+        snapshot => ``listed``;
+      * NO matching entry in that snapshot => ``not_listed`` (a normal delist
+        in a fresh authoritative feed is definitive, never unknown);
+      * a reconciled inactive historical entry (its source record belongs to
+        an older generation) is ignored when deciding the current state — it
+        neither establishes listing nor turns a fresh delist into unknown.
+
+    Old-snapshot rows and rows written by failed/running snapshots are
+    filtered out by the generation predicate before any ordering. A failed
+    newer import may advance the operational ``last_snapshot_id`` but never
+    replaces the authoritative last-good generation (that is the sync
+    engine's last-good semantics, which this resolver reads, never
+    re-derives). Stale/unhealthy feeds, or a feed without a last-good
+    generation, remain ``unknown``. Rung values are P0-04's — none are
+    assigned here.
+
+    ``as_of`` defaults to the server UTC clock. No commit / rollback: reads
+    share the caller's transaction.
+    """
+    as_of = as_of or datetime.now(timezone.utc)
+    if as_of.tzinfo is None:
+        as_of = as_of.replace(tzinfo=timezone.utc)
+
+    fresh, code, state = _feed_gate(
+        conn, "kev",
+        as_of=as_of,
+        missing_code=KEV_MISSING_SYNC_STATE,
+        unhealthy_code=KEV_UNHEALTHY,
+        never_code=KEV_NEVER_IMPORTED,
+        stale_code=KEV_STALE,
+        snapshot_code=KEV_MISSING_SNAPSHOT,
+    )
+    provenance = _feed_provenance(state, as_of)
+    if not fresh:
+        return KevTernaryResolution(
+            cve_id=cve_id,
+            state="unknown",
+            reason_code=code,
+            reason=_FEED_REASON_TEXT[code],
+            provenance=provenance,
+        )
+
+    # Generation filter FIRST: only entries whose source record belongs to
+    # the exact authoritative last-good snapshot are current-membership
+    # evidence at all. Reconciled inactive rows retain their OLD source
+    # record, so a delist leaves no row inside the fresh generation — and
+    # correctly reads as not_listed below, not unknown.
+    good_snapshot_id = state.last_good_snapshot_id
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT k.id, k.declared_cve_id, k.cve_id, k.known_ransomware,
+                   k.date_added, k.source_record_id, k.is_active,
+                   sr.snapshot_id
+            FROM kev_entries k
+            JOIN vuln_source_records sr ON sr.id = k.source_record_id
+            WHERE (k.cve_id = %s OR k.declared_cve_id = %s)
+              AND sr.snapshot_id = %s
+            ORDER BY k.is_active DESC, k.updated_at DESC
+            LIMIT 1;
+            """,
+            (cve_id, cve_id, good_snapshot_id),
+        )
+        row = cur.fetchone()
+
+    if row is None:
+        # Fresh, authoritative feed with no membership in the last-good
+        # generation: absence IS a definitive not_listed (normal delist).
+        return KevTernaryResolution(
+            cve_id=cve_id,
+            state="not_listed",
+            snapshot_id=good_snapshot_id,
+            provenance=provenance,
+        )
+
+    # 'resolved' CVE = the canonical FK when the spine row exists, else the
+    # exact declared CVE ID this entry is catalogued under.
+    resolved_cve = row.get("cve_id") or row.get("declared_cve_id")
+
+    if not row.get("is_active", False):
+        # Inactive INSIDE the authoritative generation → delisted there.
+        return KevTernaryResolution(
+            cve_id=cve_id,
+            state="not_listed",
+            snapshot_id=good_snapshot_id,
+            provenance=provenance,
+        )
+
+    return KevTernaryResolution(
+        cve_id=cve_id,
+        state="listed",
+        entry_id=str(row["id"]),
+        declared_cve_id=row.get("declared_cve_id"),
+        resolved_cve_id=resolved_cve,
+        known_ransomware=row.get("known_ransomware"),
+        date_added=row.get("date_added"),
+        source_record_id=str(row["source_record_id"]) if row.get("source_record_id") else None,
+        snapshot_id=good_snapshot_id,
+        provenance=provenance,
+    )
+
+
+_FEED_REASON_TEXT = {
+    EPSS_MISSING_SYNC_STATE: "No EPSS sync state exists",
+    EPSS_UNHEALTHY: "EPSS sync is unhealthy",
+    EPSS_NEVER_IMPORTED: "EPSS has never completed a successful import",
+    EPSS_STALE: "EPSS last successful import is older than 48 hours",
+    EPSS_MISSING_SNAPSHOT: "EPSS sync state has no last-good snapshot",
+    EPSS_NO_OBSERVATION: "No EPSS observation exists in the last-good snapshot",
+    KEV_MISSING_SYNC_STATE: "No KEV sync state exists",
+    KEV_UNHEALTHY: "KEV sync is unhealthy",
+    KEV_NEVER_IMPORTED: "KEV has never completed a successful import",
+    KEV_STALE: "KEV last successful import is older than 48 hours",
+    KEV_MISSING_SNAPSHOT: "KEV sync state has no last-good snapshot",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -1127,8 +1512,13 @@ def update_sync_state(
 ) -> SyncState:
     """
     Atomically advance sync state after a snapshot completes.
-    On success: update cursor, reset failures, mark healthy.
-    On failure: increment failures, record error, mark unhealthy.
+    On success: update cursor, reset failures, mark healthy, and advance BOTH
+    the operational last-attempt pointer and the authoritative
+    last_good_snapshot_id to the completed snapshot.
+    On failure: increment failures, record error, mark unhealthy, advance ONLY
+    the operational last_snapshot_id to the failed attempt — the authoritative
+    last_good_snapshot_id is preserved untouched (a failed import never
+    replaces the last good generation).
     Gracefully handles string, dict, or list for cursor_value (SCOPE-2).
     """
     serialized_cursor = cursor_value
@@ -1145,13 +1535,14 @@ def update_sync_state(
                     last_attempted_at = now(),
                     last_error = NULL,
                     last_snapshot_id = %s,
+                    last_good_snapshot_id = %s,
                     consecutive_failures = 0,
                     is_healthy = TRUE,
                     updated_at = now()
                 WHERE source = %s
                 RETURNING *;
                 """,
-                (serialized_cursor, last_snapshot_id, source),
+                (serialized_cursor, last_snapshot_id, last_snapshot_id, source),
             )
         else:
             cur.execute(
@@ -1189,6 +1580,9 @@ def _row_to_sync_state(row: dict) -> SyncState:
         last_attempted_at=row.get("last_attempted_at"),
         last_error=row.get("last_error"),
         last_snapshot_id=str(row["last_snapshot_id"]) if row.get("last_snapshot_id") else None,
+        last_good_snapshot_id=(
+            str(row["last_good_snapshot_id"]) if row.get("last_good_snapshot_id") else None
+        ),
         consecutive_failures=row.get("consecutive_failures", 0),
         is_healthy=row.get("is_healthy", True),
         config=row.get("config"),
@@ -1405,16 +1799,29 @@ def get_composed_cve_detail(
         for a in cvss_list
     ]
 
-    # Deterministic TES-input resolution
-    tes_res = resolve_tes_cvss(conn, cve_id)
-    tes_dict = {
-        "is_scoreable": tes_res.is_scoreable,
-        "resolved_score": float(tes_res.resolved_score) if tes_res.resolved_score is not None else None,
-        "resolved_vector": tes_res.resolved_vector,
-        "resolved_severity": tes_res.resolved_severity,
-        "resolved_assessor": tes_res.resolved_assessor,
-        "resolution_tier": tes_res.resolution_tier,
-        "unscoreable_reason": tes_res.unscoreable_reason,
+    # Deterministic CVSS authority resolution (P0-03, PRD §3.5 #2).
+    # Intrinsic CVSS is never TES: the detail section exposes the authority
+    # decision and its full provenance; no tes_* fields exist anywhere in
+    # this payload.
+    auth_res = resolve_cvss_authority(conn, cve_id)
+    cvss_authority_dict = {
+        "is_scoreable": auth_res.is_scoreable,
+        "assessment_id": auth_res.assessment_id,
+        "version": auth_res.version,
+        "role": auth_res.role,
+        "assessor": auth_res.assessor,
+        "provider_org_id": auth_res.provider_org_id,
+        "scenario": auth_res.scenario,
+        "score": float(auth_res.score) if auth_res.score is not None else None,
+        "severity": auth_res.severity,
+        "vector": auth_res.vector,
+        "source": auth_res.source,
+        "source_record_id": auth_res.source_record_id,
+        "created_at": _ts(auth_res.created_at),
+        "is_current": auth_res.is_current,
+        "ambiguous_rows": auth_res.ambiguous_rows,
+        "reason_code": auth_res.reason_code,
+        "reason": auth_res.reason,
     }
 
     # Affected / applicability
@@ -1529,7 +1936,7 @@ def get_composed_cve_detail(
         "source_provenance": provenance,
         "descriptions": descriptions,
         "cvss_assessments": assessments,
-        "tes_resolution": tes_dict,
+        "cvss_authority": cvss_authority_dict,
         "affected": affected,
         "weaknesses": weaknesses,
         "references": refs,
@@ -1548,8 +1955,6 @@ def search_vulnerabilities(
     q: Optional[str] = None,
     state: Optional[str] = None,
     has_kev: Optional[bool] = None,
-    min_tes_cvss: Optional[float] = None,
-    max_tes_cvss: Optional[float] = None,
     min_cvss: Optional[float] = None,
     max_cvss: Optional[float] = None,
     min_epss: Optional[float] = None,
@@ -1558,14 +1963,12 @@ def search_vulnerabilities(
     offset: int = 0,
 ) -> dict:
     """
-    Search indexed normalized vulnerability fields with deterministic TES filtering.
+    Search indexed normalized vulnerability fields with deterministic CVSS
+    authority filtering (P0-03: intrinsic CVSS is never TES).
     Returns {"total": int, "limit": int, "offset": int, "items": list[dict]}.
     """
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
-
-    effective_min_tes = min_tes_cvss if min_tes_cvss is not None else min_cvss
-    effective_max_tes = max_tes_cvss if max_tes_cvss is not None else max_cvss
 
     where_clauses = ["1=1"]
     params: list[Any] = []
@@ -1593,13 +1996,13 @@ def search_vulnerabilities(
         )
         params.append(ecosystem)
 
-    if effective_min_tes is not None:
-        where_clauses.append("tes.resolved_score >= %s")
-        params.append(Decimal(str(effective_min_tes)))
+    if min_cvss is not None:
+        where_clauses.append("ca.resolved_score >= %s")
+        params.append(Decimal(str(min_cvss)))
 
-    if effective_max_tes is not None:
-        where_clauses.append("tes.resolved_score <= %s")
-        params.append(Decimal(str(effective_max_tes)))
+    if max_cvss is not None:
+        where_clauses.append("ca.resolved_score <= %s")
+        params.append(Decimal(str(max_cvss)))
 
     if min_epss is not None:
         where_clauses.append(
@@ -1639,29 +2042,42 @@ def search_vulnerabilities(
 
     where_sql = " AND ".join(where_clauses)
 
-    tes_lateral = """
+    # Generation-aware SQL mirror of resolve_cvss_authority (PRD §3.5 #2):
+    # is_current rows only -> newest supported version -> structural role
+    # CNA > NVD > ADP -> >1 survivor is ambiguous (NULL, no tie-break, no
+    # fallback). No scenario filter and no score-maximum selection.
+    cvss_lateral = """
         LEFT JOIN LATERAL (
             SELECT
                 CASE
-                    -- Tier 1: exactly 1 current CNA CVSS 3.1 GENERAL assessment
-                    WHEN COUNT(*) FILTER (WHERE ca.container_role = 'cna' OR (ca.container_role IS NULL AND ca.source = 'cve' AND (ca.assessment_type = 'cna' OR ca.assessment_type IS NULL))) = 1 THEN
-                        (ARRAY_AGG(ca.base_score) FILTER (WHERE ca.container_role = 'cna' OR (ca.container_role IS NULL AND ca.source = 'cve' AND (ca.assessment_type = 'cna' OR ca.assessment_type IS NULL))))[1]
-                    -- Ambiguous CNA (>1 CNA): NULL
-                    WHEN COUNT(*) FILTER (WHERE ca.container_role = 'cna' OR (ca.container_role IS NULL AND ca.source = 'cve' AND (ca.assessment_type = 'cna' OR ca.assessment_type IS NULL))) > 1 THEN
-                        NULL
-                    -- Tier 2: 0 CNA and exactly 1 current NVD CVSS 3.1 GENERAL assessment
-                    WHEN COUNT(*) FILTER (WHERE ca.container_role = 'cna' OR (ca.container_role IS NULL AND ca.source = 'cve' AND (ca.assessment_type = 'cna' OR ca.assessment_type IS NULL))) = 0
-                         AND COUNT(*) FILTER (WHERE ca.container_role = 'nvd' OR (ca.container_role IS NULL AND ca.source = 'nvd') OR ca.source = 'nvd') = 1 THEN
-                        (ARRAY_AGG(ca.base_score) FILTER (WHERE ca.container_role = 'nvd' OR (ca.container_role IS NULL AND ca.source = 'nvd') OR ca.source = 'nvd'))[1]
-                    -- Otherwise (0 CNA & >1 NVD, or 0 CNA & 0 NVD, e.g. only ADP): NULL
+                    WHEN COUNT(*) = 1 THEN MAX(ca.base_score)
                     ELSE NULL
                 END as resolved_score
             FROM cvss_assessments ca
             WHERE ca.cve_id = cv.cve_id
-              AND ca.cvss_version = '3.1'
-              AND COALESCE(ca.scenario, 'GENERAL') = 'GENERAL'
               AND ca.is_current = TRUE
-        ) tes ON TRUE
+              AND ca.cvss_version = (
+                    SELECT ca2.cvss_version FROM cvss_assessments ca2
+                    WHERE ca2.cve_id = cv.cve_id AND ca2.is_current = TRUE
+                    ORDER BY
+                        CASE ca2.cvss_version WHEN '4.0' THEN 0 WHEN '3.1' THEN 1 WHEN '3.0' THEN 2 WHEN '2.0' THEN 3 ELSE 4 END
+                    LIMIT 1
+              )
+              AND ca.container_role = (
+                    SELECT ca3.container_role FROM cvss_assessments ca3
+                    WHERE ca3.cve_id = cv.cve_id AND ca3.is_current = TRUE
+                      AND ca3.cvss_version = (
+                            SELECT ca2.cvss_version FROM cvss_assessments ca2
+                            WHERE ca2.cve_id = cv.cve_id AND ca2.is_current = TRUE
+                            ORDER BY
+                                CASE ca2.cvss_version WHEN '4.0' THEN 0 WHEN '3.1' THEN 1 WHEN '3.0' THEN 2 WHEN '2.0' THEN 3 ELSE 4 END
+                            LIMIT 1
+                      )
+                    ORDER BY
+                        CASE ca3.container_role WHEN 'cna' THEN 0 WHEN 'nvd' THEN 1 WHEN 'adp' THEN 2 ELSE 3 END
+                    LIMIT 1
+              )
+        ) ca ON TRUE
     """
 
     with conn.cursor() as cur:
@@ -1670,7 +2086,7 @@ def search_vulnerabilities(
             f"""
             SELECT COUNT(*) as total
             FROM canonical_vulnerabilities cv
-            {tes_lateral}
+            {cvss_lateral}
             WHERE {where_sql};
             """,
             params,
@@ -1699,9 +2115,9 @@ def search_vulnerabilities(
                     SELECT ep.percentile FROM epss_scores ep
                     WHERE ep.cve_id = cv.cve_id ORDER BY ep.score_date DESC LIMIT 1
                 ) as epss_percentile,
-                tes.resolved_score as sql_tes_score
+                ca.resolved_score as sql_resolved_cvss_score
             FROM canonical_vulnerabilities cv
-            {tes_lateral}
+            {cvss_lateral}
             WHERE {where_sql}
             ORDER BY cv.date_published DESC NULLS LAST, cv.cve_id DESC
             LIMIT %s OFFSET %s;
@@ -1713,7 +2129,7 @@ def search_vulnerabilities(
     items = []
     for r in rows:
         cve_id = r["cve_id"]
-        tes_res = resolve_tes_cvss(conn, cve_id)
+        auth_res = resolve_cvss_authority(conn, cve_id)
         items.append({
             "cve_id": cve_id,
             "state": r["state"],
@@ -1723,9 +2139,12 @@ def search_vulnerabilities(
             "has_kev": bool(r.get("has_kev", False)),
             "epss_score": float(r["epss_score"]) if r.get("epss_score") is not None else None,
             "epss_percentile": float(r["epss_percentile"]) if r.get("epss_percentile") is not None else None,
-            "tes_score": float(tes_res.resolved_score) if tes_res.resolved_score is not None else None,
-            "tes_severity": tes_res.resolved_severity,
-            "is_scoreable": tes_res.is_scoreable,
+            "cvss_score": float(auth_res.score) if auth_res.score is not None else None,
+            "cvss_severity": auth_res.severity,
+            "cvss_version": auth_res.version,
+            "cvss_role": auth_res.role,
+            "cvss_reason_code": auth_res.reason_code,
+            "is_scoreable": auth_res.is_scoreable,
         })
 
     return {

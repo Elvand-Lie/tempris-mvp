@@ -44,6 +44,12 @@ from app.vuln_intelligence.models import (
     PathTraversalError,
     ArchiveBombError,
     ArchiveCorruptionError,
+    CVE_ARCHIVE_LIMITS,
+)
+from app.vuln_intelligence.cve_staging import (
+    stage_archive,
+    load_staged_catalog,
+    clear_staging,
 )
 
 logger = logging.getLogger(__name__)
@@ -91,8 +97,18 @@ class CveFetchClient:
     Fetch client for official CVE records from cvelistV5.
 
     Supports:
-      - Bootstrap: download release / repository zip snapshot or bulk bundle with bounded batching & continuation
-      - Incremental: GitHub commits delta or modified since cursor
+      - Bootstrap: STAGED STREAMING download (P1-02 Defect 1) — the zip is
+        downloaded exactly ONCE per bootstrap and extracted to a persistent
+        on-disk stage (see app.vuln_intelligence.cve_staging); every
+        continuation round slices its batch from disk and parses entries on
+        demand, so the full parsed catalog is never resident in RAM and no
+        round ever re-downloads the archive. The continuation cursor carries
+        the staged extraction's identity; resume validates it and RESTARTS
+        from batch 0 on any mismatch (missing/altered stage, different
+        download) — offset resume is only ever applied to the identical
+        extraction it was created from. Reprocessing is harmless: all writes
+        are content-hash upserts. Staging is cleared on chain exhaustion.
+      - Incremental: GitHub commits delta or modified since cursor.
     """
     DEFAULT_ZIP_URL = "https://github.com/CVEProject/cvelistV5/archive/refs/heads/main.zip"
     GITHUB_API_COMMITS_URL = "https://api.github.com/repos/CVEProject/cvelistV5/commits"
@@ -106,7 +122,10 @@ class CveFetchClient:
     ):
         self.base_url = base_url or self.DEFAULT_ZIP_URL
         self.client = client
-        self.archive_limits = archive_limits or ArchiveLimits()
+        # P1-02 review: the shared ArchiveLimits defaults stay conservative
+        # (500 MB / 2 GB — OSV's bounds); the cvelistV5 catalog is the ONE
+        # consumer that needs the larger, CVE-specific preset.
+        self.archive_limits = archive_limits or CVE_ARCHIVE_LIMITS
 
     def fetch(
         self,
@@ -148,72 +167,154 @@ class CveFetchClient:
         batch_size: int,
         cursor_dict: Optional[dict] = None,
     ) -> FetchResult:
-        """Download bulk archive and extract a bounded slice of CVE JSON files."""
-        resp = http.get(self.base_url)
-        resp.raise_for_status()
-
-        content_type = resp.headers.get("content-type", "")
-        all_records: list[dict] = []
-        now_iso = datetime.now(timezone.utc).isoformat()
-
-        if resp.content.startswith(b"PK") or "zip" in content_type or self.base_url.endswith(".zip"):
-            for name, content in safe_extract_zip(resp.content, limits=self.archive_limits):
-                if name.endswith(".json") and not name.startswith("__MACOSX"):
-                    try:
-                        data = json.loads(content.decode("utf-8"))
-                        if isinstance(data, dict) and data.get("dataType") == "CVE_RECORD":
-                            all_records.append(data)
-                    except Exception as parse_err:
-                        logger.warning("Failed parsing CVE zip entry %s: %s", name, parse_err)
-        elif resp.content.startswith(b"{"):
-            data = resp.json()
-            if isinstance(data, dict) and data.get("dataType") == "CVE_RECORD":
-                all_records = [data]
-            elif isinstance(data, list):
-                all_records = [r for r in data if isinstance(r, dict) and r.get("dataType") == "CVE_RECORD"]
-        elif resp.content.startswith(b"["):
-            data = resp.json()
-            if isinstance(data, list):
-                all_records = [r for r in data if isinstance(r, dict) and r.get("dataType") == "CVE_RECORD"]
-
-        total_entries = len(all_records)
+        """Staged streaming bootstrap: one download, disk-resident batches."""
         offset = 0
-        target_sha = now_iso
+        target_sha = datetime.now(timezone.utc).isoformat()
+        cursor_identity: Optional[str] = None
+        # P1-02 review fix: staged/resumed MUST be initialized — a cursor
+        # that cannot be honored (missing/invalid identity) leaves staged
+        # unset and the download path would raise UnboundLocalError.
+        staged = None
+        resumed = False
+        # P1-02 review: set when a continuation cursor cannot be honored
+        # (missing/invalid staging identity) and the bootstrap RESTARTS from
+        # batch 0 — the engine must discard the open snapshot (artifact A's
+        # writes) and open a fresh one at batch 0.
+        artifact_restarted = False
         if cursor_dict:
-            offset = cursor_dict.get("entry_offset", 0)
-            target_sha = cursor_dict.get("target_sha", now_iso)
+            cursor_identity = cursor_dict.get("staging_identity")
+            if cursor_identity:
+                # P1-02 review: offset resume is allowed ONLY against the
+                # identical extraction the cursor was created from — and a
+                # cursor WITHOUT an identity is legacy/malformed and must
+                # never resume by offset or inherit its old target cursor.
+                target_sha = cursor_dict.get("target_sha", target_sha)
+                candidate = load_staged_catalog()
+                if candidate is not None and candidate.identity == cursor_identity:
+                    offset = int(cursor_dict.get("entry_offset", 0))
+                    staged = candidate
+                    resumed = True
+                else:
+                    logger.warning(
+                        "CVE staging identity invalid; restarting bootstrap from batch 0"
+                    )
+                    # P1-02 review: the restart must also DROP the inherited
+                    # target cursor — the old target names the abandoned
+                    # extraction, and a premature clean cursor would strand
+                    # the restart's own rounds. Fresh target from now().
+                    target_sha = datetime.now(timezone.utc).isoformat()
+                    artifact_restarted = True
+            else:
+                logger.warning(
+                    "CVE continuation cursor carries no staging identity; "
+                    "restarting bootstrap from batch 0"
+                )
+                # P1-02 review: same as invalid identity — restart drops the
+                # inherited target cursor and signals the engine.
+                target_sha = datetime.now(timezone.utc).isoformat()
+                artifact_restarted = True
 
-        batch_records = all_records[offset : offset + batch_size]
-        next_offset = offset + len(batch_records)
+        download_bytes = 0
+        download_hash: Optional[str] = None
+        response_url = self.base_url
+        if staged is None:
+            resp = http.get(self.base_url)
+            resp.raise_for_status()
+            content_type = resp.headers.get("content-type", "")
+            is_zip = (
+                resp.content.startswith(b"PK")
+                or "zip" in content_type
+                or self.base_url.endswith(".zip")
+            )
+            if is_zip:
+                download_bytes = len(resp.content)
+                download_hash = hashlib.sha256(resp.content).hexdigest()
+                response_url = str(resp.url)
+                staged = stage_archive(
+                    resp.content,
+                    limits=self.archive_limits,
+                    source_url=response_url,
+                )
+            else:
+                # Tiny inline bodies (single JSON record / small lists): keep
+                # the historical in-memory path; no staging needed.
+                all_records: list[dict] = []
+                if resp.content.startswith(b"{"):
+                    data = resp.json()
+                    if isinstance(data, dict) and data.get("dataType") == "CVE_RECORD":
+                        all_records = [data]
+                    elif isinstance(data, list):
+                        all_records = [r for r in data if isinstance(r, dict) and r.get("dataType") == "CVE_RECORD"]
+                elif resp.content.startswith(b"["):
+                    data = resp.json()
+                    if isinstance(data, list):
+                        all_records = [r for r in data if isinstance(r, dict) and r.get("dataType") == "CVE_RECORD"]
+                # P1-02 recheck: this branch exists ONLY for tiny inline
+                # bodies (single JSON record / small lists, already fully in
+                # memory). It must NEVER emit a multi-batch continuation: its
+                # cursors carry no staging identity, so the identity gate
+                # treats every one as untrusted and would restart batch 0
+                # forever (an inline list larger than batch_size could never
+                # advance). Serve the whole list as ONE exhausted batch —
+                # matching the branch's stated purpose.
+                batch_records = all_records[offset:]
+                cursor_after = target_sha
+                is_exhausted = True
+                return FetchResult(
+                    records=batch_records,
+                    cursor_after=cursor_after,
+                    is_bootstrap=True,
+                    is_exhausted=is_exhausted,
+                    metadata={
+                        "source": "cvelistV5",
+                        "count": len(batch_records),
+                        "total_entries": len(all_records),
+                        "offset": offset,
+                        "url": str(resp.url),
+                        "bytes_downloaded": len(resp.content),
+                        "content_hash": hashlib.sha256(resp.content).hexdigest(),
+                    },
+                )
+
+        batch_paths = staged.entry_slice(offset, batch_size)
+        batch_records = staged.read_entries(batch_paths)
+        next_offset = offset + len(batch_paths)
+        total_entries = staged.entry_count
 
         if next_offset < total_entries:
-            # Intermediate batch -> continuation cursor
+            # Intermediate batch -> continuation cursor carrying the stage
+            # identity (resume validates it; mismatch restarts from batch 0).
             cursor_after = json.dumps({
                 "phase": "bootstrap",
                 "entry_offset": next_offset,
                 "total_entries": total_entries,
                 "target_sha": target_sha,
+                "staging_identity": staged.identity,
             })
             is_exhausted = False
         else:
-            # Final batch -> clean target cursor
+            # Final batch -> clean target cursor; the stage is now consumed.
             cursor_after = target_sha
             is_exhausted = True
+            clear_staging()
 
         return FetchResult(
             records=batch_records,
             cursor_after=cursor_after,
             is_bootstrap=True,
             is_exhausted=is_exhausted,
+            artifact_restarted=artifact_restarted,
             metadata={
                 "source": "cvelistV5",
+                "staged": True,
+                "resumed": resumed,
+                "staging_identity": staged.identity,
                 "count": len(batch_records),
                 "total_entries": total_entries,
                 "offset": offset,
-                "url": self.base_url,
-                "bytes_downloaded": len(resp.content),
-                "content_hash": hashlib.sha256(resp.content).hexdigest(),
-                "artifact_bytes": resp.content,
+                "url": response_url,
+                "bytes_downloaded": download_bytes,
+                "content_hash": download_hash,
             },
         )
 
@@ -263,6 +364,38 @@ class CveFetchClient:
 # 2. NVD 2.0 API Fetch Client
 # ---------------------------------------------------------------------------
 
+# NVD lastModFilter timestamp shapes seen at this boundary: the client
+# itself writes millisecond precision with Z (window ends, promoted
+# cursors); stored cursor values may be bare NVD API timestamps (milli-
+# second or seconds precision, no Z). Garbage still fails to parse.
+_NVD_WINDOW_TS_FORMATS = (
+    "%Y-%m-%dT%H:%M:%S.%fZ",
+    "%Y-%m-%dT%H:%M:%S.%f",
+    "%Y-%m-%dT%H:%M:%SZ",
+    "%Y-%m-%dT%H:%M:%S",
+)
+
+
+def _parse_nvd_window_bound(value) -> Optional[datetime]:
+    """Parse an NVD window bound strictly; None when absent/malformed.
+
+    P1-02 recheck round 2: window bounds are FILTER PARAMETERS sent to the
+    NVD API — a non-timestamp string (e.g. "garbage") must fail closed at
+    the cursor boundary instead of being forwarded upstream.
+    """
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    for fmt in _NVD_WINDOW_TS_FORMATS:
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
 class NvdFetchClient:
     """
     Fetch client for NIST National Vulnerability Database (NVD) 2.0 API.
@@ -301,14 +434,90 @@ class NvdFetchClient:
             start_index = cursor_dict.get("startIndex", 0)
             target_timestamp = cursor_dict.get("target_timestamp")
 
+        # P1-02 review: an incremental window is POSITIONAL. The previous
+        # cursor design replaced the window with only max(lastModified) of
+        # the processed page — records SHARING that timestamp with the page
+        # boundary were stranded forever (next request restarted at the same
+        # timestamp and the engine stopped on cursor_after == cursor_before).
+        # A window cursor pins a FIXED window end plus a startIndex and is
+        # paginated positionally to exhaustion; only then is the clean
+        # timestamp cursor promoted to the window end.
+        window_start: Optional[str] = None
+        window_end: Optional[str] = None
+        if not is_bootstrap and cursor and not is_continuation:
+            window_cursor = _parse_cursor_json(cursor)
+            if isinstance(window_cursor, dict) and "nvd_window" in window_cursor:
+                # P1-02 recheck: a window cursor must carry the COMPLETE
+                # schema before it may constrain a request. A partial window
+                # (missing bounds) previously fell through to an UNFILTERED
+                # NVD request and could begin a positional traversal of the
+                # full catalog. Fail closed exactly like a foreign cursor.
+                # P1-02 recheck round 2: presence is not schema either — the
+                # marker must be boolean True and both bounds must PARSE as
+                # NVD timestamps, or garbage strings would be forwarded
+                # upstream as lastModStartDate/lastModEndDate filters.
+                raw_start = window_cursor.get("window_start")
+                raw_end = window_cursor.get("window_end")
+                raw_index = window_cursor.get("startIndex", 0)
+                parsed_start = _parse_nvd_window_bound(raw_start)
+                parsed_end = _parse_nvd_window_bound(raw_end)
+                schema_valid = (
+                    window_cursor.get("nvd_window") is True
+                    and parsed_start is not None
+                    and parsed_end is not None
+                    and isinstance(raw_index, int)
+                    and not isinstance(raw_index, bool)
+                    and raw_index >= 0
+                )
+                if not schema_valid:
+                    return FetchResult(
+                        records=[],
+                        is_bootstrap=False,
+                        error=(
+                            "Malformed NVD window cursor; refusing to send "
+                            f"an unconstrained request: {cursor[:80]}"
+                        ),
+                    )
+                window_start = raw_start.strip()
+                window_end = raw_end.strip()
+                start_index = raw_index
+            elif isinstance(window_cursor, dict):
+                # P1-02 review: a structured cursor that is neither a window
+                # nor a bootstrap continuation is foreign (legacy/rolled-back
+                # writer). Fail closed with a clear error — silently treating
+                # it as a timestamp would strand work or 400 forever.
+                return FetchResult(
+                    records=[],
+                    is_bootstrap=False,
+                    error=(
+                        "Unrecognized NVD cursor format; refusing to "
+                        f"interpret it as a timestamp: {cursor[:80]}"
+                    ),
+                )
+            else:
+                window_start = cursor
+                window_end = datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%S.000Z"
+                )
+
         params: dict[str, Any] = {
             "resultsPerPage": min(batch_size, 2000),
             "startIndex": start_index,
         }
 
-        if not is_bootstrap and cursor and not is_continuation:
-            params["lastModStartDate"] = cursor
-            params["lastModEndDate"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        if window_start is not None and window_end is not None:
+            if window_end <= window_start:
+                # Zero-width window (a previous drain completed within the
+                # same second): nothing can be due — skip the upstream call.
+                return FetchResult(
+                    records=[],
+                    cursor_after=window_start,
+                    is_bootstrap=False,
+                    is_exhausted=True,
+                    metadata={"window_start": window_start, "window_end": window_end, "empty_window": True},
+                )
+            params["lastModStartDate"] = window_start
+            params["lastModEndDate"] = window_end
 
         try:
             with _get_http_client(timeout_seconds, self.client) as http:
@@ -347,8 +556,29 @@ class NvdFetchClient:
                         cursor_after = final_target_ts
                         is_exhausted = True
                 else:
-                    cursor_after = final_target_ts
-                    is_exhausted = True
+                    # P1-02 review: paginate the FIXED window positionally.
+                    # The cursor only reaches the window end when the window
+                    # is exhausted (startIndex + returned >= totalResults),
+                    # so a backlog larger than one batch — or a timestamp tie
+                    # across a page boundary — always continues where it
+                    # stopped; nothing is stranded and nothing is skipped.
+                    next_index = start_index + len(records)
+                    if next_index < total_results and len(records) > 0:
+                        cursor_after = json.dumps({
+                            "nvd_window": True,
+                            "window_start": window_start,
+                            "window_end": window_end,
+                            "startIndex": next_index,
+                        })
+                        is_exhausted = False
+                    else:
+                        # Window exhausted positionally — promote the clean
+                        # cursor to the WINDOW END (not the response
+                        # timestamp): a record modified after window_end has
+                        # lastModified > window_end and remains due next
+                        # cycle; promoting to now() would strand it.
+                        cursor_after = window_end or final_target_ts
+                        is_exhausted = True
 
                 return FetchResult(
                     records=records,
@@ -403,6 +633,11 @@ class KevFetchClient:
         is_continuation = cursor_dict is not None and cursor_dict.get("phase") == "bootstrap"
         is_bootstrap = cursor is None or is_continuation
 
+        # P1-02 review: set when the upstream catalog changed under a
+        # continuation cursor — the engine discards the open shared snapshot
+        # and restarts at batch 0 in a fresh snapshot.
+        artifact_restarted = False
+
         try:
             with _get_http_client(timeout_seconds, self.client) as http:
                 resp = http.get(self.catalog_url)
@@ -419,12 +654,41 @@ class KevFetchClient:
                 total_count = data.get("count", len(vulnerabilities))
                 date_released = data.get("dateReleased") or datetime.now(timezone.utc).isoformat()
                 catalog_version = data.get("catalogVersion", "")
+                catalog_hash = hashlib.sha256(resp.content).hexdigest()
 
                 offset = 0
                 previous_seen_ids: list[str] = []
                 if cursor_dict and is_continuation:
-                    offset = cursor_dict.get("entry_offset", 0)
-                    previous_seen_ids = cursor_dict.get("seen_ids", [])
+                    resumed_catalog_hash = cursor_dict.get("catalog_hash")
+                    if not resumed_catalog_hash:
+                        # P1-02 review: a continuation cursor WITHOUT the
+                        # artifact hash (legacy/malformed) can never be
+                        # honored — offset/seen_ids from a re-downloaded
+                        # catalog are meaningless. Restart at batch 0; the
+                        # run's fresh snapshot discards nothing (there is
+                        # nothing carried yet) and no stale seen_ids leak
+                        # into reconciliation.
+                        logger.warning(
+                            "KEV continuation cursor carries no catalog hash; "
+                            "restarting bootstrap from batch 0"
+                        )
+                        offset = 0
+                        previous_seen_ids = []
+                    elif resumed_catalog_hash != catalog_hash:
+                        # Different catalog since the cursor was written:
+                        # restart from batch 0. seen_ids accumulated from the
+                        # old catalog must never leak into reconciliation.
+                        logger.warning(
+                            "KEV catalog changed since continuation cursor "
+                            "(%s != %s); restarting snapshot from batch 0",
+                            resumed_catalog_hash[:12], catalog_hash[:12],
+                        )
+                        offset = 0
+                        previous_seen_ids = []
+                        # P1-02 review: signal the engine — the open shared
+                        # snapshot belongs to the ABANDONED catalog and must
+                        # be discarded (fresh snapshot at batch 0).
+                        artifact_restarted = True
 
                 batch_records = vulnerabilities[offset : offset + batch_size]
                 new_seen_ids = [v.get("cveID") for v in batch_records if v.get("cveID")]
@@ -432,11 +696,20 @@ class KevFetchClient:
                 next_offset = offset + len(batch_records)
 
                 if next_offset < total_count and len(batch_records) > 0:
+                    # KEV is ONE atomic artifact: the reconciliation (seen_ids)
+                    # and batching only make sense against the identical
+                    # catalog this cursor was built from. A continuation
+                    # cursor therefore carries the artifact hash; any
+                    # differently-dated catalog at resume RESTARTS the
+                    # snapshot from batch 0 (no stale-label, no cross-catalog
+                    # seen_ids). The artifact is re-downloaded on restart by
+                    # design — it is a single small JSON, not a heavy pull.
                     cursor_after = json.dumps({
                         "phase": "bootstrap",
                         "entry_offset": next_offset,
                         "total_entries": total_count,
                         "target_cursor": date_released,
+                        "catalog_hash": hashlib.sha256(resp.content).hexdigest(),
                         "seen_ids": all_seen_ids,
                     })
                     is_exhausted = False
@@ -450,6 +723,7 @@ class KevFetchClient:
                     is_bootstrap=is_bootstrap,
                     is_exhausted=is_exhausted,
                     seen_ids=all_seen_ids if is_exhausted else None,
+                    artifact_restarted=artifact_restarted,
                     metadata={
                         "catalogVersion": catalog_version,
                         "dateReleased": date_released,
@@ -504,6 +778,11 @@ class EpssFetchClient:
         is_continuation = cursor_dict is not None and cursor_dict.get("phase") == "bootstrap"
         is_bootstrap = cursor is None or is_continuation
 
+        # P1-02 review: set when the upstream CSV changed under a continuation
+        # cursor — the engine discards the open shared snapshot and restarts
+        # at batch 0 in a fresh snapshot under the CURRENT artifact's date.
+        artifact_restarted = False
+
         try:
             with _get_http_client(timeout_seconds, self.client) as http:
                 resp = http.get(self.csv_url)
@@ -535,9 +814,48 @@ class EpssFetchClient:
                             elif k.strip() == "model_version":
                                 model_version = v.strip()
 
+                file_hash = hashlib.sha256(raw_bytes).hexdigest()
+
+                # P1-02 Defect 2: the previous code OVERRODE the freshly
+                # parsed header date with the continuation cursor's stored
+                # (possibly stale) score_date — each day's chunk of a newer
+                # file was labeled with the old file's date. That inheritance
+                # is GONE. A continuation cursor is valid only against the
+                # identical artifact it was created from (file_hash); a
+                # differently-dated served file RESTARTS the bootstrap from
+                # batch 0, and every record is processed under the CURRENT
+                # artifact's own header date.
                 if cursor_dict and is_continuation:
-                    score_date = cursor_dict.get("score_date") or score_date
-                    model_version = cursor_dict.get("model_version") or model_version
+                    resumed_hash = cursor_dict.get("file_hash")
+                    if not resumed_hash:
+                        # P1-02 review: a continuation cursor WITHOUT the file
+                        # hash (legacy/malformed) must not resume by offset —
+                        # and must not inherit its stored score_date label
+                        # (that is the stale-label defect re-entering through
+                        # an old cursor). Restart at batch 0 under the CURRENT
+                        # artifact's own header date.
+                        logger.warning(
+                            "EPSS continuation cursor carries no file hash; "
+                            "restarting bootstrap from batch 0 under the "
+                            "current artifact's header date"
+                        )
+                        cursor_dict = None
+                    elif resumed_hash != file_hash:
+                        logger.warning(
+                            "EPSS artifact changed since continuation cursor "
+                            "(%s != %s); restarting bootstrap from batch 0 "
+                            "under the new artifact's header date",
+                            resumed_hash[:12], file_hash[:12],
+                        )
+                        cursor_dict = None
+                        # P1-02 review: signal the engine — the open shared
+                        # snapshot belongs to the ABANDONED artifact (stale
+                        # score_date label); it must be discarded so the
+                        # restart lands in a fresh snapshot.
+                        artifact_restarted = True
+                    else:
+                        score_date = cursor_dict.get("score_date") or score_date
+                        model_version = cursor_dict.get("model_version") or model_version
 
                 if not score_date:
                     score_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -593,6 +911,7 @@ class EpssFetchClient:
                         "total_lines": total_rows,
                         "model_version": model_version,
                         "score_date": score_date,
+                        "file_hash": file_hash,
                         "target_cursor": score_date,
                     })
                     is_exhausted = False
@@ -605,6 +924,7 @@ class EpssFetchClient:
                     cursor_after=cursor_after,
                     is_bootstrap=is_bootstrap,
                     is_exhausted=is_exhausted,
+                    artifact_restarted=artifact_restarted,
                     metadata={
                         "model_version": model_version,
                         "score_date": score_date,

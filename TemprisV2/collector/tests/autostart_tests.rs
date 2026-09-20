@@ -568,6 +568,29 @@ fn test_ui_enable_disable_toggle_actions_and_debouncing() {
 }
 
 #[test]
+fn test_inplace_upgrade_binary_replacement_atomic_semantics() {
+    let temp_dir = std::env::temp_dir().join(format!("tempris_upgrade_test_{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+
+    let target_bin = temp_dir.join("tempris-collector.exe");
+    let new_bin = temp_dir.join("tempris-collector-new.tmp");
+
+    std::fs::write(&target_bin, b"OLD_COLLECTOR_V020_BINARY_CONTENT").expect("write target");
+    std::fs::write(&new_bin, b"NEW_COLLECTOR_V030_BINARY_CONTENT").expect("write new");
+
+    // Perform atomic replace as in upgrade
+    tempris_collector::storage::win_file::atomic_replace(&target_bin, &new_bin)
+        .expect("atomic_replace should succeed");
+
+    assert!(target_bin.exists());
+    let replaced_content = std::fs::read(&target_bin).expect("read replaced");
+    assert_eq!(replaced_content, b"NEW_COLLECTOR_V030_BINARY_CONTENT");
+    assert!(!new_bin.exists());
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn test_parse_query_xml_detects_disabled_task() {
     let disabled_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
     <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">

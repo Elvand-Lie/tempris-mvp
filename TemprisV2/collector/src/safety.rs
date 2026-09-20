@@ -167,7 +167,7 @@ pub fn validate_target_syntax(
     Ok(())
 }
 
-fn validate_hostname_syntax(hostname: &str) -> Result<()> {
+pub fn validate_hostname_syntax(hostname: &str) -> Result<()> {
     if hostname.len() > 253 {
         return Err(anyhow!("Hostname exceeds maximum length of 253 characters"));
     }

@@ -1058,7 +1058,7 @@ class TestSavepointProtocol:
             assert detail_before["state"] == detail_after["state"]
             assert detail_before["cvss_assessments"] == detail_after["cvss_assessments"]
             assert detail_before["affected"] == detail_after["affected"]
-            assert detail_before["tes_resolution"] == detail_after["tes_resolution"]
+            assert detail_before["cvss_authority"] == detail_after["cvss_authority"]
 
 
 # ===========================================================================

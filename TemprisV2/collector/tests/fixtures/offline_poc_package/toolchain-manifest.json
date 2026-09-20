@@ -1,0 +1,6 @@
+{
+  "format_version": 1,
+  "key_id": "tempris-toolchain-release-v1",
+  "signature": "1577beb619cad891d597d7c4aa5af39b49066edb77e586ef4bbe6dcb4bff905482597db145b17ed990cab8cd10abaad7d04909f5baf6da79e42ffb1d87dca606",
+  "manifest_raw": "{\r\n  \"schema_version\": 1,\r\n  \"channel\": \"poc\",\r\n  \"sequence_number\": 100,\r\n  \"generated_at\": \"2026-09-06T12:00:00Z\",\r\n  \"min_collector_version\": \"0.4.0\",\r\n  \"components\": {\r\n    \"nuclei\": {\r\n      \"version\": \"3.8.0\",\r\n      \"platform\": {\r\n        \"os\": \"windows\",\r\n        \"arch\": \"x86_64\"\r\n      },\r\n      \"sha256\": \"f26b6d36528605593d9c5714d2fc1b9a25c4f5c634a64c2c12599f23e1d42206\",\r\n      \"byte_size\": 67809444,\r\n      \"entrypoint\": \"nuclei.exe\",\r\n      \"is_emergency_rollback\": false\r\n    },\r\n    \"nuclei_templates\": {\r\n      \"version\": \"10.4.4\",\r\n      \"platform\": {\r\n        \"os\": \"windows\",\r\n        \"arch\": \"x86_64\"\r\n      },\r\n      \"sha256\": \"30d10a5a9aeec8de63f0769b4522502c8247738a43f600097e4e0ab19dfecdd3\",\r\n      \"byte_size\": 164381,\r\n      \"entrypoint\": \"templates.zip\",\r\n      \"is_emergency_rollback\": false\r\n    }\r\n  }\r\n}"
+}

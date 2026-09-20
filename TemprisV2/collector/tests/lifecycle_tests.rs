@@ -474,7 +474,7 @@ fn test_runtime_snapshot_atomic_write_read_and_zero_secrets() {
     assert_eq!(loaded.status, RuntimeStatus::Connected);
     assert_eq!(loaded.jobs_verified, 27);
     assert_eq!(loaded.current_activity, "Verifying 10.0.1.5 -> verified");
-    assert_eq!(loaded.collector_version, "0.2.0");
+    assert_eq!(loaded.collector_version, env!("CARGO_PKG_VERSION"));
 
     let raw_text = fs::read_to_string(&runtime_path).expect("read raw runtime.json");
     assert!(raw_text.contains("\"status\": \"CONNECTED\""));

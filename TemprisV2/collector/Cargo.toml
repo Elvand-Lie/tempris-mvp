@@ -1,9 +1,9 @@
 [package]
 name = "tempris-collector"
-version = "0.2.0"
+version = "0.4.0"
 edition = "2021"
 authors = ["Tempris Team"]
-description = "Tempris V2 Internal Asset Reachability Collector for Windows"
+description = "Tempris V2 Internal Asset Reachability and SCOUT Collector for Windows"
 
 [lib]
 name = "tempris_collector"
@@ -30,6 +30,10 @@ thiserror = "2.0"
 anyhow = "1.0"
 eframe = { version = "0.30", default-features = false, features = ["default_fonts", "glow"] }
 egui = "0.30"
+sha2 = "0.10"
+semver = { version = "1.0", features = ["serde"] }
+regex = "1.10"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 quick-xml = "0.37"
@@ -44,3 +48,4 @@ winapi = { version = "0.3", features = [
 [dev-dependencies]
 tokio = { version = "1.40", features = ["full", "test-util"] }
 wiremock = "0.6"
+tempfile = "3.10"
