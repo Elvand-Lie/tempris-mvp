@@ -182,6 +182,19 @@ def clean_database():
                     "exposure_non_exploitation_attestations;"
                 )
                 cur.execute("TRUNCATE identity_boundary_audit, tenant_identity_boundary;")
+                # Ch.6/Ch.7 (025/026): intake rows FK-reference
+                # assets/findings/asset_exposures (RESTRICT-composite), and
+                # spectrum workflow rows FK-reference asset_exposures — both
+                # clusters must be cleared before the exposure/finding deletes
+                # below (test DB only).
+                cur.execute(
+                    "TRUNCATE intake_record_events, intake_records, "
+                    "intake_connector_registrations;"
+                )
+                cur.execute(
+                    "TRUNCATE spectrum_workflow_history, spectrum_strike_requests, "
+                    "spectrum_edip_handoffs, spectrum_exposure_workflow;"
+                )
                 cur.execute("DELETE FROM audit_events WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
                 # Sessions (migration 024): FK ON DELETE CASCADE would clear
                 # non-fixture rows with their users; fixture users persist, so
@@ -226,7 +239,7 @@ def clean_database():
                     ON CONFLICT (tenant_id) DO UPDATE
                     SET package_id = 'CORE_ASSETS', module_overrides = '{}'::jsonb, version = 1;
                 """, (str(TENANT_A), str(TENANT_B)))
-                cur.execute("UPDATE modules SET status = 'active' WHERE id = 'ASSETS';")
+                cur.execute("UPDATE modules SET status = 'active' WHERE id IN ('ASSETS', 'SPECTRUM');")
             conn.commit()
             seed_fixture_auth_data(conn)
 
