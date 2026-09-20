@@ -42,6 +42,12 @@ import {
   SpectrumQueueResponse,
   SpectrumStrikeRequestResult,
   SpectrumWorkflow,
+  SpeakReport,
+  SpeakReportListResponse,
+  SpotlightSnapshot,
+  SpotlightSnapshotListResponse,
+  SpotlightSummary,
+  SynthesisAnswer,
 } from './types';
 
 const AUTH_API_BASE = new URL('api/auth', document.baseURI).pathname;
@@ -52,6 +58,9 @@ const ORG_API_BASE = new URL('api/org', document.baseURI).pathname;
 const PLATFORM_API_BASE = new URL('api/platform', document.baseURI).pathname;
 const SCOUT_API_BASE = new URL('api/scout', document.baseURI).pathname;
 const SPECTRUM_API_BASE = new URL('api/spectrum', document.baseURI).pathname;
+const SPOTLIGHT_API_BASE = new URL('api/ciso', document.baseURI).pathname;
+const SPEAK_API_BASE = new URL('api/speak', document.baseURI).pathname;
+const SYNTHESIS_API_BASE = new URL('api/synthesis', document.baseURI).pathname;
 const EXPOSURE_API_BASE = new URL('api/exposure', document.baseURI).pathname;
 export const SESSION_STORAGE_KEY = 'tempris_bearer_token';
 export const AUTH_UNAUTHORIZED_EVENT = 'tempris:auth_unauthorized';
@@ -576,6 +585,158 @@ export const api = {
       request<ReachabilityEvidenceRecord>(
         `${EXPOSURE_API_BASE}/${exposureId}/reachability`,
         { method: 'POST', body: JSON.stringify(payload) }
+      ),
+  },
+
+  // SPOTLIGHT endpoints (Chapter 10 executive view — read-only projection;
+  // never a source of record, counts + maxima never means).
+  spotlight: {
+    getSummary: (): Promise<SpotlightSummary> =>
+      request<SpotlightSummary>(`${SPOTLIGHT_API_BASE}/summary`),
+
+    captureSnapshot: (): Promise<SpotlightSnapshot> =>
+      request<SpotlightSnapshot>(`${SPOTLIGHT_API_BASE}/snapshots`, {
+        method: 'POST',
+      }),
+
+    listSnapshots: (limit = 50, offset = 0): Promise<SpotlightSnapshotListResponse> =>
+      request<SpotlightSnapshotListResponse>(
+        `${SPOTLIGHT_API_BASE}/snapshots?limit=${limit}&offset=${offset}`
+      ),
+
+    getSnapshot: (snapshotId: string): Promise<SpotlightSnapshot> =>
+      request<SpotlightSnapshot>(`${SPOTLIGHT_API_BASE}/snapshots/${snapshotId}`),
+
+    getTrend: (): Promise<SpotlightSummary['trend']> =>
+      request<SpotlightSummary['trend']>(`${SPOTLIGHT_API_BASE}/trend`),
+  },
+
+  // SPEAK endpoints (Chapter 11 deliverables — sealed, versioned,
+  // template-identified reports over snapshot values; the AI surface fails
+  // closed with no model).
+  speak: {
+    registerReport: (payload: {
+      report_type: string;
+      title: string;
+      exposure_ids?: string[];
+    }): Promise<SpeakReport> =>
+      request<SpeakReport>(`${SPEAK_API_BASE}/reports/register`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    generateReport: (reportId: string): Promise<SpeakReport> =>
+      request<SpeakReport>(`${SPEAK_API_BASE}/reports/${reportId}/generate`, {
+        method: 'POST',
+      }),
+
+    regenerateReport: (reportId: string): Promise<SpeakReport> =>
+      request<SpeakReport>(`${SPEAK_API_BASE}/reports/${reportId}/regenerate`, {
+        method: 'POST',
+      }),
+
+    listReports: (params: { status?: string; report_type?: string; limit?: number; offset?: number } = {}): Promise<SpeakReportListResponse> => {
+      const query = new URLSearchParams();
+      if (params.status) query.set('status', params.status);
+      if (params.report_type) query.set('report_type', params.report_type);
+      query.set('limit', String(params.limit ?? 50));
+      if (params.offset) query.set('offset', String(params.offset));
+      return request<SpeakReportListResponse>(`${SPEAK_API_BASE}/reports?${query.toString()}`);
+    },
+
+    getReport: (reportId: string): Promise<SpeakReport> =>
+      request<SpeakReport>(`${SPEAK_API_BASE}/reports/${reportId}`),
+
+    approveReport: (reportId: string): Promise<SpeakReport> =>
+      request<SpeakReport>(`${SPEAK_API_BASE}/reports/${reportId}/approve`, {
+        method: 'POST',
+      }),
+
+    archiveReport: (reportId: string): Promise<SpeakReport> =>
+      request<SpeakReport>(`${SPEAK_API_BASE}/reports/${reportId}/archive`, {
+        method: 'POST',
+      }),
+
+    deleteDraft: (reportId: string): Promise<{ id: string; deleted: boolean }> =>
+      request<{ id: string; deleted: boolean }>(
+        `${SPEAK_API_BASE}/reports/${reportId}`,
+        { method: 'DELETE' }
+      ),
+
+    exportReport: (
+      reportId: string,
+      payload: { recipient?: string | null; note?: string | null } = {}
+    ): Promise<{ report_id: string; exported: boolean; content_hash: string }> =>
+      request<{ report_id: string; exported: boolean; content_hash: string }>(
+        `${SPEAK_API_BASE}/reports/${reportId}/export`,
+        { method: 'POST', body: JSON.stringify(payload) }
+      ),
+
+    chat: (message: string): Promise<never> =>
+      request<never>(`${SPEAK_API_BASE}/chat`, {
+        method: 'POST',
+        body: JSON.stringify({ message }),
+      }),
+
+    /**
+     * Download one sealed artifact as a browser file. Byte integrity is
+     * verified by the backend before the bytes are served (a hash mismatch
+     * refuses + alarms); the response header carries the verified seal.
+     */
+    downloadArtifact: async (reportId: string, kind: 'html' | 'json' | 'csv'): Promise<void> => {
+      const token = getStoredToken();
+      if (!token) {
+        throw new Error('Authentication required.');
+      }
+      const response = await fetch(
+        `${SPEAK_API_BASE}/reports/${reportId}/artifacts/${kind}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!response.ok) {
+        throw new Error(`Artifact download failed with status ${response.status}`);
+      }
+      const verified = response.headers.get('X-Content-Sha256-Verified');
+      if (verified && verified !== 'true') {
+        throw new Error('Artifact integrity could not be verified.');
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `report-${reportId}.${kind}`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    },
+  },
+
+  // SYNTHESIS endpoints (Chapter 12 — read-time joins over authoritative
+  // state; every answer carries its definition, availability, and source
+  // links; nothing here stores or invents truth).
+  synthesis: {
+    unremediatedSerious: (params: { threshold?: string; limit?: number } = {}): Promise<SynthesisAnswer> => {
+      const query = new URLSearchParams();
+      if (params.threshold) query.set('threshold', params.threshold);
+      if (params.limit) query.set('limit', String(params.limit));
+      const suffix = query.toString() ? `?${query.toString()}` : '';
+      return request<SynthesisAnswer>(`${SYNTHESIS_API_BASE}/unremediated-serious${suffix}`);
+    },
+
+    acceptedRisksVsObligations: (): Promise<SynthesisAnswer> =>
+      request<SynthesisAnswer>(`${SYNTHESIS_API_BASE}/accepted-risks-vs-obligations`),
+
+    remediationRecurrence: (limit = 500): Promise<SynthesisAnswer> =>
+      request<SynthesisAnswer>(
+        `${SYNTHESIS_API_BASE}/remediation-recurrence?limit=${limit}`
+      ),
+
+    coverageGaps: (limit = 500): Promise<SynthesisAnswer> =>
+      request<SynthesisAnswer>(`${SYNTHESIS_API_BASE}/coverage-gaps?limit=${limit}`),
+
+    weaknessRecurrence: (minAssets = 2): Promise<SynthesisAnswer> =>
+      request<SynthesisAnswer>(
+        `${SYNTHESIS_API_BASE}/weakness-recurrence?min_assets=${minAssets}`
       ),
   },
 };

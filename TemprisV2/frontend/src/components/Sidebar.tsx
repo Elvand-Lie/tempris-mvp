@@ -17,8 +17,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [expanded, setExpanded] = useState(true);
   const hasAssets = effectiveModules.includes('ASSETS');
   const hasSpectrum = effectiveModules.includes('SPECTRUM');
+  const hasStrike = effectiveModules.includes('STRIKE');
   const hasEdip = effectiveModules.includes('EDIP');
   const hasStandard = effectiveModules.includes('STANDARD');
+  const hasSpotlight = effectiveModules.includes('SPOTLIGHT');
+  const hasSpeak = effectiveModules.includes('SPEAK');
+  const hasSynthesis = effectiveModules.includes('SYNTHESIS');
 
   const link = (tab: ActiveTab, icon: string, label: string) => (
     <button
@@ -46,15 +50,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </button>
 
       <nav className="sidebar-nav">
-        {(hasAssets || hasSpectrum || hasEdip || hasStandard) && (
+        {(hasAssets || hasSpectrum || hasStrike || hasEdip || hasStandard || hasSpotlight || hasSpeak || hasSynthesis) && (
           <section className="sidebar-section" aria-label="Tenant Console">
             {expanded && <h2>Tenant Console</h2>}
             {hasAssets && link('assets', '🛡️', 'Assets Console')}
             {hasAssets && link('collectors', '📡', 'Collectors Console')}
             {hasAssets && link('scout', '🔭', 'SCOUT')}
             {hasSpectrum && link('spectrum', '🎯', 'SPECTRUM')}
+            {hasStrike && link('strike', '⚡', 'STRIKE')}
             {hasEdip && link('edip', '🧭', 'EDIP')}
             {hasStandard && link('standard', '📋', 'STANDARD')}
+            {hasSpotlight && link('spotlight', '📊', 'SPOTLIGHT')}
+            {hasSpeak && link('speak', '📝', 'SPEAK Reports')}
+            {hasSynthesis && link('synthesis', '🧩', 'SYNTHESIS')}
           </section>
         )}
 

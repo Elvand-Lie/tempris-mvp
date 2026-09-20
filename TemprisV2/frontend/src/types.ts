@@ -8,7 +8,18 @@ export type AssetStatus = 'active' | 'decommissioned';
 export type ReachabilityStatus = 'unverified' | 'verified' | 'unreachable';
 export type AuthorizationStatus = 'pending' | 'approved' | 'revoked' | 'expired';
 export type UserRole = 'analyst' | 'admin' | 'superadmin';
-export type ActiveTab = 'assets' | 'collectors' | 'scout' | 'spectrum' | 'edip' | 'standard' | 'org';
+export type ActiveTab =
+  | 'assets'
+  | 'collectors'
+  | 'scout'
+  | 'spectrum'
+  | 'strike'
+  | 'edip'
+  | 'standard'
+  | 'spotlight'
+  | 'speak'
+  | 'synthesis'
+  | 'org';
 
 export type ScoutProfile = 'SERVICE_DISCOVERY' | 'VULNERABILITY_ASSESSMENT';
 
@@ -671,4 +682,169 @@ export interface SpectrumEdipHandoffResult {
   edip_handoff: SpectrumEdipHandoff;
   /** analysis_state is 'action_required' after the handoff. */
   workflow: SpectrumWorkflow;
+}
+
+// ---------------------------------------------------------------------------
+// Chapters 10-12 — SPOTLIGHT (executive view), SPEAK (deliverables),
+// SYNTHESIS (deterministic correlation). All three are consumers of
+// upstream authoritative state: nothing on this page is a source of record.
+// ---------------------------------------------------------------------------
+
+export type SpotlightTileStatus = 'ok' | 'unavailable' | 'insufficient_history';
+
+/** One executive tile: 'unavailable' NEVER renders as a zero (Ch.10). */
+export interface SpotlightUnavailable {
+  status: 'unavailable';
+  reason: string;
+}
+
+export interface SpotlightSevereTile {
+  status: 'ok';
+  total_current_exposures: number;
+  scan_truncated: boolean;
+  final_count: number;
+  provisional_count: number;
+  unscoreable_count: number;
+  max_final_tes: DecimalWire | null;
+  max_provisional_tes: DecimalWire | null;
+  severe_threshold: DecimalWire;
+  severe_count: number;
+  severe_exposures: SpotlightSevereRow[];
+}
+
+export interface SpotlightSevereRow {
+  exposure_id: string;
+  finding_id: string;
+  asset_id: string;
+  tes_state: TesState;
+  value: DecimalWire | null;
+  reason: string | null;
+}
+
+export interface SpotlightWorkflowTile {
+  status: 'ok';
+  current_exposures: number;
+  analysis_state_new: number;
+  analysis_state_assigned: number;
+  analysis_state_in_analysis: number;
+  analysis_state_action_required: number;
+  unassigned: number;
+  open_edip_handoffs: number;
+}
+
+export interface SpotlightFeedFact {
+  source: string;
+  status: 'healthy' | 'stale' | 'unknown';
+  is_healthy: boolean;
+  last_successful_at: string | null;
+  consecutive_failures: number;
+  last_good_snapshot_id: string | null;
+}
+
+export interface SpotlightCoverageTile {
+  status: 'ok';
+  feeds: SpotlightFeedFact[];
+  feeds_healthy: number;
+  feeds_stale: number;
+  feeds_unknown: number;
+}
+
+/** A trend delta computed BETWEEN two snapshots (never fabricated). */
+export interface SpotlightTrendDelta {
+  previous: number | DecimalWire;
+  current: number | DecimalWire;
+  delta: number | DecimalWire;
+}
+
+export interface SpotlightTrend {
+  status: 'ok' | 'insufficient_history';
+  snapshots_available?: number;
+  reason?: string;
+  newer_snapshot_id?: string;
+  older_snapshot_id?: string;
+  newer_captured_at?: string;
+  older_captured_at?: string;
+  deltas?: Record<string, SpotlightTrendDelta>;
+}
+
+/** GET /api/ciso/summary — the read-only executive projection. */
+export interface SpotlightSummary {
+  authority: string;
+  as_of: string;
+  tenant_id: string;
+  metric_definitions: Record<string, string>;
+  severe_exposures: SpotlightSevereTile;
+  workflow_posture: SpotlightWorkflowTile;
+  coverage_quality: SpotlightCoverageTile;
+  remediation_posture: SpotlightUnavailable;
+  accepted_risk_register: SpotlightUnavailable;
+  regulatory_pressure: SpotlightUnavailable;
+  trend: SpotlightTrend;
+}
+
+export interface SpotlightSnapshot {
+  id: string;
+  tenant_id: string;
+  captured_at: string;
+  captured_by: string;
+  actor_role: string | null;
+  payload_hash: string;
+  payload: Record<string, unknown>;
+  source_refs: Record<string, unknown>;
+}
+
+export interface SpotlightSnapshotListResponse {
+  total: number;
+  items: SpotlightSnapshot[];
+}
+
+/** One sealed report row (Ch.11). Sealed values are read, never recomputed. */
+export interface SpeakArtifactRef {
+  id: string;
+  artifact_kind: 'html' | 'json' | 'csv';
+  size_bytes: number;
+  content_hash: string;
+  created_at: string;
+}
+
+export interface SpeakReport {
+  id: string;
+  tenant_id: string;
+  report_type: string;
+  title: string;
+  status: 'draft' | 'approved' | 'archived';
+  version: number;
+  parent_report_id: string | null;
+  template_id: string;
+  template_version: number;
+  as_of: string | null;
+  content_hash: string | null;
+  generated_by: string | null;
+  generated_at: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  archived_by: string | null;
+  archived_at: string | null;
+  created_at: string;
+  sealed_payload?: Record<string, unknown> | null;
+  artifacts?: SpeakArtifactRef[];
+}
+
+export interface SpeakReportListResponse {
+  total: number;
+  items: SpeakReport[];
+}
+
+/** One correlated answer row: source links ride along (Ch.12). */
+export interface SynthesisAnswer {
+  question: string;
+  definition: string;
+  as_of: string;
+  authority: string;
+  availability: Record<string, { status: string; reason?: string }>;
+  missing_domains: string[];
+  degraded: boolean;
+  row_count: number;
+  truncated: boolean;
+  rows: Record<string, unknown>[];
 }

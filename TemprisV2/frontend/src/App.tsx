@@ -28,8 +28,12 @@ import { OrganizationConsole } from './components/OrganizationConsole';
 import { PlatformAdminConsole } from './components/PlatformAdminConsole';
 import { ScoutDashboard } from './components/ScoutDashboard';
 import { SpectrumWorkbench } from './components/SpectrumWorkbench';
+import { StrikeConsole } from './components/StrikeConsole';
 import { EdipWorkbench } from './edip/EdipWorkbench';
 import { StandardConsole } from './standard/StandardConsole';
+import { SpotlightExecutive } from './components/SpotlightExecutive';
+import { SpeakReports } from './components/SpeakReports';
+import { SynthesisConsole } from './components/SynthesisConsole';
 
 // Dedicated platform login-context tenant (Tempris Platform Control).
 // The operational Tempris tenant remains 11111111-1111-1111-1111-111111111111.
@@ -114,8 +118,12 @@ const AppShell: React.FC = () => {
 
   const hasAssetsModule = effectiveModules.includes('ASSETS');
   const hasSpectrumModule = effectiveModules.includes('SPECTRUM');
+  const hasStrikeModule = effectiveModules.includes('STRIKE');
   const hasEdipModule = effectiveModules.includes('EDIP');
   const hasStandardModule = effectiveModules.includes('STANDARD');
+  const hasSpotlightModule = effectiveModules.includes('SPOTLIGHT');
+  const hasSpeakModule = effectiveModules.includes('SPEAK');
+  const hasSynthesisModule = effectiveModules.includes('SYNTHESIS');
   const isPlatformRoute = applicationRoute !== 'tenant';
   const isPlatformAuthority = Boolean(
     user?.is_platform_admin && activeTenant?.id === PLATFORM_TENANT_ID
@@ -784,6 +792,12 @@ const AppShell: React.FC = () => {
           ) : (
             <ModuleNotEntitled module="SPECTRUM" />
           )
+        ) : activeTab === 'strike' ? (
+          hasStrikeModule ? (
+            <StrikeConsole />
+          ) : (
+            <ModuleNotEntitled module="STRIKE" />
+          )
         ) : activeTab === 'edip' ? (
           hasEdipModule ? (
             <EdipWorkbench />
@@ -795,6 +809,24 @@ const AppShell: React.FC = () => {
             <StandardConsole />
           ) : (
             <ModuleNotEntitled module="STANDARD" />
+          )
+        ) : activeTab === 'spotlight' ? (
+          hasSpotlightModule ? (
+            <SpotlightExecutive />
+          ) : (
+            <ModuleNotEntitled module="SPOTLIGHT" />
+          )
+        ) : activeTab === 'speak' ? (
+          hasSpeakModule ? (
+            <SpeakReports />
+          ) : (
+            <ModuleNotEntitled module="SPEAK" />
+          )
+        ) : activeTab === 'synthesis' ? (
+          hasSynthesisModule ? (
+            <SynthesisConsole />
+          ) : (
+            <ModuleNotEntitled module="SYNTHESIS" />
           )
         ) : (
           role === 'superadmin' ? (
