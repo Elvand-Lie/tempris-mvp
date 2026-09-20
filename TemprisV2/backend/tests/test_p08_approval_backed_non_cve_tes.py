@@ -105,7 +105,7 @@ def _clean_env():
                     "exposure_non_exploitation_attestations, "
                     "exposure_exploitation_evidence, exposure_business_impact, "
                     "exposure_reachability_evidence, asset_exposures, "
-                    "asset_applicability_reviews;")
+                    "asset_applicability_reviews CASCADE;")
                 cur.execute("TRUNCATE identity_boundary_audit, tenant_identity_boundary;")
                 cur.execute(
                     "DELETE FROM findings WHERE tenant_id = ANY(%s::uuid[]);",
@@ -947,9 +947,10 @@ class TestRacesAndFailures:
 
 
 class TestNoSecondApprovalStore:
-    def test_registry_contains_exactly_the_three_chapter3_types(self):
-        assert sorted(_REGISTRY.keys()) == sorted([
-            SUBJECT_MANUAL_SSS, SUBJECT_SSS_OVERRIDE, SUBJECT_ER_ATTESTATION])
+    def test_registry_contains_the_three_chapter3_types(self):
+        assert {
+            SUBJECT_MANUAL_SSS, SUBJECT_SSS_OVERRIDE, SUBJECT_ER_ATTESTATION,
+        } <= set(_REGISTRY)
 
     def test_chapter3_tables_reference_the_single_approval_store(self):
         with get_db_connection() as conn:
@@ -960,13 +961,14 @@ class TestNoSecondApprovalStore:
                     WHERE confrelid = 'chapter5_approvals'::regclass;
                 """)
                 referencing = sorted(str(r["tbl"]) for r in cur.fetchall())
-        # every Chapter 3 approval FK points at the ONE primitive table
-        assert set(referencing) <= {
+        # All Chapter 3 consumers point at the one primitive table; later
+        # chapters may register additional consumers of that same primitive.
+        assert {
             "chapter5_approval_audit",
             "non_cve_sss_derivations",
             "exposure_non_exploitation_attestations",
             "non_cve_sss_override_proposals",
-        }
+        } <= set(referencing)
 
 
 # ===========================================================================
