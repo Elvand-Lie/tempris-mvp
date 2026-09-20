@@ -15,7 +15,8 @@ const tenantMetadata = {
 function token(extra: Record<string, unknown> = {}): string {
   const encode = (value: object) => btoa(JSON.stringify(value)).replace(/=/g, '');
   return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({
-    sub: 'admin@example.com',
+    sub: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    email: 'admin@example.com',
     tenant_id: tenantMetadata.id,
     role: 'superadmin',
     iat: 1,
@@ -52,7 +53,7 @@ describe('AuthContext', () => {
     expect(screen.getByText('no-tenant')).toBeInTheDocument();
   });
 
-  it('persists login, decodes the five presentation claims, and loads server metadata', async () => {
+  it('persists login, decodes presentation claims, and loads server metadata', async () => {
     const jwt = token();
     vi.spyOn(api, 'login').mockImplementation(async () => {
       sessionStorage.setItem(SESSION_STORAGE_KEY, jwt);

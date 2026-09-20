@@ -59,7 +59,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     setMetadataError(null);
     setActiveTenant(null);
     setEffectiveModules([]);
-    setUser({ email: String(session.payload.sub || ''), is_platform_admin: false });
+    setUser({ email: String(session.payload.email || session.payload.sub || ''), is_platform_admin: false });
 
     api.getTenantMetadata()
       .then((metadata) => {
@@ -83,7 +83,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
         });
         setEffectiveModules(metadata.effective_modules);
         setUser({
-          email: String(session.payload.sub || ''),
+          email: String(session.payload.email || session.payload.sub || ''),
           is_platform_admin: metadata.is_platform_admin === true,
         });
       })

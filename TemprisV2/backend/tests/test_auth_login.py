@@ -79,6 +79,7 @@ def test_login_success_and_jwt_claims(client: TestClient):
     assert decoded["tenant_id"] == str(TENANT_A)
     # sub = user UUID (PRD Ch.5 decision; email is a display/lookup attribute)
     assert decoded["sub"] == str(_fixture_user_id("admin"))
+    assert decoded["email"] == "admin"
     assert decoded["role"] == "admin"
     assert isinstance(decoded["iat"], int)
     assert isinstance(decoded["exp"], int)

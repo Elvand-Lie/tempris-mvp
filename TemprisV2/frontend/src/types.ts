@@ -200,6 +200,7 @@ export interface LoginResponse {
 
 export interface JwtPayload {
   sub?: string;
+  email?: string;
   tenant_id?: string;
   role?: UserRole | string;
   iat?: number;

@@ -103,7 +103,7 @@ def login(creds: LoginRequest, request: Request):
     """
     Verifies database credentials using timing-equivalent scrypt execution,
     derives the user's sole active membership, and issues an authoritative
-    1-hour 5-claim HS256 JWT.
+    1-hour session-bound HS256 JWT.
     Enforces process-local per-client login attempt rate limit.
     """
     client_ip = "127.0.0.1"
@@ -255,6 +255,7 @@ def login(creds: LoginRequest, request: Request):
         payload = {
             "tenant_id": tenant_id,
             "sub": str(user["id"]),
+            "email": canonical_email,
             "role": role,
             "iat": now_ts,
             "exp": now_ts + SESSION_LIFETIME_SECONDS,
