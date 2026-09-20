@@ -42,6 +42,9 @@ function getTestJwtToken(role: string = 'admin', tenantId: string = '00000000-00
     tenant_id: tenantId,
     sub: `e2e-${role}-actor`,
     role: role,
+    // The backend rejects tokens without integer `iat`/`exp` and enforces
+    // exp - iat == 3600 (auth.get_auth_context) — mint the exact contract.
+    iat: now,
     exp: now + 3600,
   };
 
@@ -68,12 +71,18 @@ function getTestJwtToken(role: string = 'admin', tenantId: string = '00000000-00
 }
 
 test.describe('Tempris V2 Assets Critical Flow E2E', () => {
-  test('displays session-required view when unauthenticated', async ({ page }) => {
-    // Clear any storage and visit root
+  test('shows the sign-in screen when unauthenticated', async ({ page }) => {
+    // Clear any storage and visit root. Since 66f987f the unauthenticated
+    // surface is the login screen (the old #session-required-state notice is
+    // retired) — assert the screen and its form contract, matching the
+    // vitest suite (components.test.tsx).
     await page.goto('/');
-    await expect(page.locator('#session-required-state')).toBeVisible();
-    await expect(page.locator('#session-required-state')).toContainText('Authentication Required');
-    await expect(page.locator('#session-required-state')).toContainText('No valid bearer session token was found');
+    await expect(page.locator('#login-screen')).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Sign In/i })).toBeVisible();
+    await expect(page.locator('#login-email')).toBeVisible();
+    await expect(page.locator('#login-password')).toBeVisible();
+    await expect(page.locator('#btn-login-submit')).toBeVisible();
+    await expect(page.locator('.login-security-notice')).toContainText('Authorized access only');
   });
 
   test('executes end-to-end asset lifecycle with injected session token', async ({ page }) => {
@@ -84,9 +93,9 @@ test.describe('Tempris V2 Assets Critical Flow E2E', () => {
       window.sessionStorage.setItem('tempris_bearer_token', token);
     }, adminToken);
 
-    // 1. Load the Assets page
+    // 1. Load the Assets page (title rebranded in cd65e6f)
     await page.goto('/');
-    await expect(page).toHaveTitle(/Tempris V2 — Assets/i);
+    await expect(page).toHaveTitle(/Tempris V2 — Security Operations/i);
 
     // Verify session badge displays ADMIN role
     await expect(page.locator('#user-session-badge')).toBeVisible();
