@@ -48,6 +48,15 @@ import {
   SpotlightSnapshotListResponse,
   SpotlightSummary,
   SynthesisAnswer,
+  IntakeConfirmOutcome,
+  IntakeConfirmPayload,
+  IntakeConnectorRegistration,
+  IntakeConnectorRegistrationPayload,
+  IntakeCreatePayload,
+  IntakeCreateResult,
+  IntakeListParams,
+  IntakeRecord,
+  IntakeRecordEvent,
 } from './types';
 
 const AUTH_API_BASE = new URL('api/auth', document.baseURI).pathname;
@@ -62,6 +71,7 @@ const SPOTLIGHT_API_BASE = new URL('api/ciso', document.baseURI).pathname;
 const SPEAK_API_BASE = new URL('api/speak', document.baseURI).pathname;
 const SYNTHESIS_API_BASE = new URL('api/synthesis', document.baseURI).pathname;
 const EXPOSURE_API_BASE = new URL('api/exposure', document.baseURI).pathname;
+const INTAKE_API_BASE = new URL('api/intake', document.baseURI).pathname;
 export const SESSION_STORAGE_KEY = 'tempris_bearer_token';
 export const AUTH_UNAUTHORIZED_EVENT = 'tempris:auth_unauthorized';
 
@@ -197,6 +207,40 @@ async function request<T>(
     return response.json();
   }
   return null as unknown as T;
+}
+
+/**
+ * Authenticated fetch for the two intake endpoints whose responses carry
+ * OUTCOMES rather than plain data (X-Intake-Outcome / structured 409
+ * details): the caller needs status + body together, which `request`
+ * deliberately hides.
+ */
+async function intakeFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const token = getStoredToken();
+  if (!token) {
+    const error = new Error('Authentication required: No bearer token found in session storage.');
+    (error as any).status = 401;
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT));
+    }
+    throw error;
+  }
+  const headers = new Headers(options.headers || {});
+  headers.set('Authorization', `Bearer ${token}`);
+  headers.set('Content-Type', 'application/json');
+  return fetch(url, { ...options, headers });
+}
+
+/** The same error shape `request` throws (message from `detail`, `.status` set). */
+function intakeHttpError(status: number, body: any): Error {
+  let errorMessage = `Request failed with status ${status}`;
+  if (body && typeof body === 'object' && body.detail !== undefined) {
+    errorMessage =
+      typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+  }
+  const error = new Error(errorMessage);
+  (error as any).status = status;
+  return error;
 }
 
 export const api = {
@@ -738,5 +782,150 @@ export const api = {
       request<SynthesisAnswer>(
         `${SYNTHESIS_API_BASE}/weakness-recurrence?min_assets=${minAssets}`
       ),
+  },
+
+  // INTAKE & TRIAGE endpoints (Chapter 6 — raw submissions are records,
+  // never findings; confirmation is the ONLY handoff into the exposure
+  // domain and from there into SPECTRUM). The backend gates every route by
+  // analyst+ role and blocks platform sessions; there is no INTAKE module
+  // entitlement.
+  intake: {
+    listRecords: (params: IntakeListParams = {}): Promise<IntakeRecord[]> => {
+      const query = new URLSearchParams();
+      if (params.state) query.set('state', params.state);
+      if (params.source) query.set('source', params.source);
+      query.set('limit', String(params.limit ?? 100));
+      if (params.offset) query.set('offset', String(params.offset));
+      return request<IntakeRecord[]>(`${INTAKE_API_BASE}?${query.toString()}`);
+    },
+
+    getRecord: (recordId: string): Promise<IntakeRecord> =>
+      request<IntakeRecord>(`${INTAKE_API_BASE}/${recordId}`),
+
+    /** The record's append-only actor trail. */
+    getRecordEvents: (recordId: string): Promise<IntakeRecordEvent[]> =>
+      request<IntakeRecordEvent[]>(`${INTAKE_API_BASE}/${recordId}/events`),
+
+    /**
+     * Submit an intake record. The backend distinguishes 'created' (201) from
+     * 'replay' (200, X-Intake-Outcome) — a repeating source event with the
+     * SAME payload returns the ORIGINAL record.
+     */
+    createRecord: async (payload: IntakeCreatePayload): Promise<IntakeCreateResult> => {
+      const response = await intakeFetch(INTAKE_API_BASE, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw intakeHttpError(response.status, body);
+      return {
+        record: body as IntakeRecord,
+        outcome: response.status === 201 ? 'created' : 'replay',
+      };
+    },
+
+    /**
+     * Confirm an intake record. 200 ⇒ 'confirmed' (finding + exposure
+     * created — the Ch.3/Ch.7 handoff). Every other backend outcome arrives
+     * as a structured 409 (code + message + persisted record) and is
+     * returned here as an outcome to render, never thrown: 'duplicate'
+     * (terminal-duplicate against the ORIGINAL current exposure, reference
+     * stored, no duplicate finding), 'blocked_false_positive' (fresh analyst
+     * re-review required), 'blocked_superseded' (anchor re-resolution first),
+     * 'anchorless_class' (v1: NHI cannot confirm), 'anchor_required',
+     * 'ambiguous_identity', 'identity_boundary_state', 'state_conflict'.
+     * 404/422/401 still throw (transport/validation errors, no outcome).
+     */
+    confirmRecord: async (
+      recordId: string,
+      payload: IntakeConfirmPayload
+    ): Promise<IntakeConfirmOutcome> => {
+      const response = await intakeFetch(`${INTAKE_API_BASE}/${recordId}/confirm`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json().catch(() => null);
+      if (response.ok) {
+        return { outcome: 'confirmed', record: body as IntakeRecord, duplicateOfExposureId: null, message: null };
+      }
+      const detail = body && typeof body === 'object' ? (body as { detail?: unknown }).detail : null;
+      if (response.status !== 409 || !detail || typeof detail !== 'object') {
+        throw intakeHttpError(response.status, body);
+      }
+      const structured = detail as {
+        code?: unknown;
+        message?: unknown;
+        record?: unknown;
+        duplicate_of_exposure_id?: unknown;
+      };
+      const code = typeof structured.code === 'string' ? structured.code : '';
+      const outcome =
+        code === 'intake_duplicate' ? 'duplicate'
+        : code === 'false_positive_re_review_required' ? 'blocked_false_positive'
+        : code === 'anchor_re_resolution_required' ? 'blocked_superseded'
+        : code === 'anchorless_class' ? 'anchorless_class'
+        : code === 'anchor_required' ? 'anchor_required'
+        : code === 'ambiguous_finding_identity' ? 'ambiguous_identity'
+        : code === 'identity_boundary_state' ? 'identity_boundary_state'
+        : 'state_conflict';
+      return {
+        outcome,
+        record: (structured.record as IntakeRecord) ?? null,
+        duplicateOfExposureId:
+          typeof structured.duplicate_of_exposure_id === 'string'
+            ? structured.duplicate_of_exposure_id
+            : null,
+        message: typeof structured.message === 'string' ? structured.message : null,
+      };
+    },
+
+    /** Classify on the closed SSS spine — 422 for any value outside it. */
+    classifyRecord: (
+      recordId: string,
+      taxonomy: { taxonomy_class: string; taxonomy_subclass?: string | null; taxonomy_subtype?: string | null },
+      note?: string | null
+    ): Promise<IntakeRecord> =>
+      request<IntakeRecord>(`${INTAKE_API_BASE}/${recordId}/classify`, {
+        method: 'POST',
+        body: JSON.stringify({ taxonomy, note: note || null }),
+      }),
+
+    /** submitted | needs_info → under_review. */
+    startReview: (recordId: string, note?: string | null): Promise<IntakeRecord> =>
+      request<IntakeRecord>(`${INTAKE_API_BASE}/${recordId}/start-review`, {
+        method: 'POST',
+        body: JSON.stringify({ note: note || null }),
+      }),
+
+    /** Hold with a NAMED deficiency (never a silent block). */
+    requestInfo: (recordId: string, deficiency: string): Promise<IntakeRecord> =>
+      request<IntakeRecord>(`${INTAKE_API_BASE}/${recordId}/request-info`, {
+        method: 'POST',
+        body: JSON.stringify({ deficiency }),
+      }),
+
+    /** Reject — reason required; the record persists (dedup memory + audit). */
+    rejectRecord: (recordId: string, reason: string): Promise<IntakeRecord> =>
+      request<IntakeRecord>(`${INTAKE_API_BASE}/${recordId}/reject`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      }),
+
+    listConnectors: (): Promise<IntakeConnectorRegistration[]> =>
+      request<IntakeConnectorRegistration[]>(`${INTAKE_API_BASE}/connectors`),
+
+    /** Re-registering an existing name updates the routing. */
+    registerConnector: (
+      payload: IntakeConnectorRegistrationPayload
+    ): Promise<IntakeConnectorRegistration> =>
+      request<IntakeConnectorRegistration>(`${INTAKE_API_BASE}/connectors`, {
+        method: 'POST',
+        body: JSON.stringify({
+          name: payload.name,
+          adapter: payload.adapter,
+          destination_routing: payload.destination_routing ?? {},
+          payload_semantics: payload.payload_semantics ?? null,
+        }),
+      }),
   },
 };

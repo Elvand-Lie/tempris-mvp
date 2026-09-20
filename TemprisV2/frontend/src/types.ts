@@ -12,6 +12,7 @@ export type ActiveTab =
   | 'assets'
   | 'collectors'
   | 'scout'
+  | 'intake'
   | 'spectrum'
   | 'strike'
   | 'edip'
@@ -848,4 +849,171 @@ export interface SynthesisAnswer {
   row_count: number;
   truncated: boolean;
   rows: Record<string, unknown>[];
+}
+
+// ---------------------------------------------------------------------------
+// Intake & Triage (Chapter 6) — raw submissions are NEVER findings; only
+// confirmation hands off into the exposure domain (finding + exposure via
+// Ch.3) and from there into SPECTRUM (Ch.7). Shapes mirror the backend
+// models in app/intake/models.py — the backend contract wins.
+// ---------------------------------------------------------------------------
+
+export type FindingSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
+
+export type IntakeSource = 'MANUAL' | 'CONNECTOR' | 'STRIKE_DISCOVERY' | 'VDP' | 'THREAT_PACK';
+
+/** submitted → under_review → confirmed | rejected | duplicate | needs_info */
+export type IntakeState = 'submitted' | 'under_review' | 'confirmed' | 'rejected' | 'duplicate' | 'needs_info';
+
+/** Closed SSS spine (§3.6.5) — the taxonomy is closed at intake. */
+export type SssTaxonomyClass =
+  | 'BLFLAW'
+  | 'SUPPLY_CHAIN'
+  | 'IDENTITY_POSTURE'
+  | 'AGENTIC_EXPOSURE'
+  | 'VALIDATION_EVIDENCE'
+  | 'NHI';
+
+export interface SssTaxonomyInput {
+  taxonomy_class: SssTaxonomyClass;
+  taxonomy_subclass?: string | null;
+  taxonomy_subtype?: string | null;
+}
+
+export interface IntakeRecord {
+  id: string;
+  tenant_id: string;
+  source: IntakeSource;
+  state: IntakeState;
+  payload: Record<string, unknown>;
+  /** sha256 hex over the canonical JSON of `payload` — the replay comparator */
+  payload_digest: string;
+  source_registration_id: string | null;
+  source_event_id: string | null;
+  title: string;
+  description: string | null;
+  severity: FindingSeverity;
+  canonical_cve_id: string | null;
+  taxonomy_class: string | null;
+  taxonomy_subclass: string | null;
+  taxonomy_subtype: string | null;
+  asset_id: string | null;
+  /** 'unresolved' | 'resolved' — anchors resolve at review time, never at submission */
+  anchor_state: string;
+  /** the single handoff into Ch.3/Ch.7 (set together, only on 'confirmed') */
+  finding_id: string | null;
+  exposure_id: string | null;
+  /** exact-duplicate reference — never a duplicate finding */
+  duplicate_of_exposure_id: string | null;
+  requested_by: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  deficiency: string | null;
+  rejection_reason: string | null;
+  duplicate_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Append-only actor trail on a record (intake_record_events). */
+export interface IntakeRecordEvent {
+  id: string;
+  tenant_id: string;
+  record_id: string;
+  event: string;
+  actor: string;
+  actor_role: string | null;
+  note: string | null;
+  detail: Record<string, unknown> | null;
+  created_at: string;
+}
+
+/** Destination routing + payload semantics ONLY — credentials are Ch.5-owned (Q19). */
+export interface IntakeConnectorRegistration {
+  id: string;
+  tenant_id: string;
+  name: string;
+  adapter: string;
+  status: 'active' | 'disabled';
+  destination_routing: Record<string, unknown>;
+  payload_semantics: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Re-registering an existing name updates the routing. */
+export interface IntakeConnectorRegistrationPayload {
+  name: string;
+  adapter: string;
+  destination_routing?: Record<string, unknown>;
+  payload_semantics?: string | null;
+}
+
+export interface IntakeCreatePayload {
+  source: IntakeSource;
+  title: string;
+  severity: FindingSeverity;
+  payload: Record<string, unknown>;
+  description?: string | null;
+  taxonomy?: SssTaxonomyInput | null;
+  canonical_cve_id?: string | null;
+  /** PROPOSED anchor — resolved (and re-validated) at review/confirmation time */
+  asset_id?: string | null;
+  /** PATCH-07 replay identity — both halves together or neither */
+  source_registration_id?: string | null;
+  source_event_id?: string | null;
+}
+
+export interface IntakeListParams {
+  state?: IntakeState;
+  source?: IntakeSource;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * The outcome of a confirmation attempt. 200 ⇒ 'confirmed' (finding +
+ * exposure created — the Ch.3/Ch.7 handoff). The backend carries the other
+ * outcomes as structured 409s (code + message + persisted record) — the
+ * record persists in every case, so these are triage OUTCOMES to render,
+ * not transport errors.
+ */
+export interface IntakeConfirmOutcome {
+  outcome:
+    | 'confirmed'
+    | 'duplicate'
+    | 'blocked_false_positive'
+    | 'blocked_superseded'
+    | 'anchorless_class'
+    | 'anchor_required'
+    | 'ambiguous_identity'
+    | 'identity_boundary_state'
+    | 'state_conflict';
+  /** The persisted record after the attempt (null only when the tenant lost access) */
+  record: IntakeRecord | null;
+  /** set on 'duplicate' — the ORIGINAL current exposure the record duplicates */
+  duplicateOfExposureId: string | null;
+  message: string | null;
+}
+
+/** 'created' | 'replay' — a repeating source event with the SAME payload returns the original record. */
+export interface IntakeCreateResult {
+  record: IntakeRecord;
+  outcome: 'created' | 'replay';
+}
+
+/**
+ * The confirmation command (backend IntakeConfirmIn): evidence is MANDATORY
+ * (non-empty object), the anchor is mandatory and re-validated at review
+ * time. The two acknowledgment flags are the named, audited analyst steps
+ * the duplicate rules require (false-positive re-review / superseded-anchor
+ * re-resolution).
+ */
+export interface IntakeConfirmPayload {
+  asset_id?: string | null;
+  evidence: Record<string, unknown>;
+  note?: string | null;
+  revalidate_prior_judgment?: boolean;
+  anchor_re_resolved?: boolean;
 }

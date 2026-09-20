@@ -1933,3 +1933,56 @@ body {
   .spectrum-columns, .spectrum-form-grid { grid-template-columns: 1fr; }
   .spectrum-filters { grid-template-columns: 1fr; }
 }
+
+/* ---------------------------------------------------------------------------
+ * Intake & Triage workbench (Chapter 6). Reuses the scout/spectrum panels,
+ * tables, and form grid; only intake-specific states and outcome surfaces
+ * are new. Raw intake renders distinctly from confirmed SPECTRUM surfaces.
+ * ------------------------------------------------------------------------- */
+
+.badge-intake-state-submitted { color: #93c5fd; background: rgba(59, 130, 246, 0.14); }
+.badge-intake-state-under_review { color: #c4b5fd; background: rgba(139, 92, 246, 0.16); }
+.badge-intake-state-needs_info { color: #fbbf24; background: rgba(245, 158, 11, 0.14); }
+.badge-intake-state-confirmed { color: #34d399; background: rgba(16, 185, 129, 0.14); }
+.badge-intake-state-rejected { color: #f87171; background: rgba(239, 68, 68, 0.14); }
+.badge-intake-state-duplicate { color: var(--text-secondary); background: rgba(148, 163, 184, 0.16); }
+.badge-intake-anchor-resolved { color: #34d399; background: rgba(16, 185, 129, 0.14); }
+.badge-intake-anchor-unresolved { color: var(--text-secondary); background: rgba(148, 163, 184, 0.16); }
+.badge-crit-info { color: var(--text-secondary); background: rgba(148, 163, 184, 0.16); }
+
+.intake-queue p, .intake-workbench .scout-hero p { color: var(--text-muted); }
+.intake-table td small, .spectrum-open-link small { display: block; color: var(--text-muted); }
+.intake-muted { color: var(--text-muted); }
+.intake-digest { font-family: var(--font-mono); font-size: 11px; word-break: break-all; }
+.intake-description { color: var(--text-secondary); font-size: 12px; }
+
+.intake-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.intake-facts article { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); }
+.intake-facts strong { color: var(--text-primary); font-size: 13px; word-break: break-word; }
+.intake-facts span { color: var(--text-muted); font-size: 11px; }
+
+.intake-payload { margin-top: 10px; }
+.intake-payload summary { cursor: pointer; color: var(--color-info); font-size: 12px; }
+.intake-payload pre { margin: 8px 0 0; padding: 12px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-secondary); font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+
+.intake-outcome { display: grid; gap: 6px; padding: 12px 14px; margin: 12px 0; border-radius: var(--radius-md); font-size: 12px; }
+.intake-outcome-confirmed { border: 1px solid rgba(16, 185, 129, 0.5); background: rgba(16, 185, 129, 0.1); color: #34d399; }
+.intake-outcome-duplicate { border: 1px solid rgba(245, 158, 11, 0.5); background: rgba(245, 158, 11, 0.1); color: #fbbf24; }
+.intake-outcome-rejected { border: 1px solid var(--color-danger); background: var(--color-danger-bg); color: #fca5a5; }
+.intake-outcome-needs-info { border: 1px solid rgba(245, 158, 11, 0.5); background: rgba(245, 158, 11, 0.1); color: #fbbf24; }
+.intake-outcome-blocked { border: 1px solid rgba(245, 158, 11, 0.5); background: rgba(245, 158, 11, 0.1); color: #fbbf24; }
+.intake-outcome-dismiss { width: max-content; padding: 0; border: 0; background: transparent; color: inherit; text-decoration: underline; cursor: pointer; font-size: 11px; }
+
+.intake-form { margin-top: 8px; }
+.intake-form h4 { margin: 14px 0 8px; font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .08em; }
+.intake-form-note { grid-column: 1 / -1; }
+.intake-acknowledgments { grid-column: 1 / -1; display: grid; gap: 6px; }
+.intake-acknowledgments label { display: flex; gap: 8px; align-items: flex-start; color: var(--text-secondary); font-size: 12px; }
+.intake-acknowledgments input[type='checkbox'] { margin-top: 2px; }
+.intake-confirm-form { border-top: 1px dashed var(--border-color); padding-top: 6px; margin-top: 14px; }
+.intake-history li span { display: block; color: var(--text-muted); }
+.intake-routing { font-size: 11px; word-break: break-all; color: var(--text-secondary); }
+
+@media (max-width: 1100px) {
+  .intake-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

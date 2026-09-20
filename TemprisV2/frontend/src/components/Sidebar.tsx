@@ -50,12 +50,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </button>
 
       <nav className="sidebar-nav">
-        {(hasAssets || hasSpectrum || hasStrike || hasEdip || hasStandard || hasSpotlight || hasSpeak || hasSynthesis) && (
+        {(
+          hasAssets || hasSpectrum || hasStrike || hasEdip || hasStandard || hasSpotlight || hasSpeak || hasSynthesis
+        ) && (
           <section className="sidebar-section" aria-label="Tenant Console">
             {expanded && <h2>Tenant Console</h2>}
             {hasAssets && link('assets', '🛡️', 'Assets Console')}
             {hasAssets && link('collectors', '📡', 'Collectors Console')}
             {hasAssets && link('scout', '🔭', 'SCOUT')}
+            {/* Intake & Triage is NOT module-entitled: the backend gates it by
+                analyst+ role and blocks platform sessions (no INTAKE module
+                exists in the catalogue) — every tenant session may triage. */}
+            {link('intake', '📥', 'Intake & Triage')}
             {hasSpectrum && link('spectrum', '🎯', 'SPECTRUM')}
             {hasStrike && link('strike', '⚡', 'STRIKE')}
             {hasEdip && link('edip', '🧭', 'EDIP')}

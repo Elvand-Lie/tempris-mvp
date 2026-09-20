@@ -27,6 +27,7 @@ import { DecommissionModal } from './components/DecommissionModal';
 import { OrganizationConsole } from './components/OrganizationConsole';
 import { PlatformAdminConsole } from './components/PlatformAdminConsole';
 import { ScoutDashboard } from './components/ScoutDashboard';
+import { IntakeWorkbench } from './components/IntakeWorkbench';
 import { SpectrumWorkbench } from './components/SpectrumWorkbench';
 import { StrikeConsole } from './components/StrikeConsole';
 import { EdipWorkbench } from './edip/EdipWorkbench';
@@ -786,6 +787,10 @@ const AppShell: React.FC = () => {
             authorizations={authorizations}
             onOpenAssets={() => setActiveTab('assets')}
           />
+        ) : activeTab === 'intake' ? (
+          // No module gate: the intake API is analyst+ with platform sessions
+          // blocked — there is no INTAKE module entitlement to check.
+          <IntakeWorkbench />
         ) : activeTab === 'spectrum' ? (
           hasSpectrumModule ? (
             <SpectrumWorkbench />
