@@ -29,6 +29,18 @@ import {
   ScoutObservation,
   ScoutProfile,
   ScoutReadiness,
+  BusinessImpactRecord,
+  EdipHandoffResult,
+  ExploitationEvidenceRecord,
+  ReachabilityEvidenceRecord,
+  ScoringInputsSnapshot,
+  SpectrumAnalysisState,
+  SpectrumExposureDetail,
+  SpectrumHistoryEntry,
+  SpectrumQueueItem,
+  SpectrumWorkflow,
+  StrikeRequestResult,
+  TesCurrentPayload,
 } from './types';
 
 const AUTH_API_BASE = new URL('api/auth', document.baseURI).pathname;
@@ -38,6 +50,8 @@ const COLLECTORS_V1_API_BASE = new URL('api/v1/collectors', document.baseURI).pa
 const ORG_API_BASE = new URL('api/org', document.baseURI).pathname;
 const PLATFORM_API_BASE = new URL('api/platform', document.baseURI).pathname;
 const SCOUT_API_BASE = new URL('api/scout', document.baseURI).pathname;
+const SPECTRUM_API_BASE = new URL('api/spectrum', document.baseURI).pathname;
+const EXPOSURE_API_BASE = new URL('api/exposure', document.baseURI).pathname;
 export const SESSION_STORAGE_KEY = 'tempris_bearer_token';
 export const AUTH_UNAUTHORIZED_EVENT = 'tempris:auth_unauthorized';
 
@@ -447,5 +461,101 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ initial_password: initialPassword }),
     });
+  },
+
+  // SPECTRUM endpoints (Chapter 7 workbench — workflow state at exposure grain).
+  // Reads are read-through: scores themselves come from the exposure namespace
+  // below, which fronts the frozen Chapter 3 routes.
+  spectrum: {
+    getQueue: (): Promise<SpectrumQueueItem[]> =>
+      request<SpectrumQueueItem[]>(`${SPECTRUM_API_BASE}/queue`),
+
+    getExposureDetail: (exposureId: string): Promise<SpectrumExposureDetail> =>
+      request<SpectrumExposureDetail>(`${SPECTRUM_API_BASE}/exposures/${exposureId}`),
+
+    assignExposure: (exposureId: string, assignedTo: string | null): Promise<SpectrumWorkflow> =>
+      request<SpectrumWorkflow>(`${SPECTRUM_API_BASE}/exposures/${exposureId}/assignment`, {
+        method: 'PATCH',
+        body: JSON.stringify({ assigned_to: assignedTo }),
+      }),
+
+    setAnalysisState: (
+      exposureId: string,
+      analysisState: SpectrumAnalysisState,
+      note?: string | null
+    ): Promise<SpectrumWorkflow> =>
+      request<SpectrumWorkflow>(`${SPECTRUM_API_BASE}/exposures/${exposureId}/analysis-state`, {
+        method: 'PATCH',
+        body: JSON.stringify({ analysis_state: analysisState, note: note || null }),
+      }),
+
+    addExposureNote: (exposureId: string, note: string): Promise<SpectrumHistoryEntry> =>
+      request<SpectrumHistoryEntry>(`${SPECTRUM_API_BASE}/exposures/${exposureId}/notes`, {
+        method: 'POST',
+        body: JSON.stringify({ note }),
+      }),
+
+    requestStrike: (exposureId: string, justification: string): Promise<StrikeRequestResult> =>
+      request<StrikeRequestResult>(`${SPECTRUM_API_BASE}/exposures/${exposureId}/strike-request`, {
+        method: 'POST',
+        body: JSON.stringify({ justification }),
+      }),
+
+    requestEdipHandoff: (exposureId: string, note?: string | null): Promise<EdipHandoffResult> =>
+      request<EdipHandoffResult>(`${SPECTRUM_API_BASE}/exposures/${exposureId}/edip-handoff`, {
+        method: 'POST',
+        body: JSON.stringify({ note: note || null }),
+      }),
+  },
+
+  // Exposure Domain endpoints (Chapter 3 authority — frozen contracts reused
+  // by the SPECTRUM UI: current-TES read model, scoring-input snapshot,
+  // per-exposure Business Impact input, analyst-reviewed evidence).
+  exposure: {
+    getCurrentTes: (exposureId: string): Promise<TesCurrentPayload> =>
+      request<TesCurrentPayload>(`${EXPOSURE_API_BASE}/${exposureId}/tes`),
+
+    getScoringInputs: (exposureId: string): Promise<ScoringInputsSnapshot> =>
+      request<ScoringInputsSnapshot>(`${EXPOSURE_API_BASE}/${exposureId}/scoring-inputs`),
+
+    setBusinessImpact: (
+      exposureId: string,
+      value: string,
+      reason?: string | null
+    ): Promise<BusinessImpactRecord> =>
+      request<BusinessImpactRecord>(
+        `${EXPOSURE_API_BASE}/${exposureId}/business-impact`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ value, reason: reason || null }),
+        }
+      ),
+
+    recordExploitationEvidence: (
+      exposureId: string,
+      payload: {
+        basis: 'observed' | 'validated';
+        result: 'succeeded';
+        evidence: Record<string, unknown>;
+        observed_at?: string | null;
+      }
+    ): Promise<ExploitationEvidenceRecord> =>
+      request<ExploitationEvidenceRecord>(
+        `${EXPOSURE_API_BASE}/${exposureId}/exploitation-evidence`,
+        { method: 'POST', body: JSON.stringify(payload) }
+      ),
+
+    recordReachabilityEvidence: (
+      exposureId: string,
+      payload: {
+        vantage: 'external' | 'internal';
+        evidence: Record<string, unknown>;
+        observed_at?: string | null;
+      }
+    ): Promise<ReachabilityEvidenceRecord> =>
+      request<ReachabilityEvidenceRecord>(
+        `${EXPOSURE_API_BASE}/${exposureId}/reachability`,
+        { method: 'POST', body: JSON.stringify(payload) }
+      ),
   },
 };

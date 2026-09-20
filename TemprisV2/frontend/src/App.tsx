@@ -27,6 +27,7 @@ import { DecommissionModal } from './components/DecommissionModal';
 import { OrganizationConsole } from './components/OrganizationConsole';
 import { PlatformAdminConsole } from './components/PlatformAdminConsole';
 import { ScoutDashboard } from './components/ScoutDashboard';
+import { SpectrumWorkbench } from './components/SpectrumWorkbench';
 
 // Dedicated platform login-context tenant (Tempris Platform Control).
 // The operational Tempris tenant remains 11111111-1111-1111-1111-111111111111.
@@ -110,6 +111,7 @@ const AppShell: React.FC = () => {
   const [isDeleteCollectorOpen, setIsDeleteCollectorOpen] = useState(false);
 
   const hasAssetsModule = effectiveModules.includes('ASSETS');
+  const hasSpectrumModule = effectiveModules.includes('SPECTRUM');
   const isPlatformRoute = applicationRoute !== 'tenant';
   const isPlatformAuthority = Boolean(
     user?.is_platform_admin && activeTenant?.id === PLATFORM_TENANT_ID
@@ -772,6 +774,12 @@ const AppShell: React.FC = () => {
             authorizations={authorizations}
             onOpenAssets={() => setActiveTab('assets')}
           />
+        ) : activeTab === 'spectrum' ? (
+          hasSpectrumModule ? (
+            <SpectrumWorkbench />
+          ) : (
+            <ModuleNotEntitled module="SPECTRUM" />
+          )
         ) : (
           role === 'superadmin' ? (
             <OrganizationConsole />

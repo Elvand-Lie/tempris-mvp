@@ -16,6 +16,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [expanded, setExpanded] = useState(true);
   const hasAssets = effectiveModules.includes('ASSETS');
+  const hasSpectrum = effectiveModules.includes('SPECTRUM');
 
   const link = (tab: ActiveTab, icon: string, label: string) => (
     <button
@@ -43,12 +44,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </button>
 
       <nav className="sidebar-nav">
-        {hasAssets && (
+        {(hasAssets || hasSpectrum) && (
           <section className="sidebar-section" aria-label="Tenant Console">
             {expanded && <h2>Tenant Console</h2>}
-            {link('assets', '🛡️', 'Assets Console')}
-            {link('collectors', '📡', 'Collectors Console')}
-            {link('scout', '🔭', 'SCOUT')}
+            {hasAssets && link('assets', '🛡️', 'Assets Console')}
+            {hasAssets && link('collectors', '📡', 'Collectors Console')}
+            {hasAssets && link('scout', '🔭', 'SCOUT')}
+            {hasSpectrum && link('spectrum', '🎯', 'SPECTRUM')}
           </section>
         )}
 

@@ -1841,3 +1841,95 @@ body {
   .scout-grid, .scout-metrics { grid-template-columns: 1fr; }
   .scout-launch, .scout-panel { padding: 15px; }
 }
+
+/* ---------------- SPECTRUM (Chapter 7) — confirmed-exposure workbench ---------------- */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.spectrum-workbench { display: grid; gap: 14px; }
+.spectrum-queue-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.spectrum-queue-head h2 { margin: 3px 0 6px; color: var(--text-primary); }
+.spectrum-filters { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; margin: 10px 0; }
+.spectrum-filters .form-group { margin: 0; }
+
+.spectrum-table th { white-space: nowrap; }
+.spectrum-row { cursor: pointer; }
+.spectrum-row.selected td { background: rgba(56, 189, 248, 0.08); }
+.spectrum-open-link { display: grid; gap: 2px; padding: 0; border: 0; background: none; color: var(--text-primary); text-align: left; cursor: pointer; font: inherit; }
+.spectrum-open-link span { color: var(--text-secondary); font-size: 11px; }
+.spectrum-open-link:hover strong { color: var(--color-info); text-decoration: underline; }
+.spectrum-table td { vertical-align: top; }
+.spectrum-table td small, .spectrum-table td span { display: block; color: var(--text-secondary); word-break: break-word; }
+.spectrum-muted { color: var(--text-muted); font-size: 12px; }
+
+.badge-spectrum-tes-FINAL { color: #34d399; background: rgba(16, 185, 129, 0.14); }
+.badge-spectrum-tes-PROVISIONAL { color: #fbbf24; background: rgba(245, 158, 11, 0.14); }
+.badge-spectrum-tes-UNSCOREABLE,
+.badge-spectrum-unscoreable { color: #f87171; background: rgba(239, 68, 68, 0.14); }
+.badge-spectrum-analysis-new { color: var(--text-secondary); background: rgba(148, 163, 184, 0.14); }
+.badge-spectrum-analysis-assigned { color: #93c5fd; background: rgba(59, 130, 246, 0.14); }
+.badge-spectrum-analysis-in_analysis { color: #c4b5fd; background: rgba(139, 92, 246, 0.16); }
+.badge-spectrum-analysis-action_required { color: #fbbf24; background: rgba(245, 158, 11, 0.18); }
+.badge-spectrum-axis-known { color: #34d399; background: rgba(16, 185, 129, 0.14); }
+.badge-spectrum-axis-unknown { color: var(--text-secondary); background: rgba(148, 163, 184, 0.16); }
+.badge-spectrum-axis-stale { color: #fbbf24; background: rgba(245, 158, 11, 0.14); }
+.badge-spectrum-eligible { color: #34d399; background: rgba(16, 185, 129, 0.14); }
+
+.spectrum-detail { display: grid; gap: 14px; border-top: 2px solid var(--border-focus); }
+.spectrum-detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.spectrum-detail-head h2 { margin: 3px 0 6px; color: var(--text-primary); font-size: 18px; }
+.spectrum-detail-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.spectrum-target { color: var(--text-secondary); word-break: break-word; }
+
+.spectrum-section { display: grid; gap: 10px; padding-top: 6px; border-top: 1px solid var(--border-color); }
+.spectrum-section h3 { margin: 6px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-secondary); }
+.spectrum-section h4 { margin: 10px 0 0; font-size: 12px; color: var(--text-secondary); }
+
+.spectrum-metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.spectrum-metrics article { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-primary); }
+.spectrum-metrics strong { color: var(--text-primary); font-size: 18px; word-break: break-all; }
+.spectrum-metrics span { color: var(--text-muted); font-size: 11px; }
+
+.spectrum-tes-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.spectrum-tes-value { font: 700 30px var(--font-mono); }
+.spectrum-tes-FINAL { color: #34d399; }
+.spectrum-tes-PROVISIONAL { color: #fbbf24; }
+.spectrum-tes-UNSCOREABLE { color: #f87171; }
+.spectrum-unscoreable { padding: 10px 12px; border: 1px solid var(--color-danger); background: var(--color-danger-bg); border-radius: var(--radius-md); color: #fca5a5; font-size: 13px; }
+.spectrum-unscoreable ul { margin: 6px 0 0 18px; }
+.spectrum-er-row td { background: rgba(148, 163, 184, 0.05); }
+.spectrum-er-row summary { cursor: pointer; color: var(--color-info); }
+.spectrum-er-row ul { margin: 8px 0 2px 18px; display: grid; gap: 3px; }
+
+.spectrum-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
+.spectrum-form-grid .form-group { margin: 0; }
+.spectrum-form-note { grid-column: 1 / -1; }
+.spectrum-form-actions { display: flex; gap: 8px; align-items: center; }
+
+.spectrum-history { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.spectrum-history li { padding: 8px 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); }
+.spectrum-history-note { display: block; margin-top: 3px; color: var(--text-primary); white-space: pre-wrap; word-break: break-word; }
+
+.spectrum-evidence-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.spectrum-evidence-list li { padding: 8px 10px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); }
+
+.spectrum-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+.spectrum-notice { padding: 9px 12px; border: 1px solid #059669; background: var(--color-success-bg); color: #34d399; border-radius: var(--radius-md); font-size: 13px; word-break: break-word; }
+.spectrum-error-text { color: #fca5a5; font-size: 12px; }
+.spectrum-state { padding: 12px; color: var(--text-muted); font-size: 13px; }
+
+@media (max-width: 900px) {
+  .spectrum-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .spectrum-columns, .spectrum-form-grid { grid-template-columns: 1fr; }
+  .spectrum-filters { grid-template-columns: 1fr; }
+}

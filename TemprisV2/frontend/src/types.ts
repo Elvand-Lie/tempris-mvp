@@ -8,7 +8,7 @@ export type AssetStatus = 'active' | 'decommissioned';
 export type ReachabilityStatus = 'unverified' | 'verified' | 'unreachable';
 export type AuthorizationStatus = 'pending' | 'approved' | 'revoked' | 'expired';
 export type UserRole = 'analyst' | 'admin' | 'superadmin';
-export type ActiveTab = 'assets' | 'collectors' | 'scout' | 'org';
+export type ActiveTab = 'assets' | 'collectors' | 'scout' | 'spectrum' | 'org';
 
 export type ScoutProfile = 'SERVICE_DISCOVERY' | 'VULNERABILITY_ASSESSMENT';
 
@@ -401,4 +401,234 @@ export interface PendingUser {
 export interface CatalogueData {
   modules: Array<{ id: string; name: string; description: string | null; status: string; created_at: string }>;
   packages: Array<{ id: string; name: string; description: string | null; is_default: boolean; version: number; created_at: string; modules: string[] }>;
+}
+
+// ---------------------------------------------------------------------------
+// SPECTRUM (Chapter 7) — confirmed-exposure workbench.
+//
+// SPECTRUM is a READ-THROUGH workbench over the Chapter 3 exposure domain
+// (PRD-000 §7): it never stores or computes scores. TES payloads, Business
+// Impact records, and analyst-reviewed evidence are read from / written to
+// the Ch.3 routes (/api/exposure) that own storage and score semantics.
+// Net-new Ch.7 state is workflow only: assignment, analysis_state (never
+// named "status" — Ch.3 owns asset_exposures.status), notes/history — all
+// at EXPOSURE grain; the finding is grouping/roll-up only.
+// ---------------------------------------------------------------------------
+
+/** Analyst process state on an exposure (Ch.7). Deliberately NOT "status". */
+export type SpectrumAnalysisState = 'new' | 'assigned' | 'in_analysis' | 'action_required';
+
+export type TesState = 'FINAL' | 'PROVISIONAL' | 'UNSCOREABLE';
+
+/** Lossless wire form for backend Decimals: {"__decimal__": "<exact string>"}. */
+export interface DecimalWire {
+  __decimal__: string;
+}
+
+/** One queue row = one current confirmed exposure (exposure grain). */
+export interface SpectrumQueueItem {
+  exposure_id: string;
+  finding_id: string;
+  asset_id: string;
+  canonical_cve_id: string | null;
+  finding_title: string;
+  finding_severity: string;
+  asset_name: string;
+  asset_normalized_target: string;
+  asset_network_scope: string;
+  confirmed_at: string;
+  analysis_state: SpectrumAnalysisState;
+  assigned_to: string | null;
+  tes_state: TesState;
+  /** Two-decimal presentation rounding from the kernel; null when UNSCOREABLE. */
+  tes_display_value: string | null;
+}
+
+/** The locked six-field finding roll-up (PRD-000 §3.5 #6). */
+export interface SpectrumFindingSummary {
+  max_final_tes: DecimalWire | null;
+  max_provisional_tes: DecimalWire | null;
+  final_count: number;
+  provisional_count: number;
+  unscoreable_count: number;
+  total_current_exposures: number;
+}
+
+export interface SpectrumWorkflow {
+  analysis_state: SpectrumAnalysisState;
+  assigned_to: string | null;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+/** FindingStatusHistory shape — workflow narrative, distinct from scoring. */
+export interface SpectrumHistoryEntry {
+  id: string;
+  changed_by: string;
+  changed_at: string;
+  note: string | null;
+  from_analysis_state: SpectrumAnalysisState | null;
+  to_analysis_state: SpectrumAnalysisState | null;
+}
+
+/** GET /api/spectrum/exposures/{id} — context + workflow only; scores are read through Ch.3. */
+export interface SpectrumExposureDetail {
+  exposure_id: string;
+  finding_id: string;
+  asset_id: string;
+  exposure_status: string;
+  confirmed_by: string;
+  confirmed_at: string;
+  evidence: Record<string, unknown>;
+  finding: {
+    finding_id: string;
+    title: string;
+    canonical_cve_id: string | null;
+    severity: string;
+    status: string;
+    tes_summary: SpectrumFindingSummary;
+  };
+  asset: {
+    asset_id: string;
+    name: string;
+    normalized_target: string;
+    target_type: string;
+    network_scope: string;
+    status: string;
+    criticality: string | null;
+  };
+  workflow: SpectrumWorkflow;
+  history: SpectrumHistoryEntry[];
+}
+
+// --- Ch.3 current-TES read model (GET /api/exposure/{id}/tes, §3.3.5) -------
+
+export interface TesDecompositionRow {
+  axis: string;
+  raw_value: DecimalWire | null;
+  base_weight: DecimalWire;
+  effective_weight: DecimalWire | null;
+  contribution: DecimalWire | null;
+  state: 'known' | 'unknown' | 'stale';
+  provenance_class: string | null;
+  freshness: string | null;
+  observed_at: string | null;
+  source: string | null;
+  reason: string | null;
+  // Exploit-reality row extras (§3.3.5: the ER value never renders bare).
+  selected_rung?: string | null;
+  selected_sources?: string[];
+  epss_freshness?: string | null;
+  epss_value?: DecimalWire | null;
+  kev_state?: string | null;
+  kev_freshness?: string | null;
+  kev_ransomware?: string | null;
+  exact_exposure_fresh_state?: string | null;
+  exact_exposure_stale_state?: string | null;
+  attestation_state?: string | null;
+  /** [source_name, reason] pairs for STALE/UNKNOWN potentially-higher sources. */
+  unresolved_higher?: Array<[string, string]>;
+}
+
+/** Atomic current-TES payload — recomputed at read; never a stored score. */
+export interface TesCurrentPayload {
+  exposure_id: string;
+  finding_id: string;
+  asset_id: string;
+  tenant_id: string;
+  canonical_cve_id: string | null;
+  formula_version: string;
+  state: TesState;
+  value: DecimalWire | null;
+  display_value: string | null;
+  /** Coverage rendering like "4/5". */
+  known_axes: string;
+  known_weight: DecimalWire | null;
+  missing_inputs: string[];
+  decomposition: TesDecompositionRow[];
+  source_view: {
+    as_of: string;
+    exposure_status: string;
+    exposure_version: string;
+    taxonomy_class?: string | null;
+    attestation_state?: string | null;
+    cvss_unscoreable_reason_code?: string | null;
+    [key: string]: unknown;
+  };
+}
+
+// --- Ch.3 scoring-input snapshot (GET /api/exposure/{id}/scoring-inputs) ----
+
+export interface ReachabilityEvidenceRecord {
+  id: string;
+  exposure_id: string;
+  vantage: string;
+  evidence: Record<string, unknown>;
+  producer: string;
+  observed_at: string;
+  recorded_by: string;
+  revoked: boolean;
+  created_at: string;
+}
+
+export interface BusinessImpactRecord {
+  id: string;
+  exposure_id: string;
+  /** Exact stored decimal — serialized as number or string; never a computed value. */
+  value: number | string;
+  reason: string | null;
+  assessed_by: string;
+  created_at: string;
+}
+
+export interface ExploitationEvidenceRecord {
+  id: string;
+  exposure_id: string;
+  evidence_kind: string;
+  producer: string;
+  evidence: Record<string, unknown>;
+  observed_at: string;
+  recorded_by: string;
+  reviewed_by: string | null;
+  revoked: boolean;
+  created_at: string;
+}
+
+export interface ScoringInputsSnapshot {
+  exposure_id: string;
+  tenant_id: string;
+  reachability: {
+    value: number;
+    vantage: string;
+    record: ReachabilityEvidenceRecord;
+  } | null;
+  business_impact: {
+    value: number | string;
+    record: BusinessImpactRecord;
+  } | null;
+  exploitation_evidence: Array<{
+    record: ExploitationEvidenceRecord;
+    eligible: boolean;
+    ttl_days: number;
+  }>;
+  non_exploitation_attestations: Array<{
+    record: Record<string, unknown>;
+    eligible: boolean;
+    ttl_days: number;
+  }>;
+}
+
+// --- Ch.7 action payloads / results -----------------------------------------
+
+export interface StrikeRequestResult {
+  strike_request_id: string;
+  engagement_draft_id: string | null;
+  /** e.g. 'draft_queued' — STRIKE unavailable ⇒ queued as draft, never silent. */
+  status: string;
+}
+
+export interface EdipHandoffResult {
+  decision_id: string;
+  /** Initial state 'needs_decision'. */
+  state: string;
 }
