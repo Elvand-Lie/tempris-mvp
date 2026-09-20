@@ -17,13 +17,16 @@ Binding rules implemented here:
    plus a DB trigger; only never-approved drafts are deletable.
 5. Register-time ownership validation (V1 posture kept): every registered
    exposure must be a CURRENT confirmed episode of the requesting tenant.
-6. SPEAK's AI surface fails closed with no model — never invented numbers.
+6. SPEAK's AI surface is interpretation-only: it reads one coherent view of
+   THIS tenant's authoritative state, cites the exact source objects it was
+   given, writes only its own audit event, and fails CLOSED with no
+   configured model — never invented numbers.
 """
 from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import psycopg
@@ -31,8 +34,9 @@ from psycopg.rows import dict_row
 
 from app.audit import record_audit_event
 from app.ciso import service as ciso_service
+from app.config import get_speak_llm_config
 from app.exposure.tes_read_model import _jsonify, get_exposure_tes
-from app.speak import render
+from app.speak import llm, render
 from app.speak.errors import (
     ArtifactIntegrityError,
     LlmUnavailableError,
@@ -722,12 +726,57 @@ def export_report(
     }
 
 
-def speak_chat_fail_closed() -> None:
-    """The SPEAK AI surface with no configured model. It fails CLOSED: the
-    named defect class — a mock fallback rendering invented seed numbers —
-    is retired. No session rows, no message rows, no content is produced:
-    an AI surface without a model says 'unavailable'."""
-    raise LlmUnavailableError(
-        "SPEAK has no configured LLM provider; the AI surface fails closed "
-        "and never invents content (PRD Ch.11 rule 6)"
+def speak_chat(
+    conn: psycopg.Connection,
+    tenant_id: uuid.UUID,
+    *,
+    message: str,
+    actor_id: str,
+    actor_role: str,
+) -> dict:
+    """The system's only LLM surface (PRD Ch.11 rule 6). One coherent
+    read-only view of THIS tenant's authoritative state (the Ch.10 executive
+    summary, read inside the caller's boundary) is handed to the model as
+    DATA; the answer comes back labeled INTERPRETATION with server-built
+    citations — the exact source objects the model was given, never what the
+    model claims. No session rows, no message rows; the only write is the
+    tenant's own audit-chain event. With no configured provider it fails
+    CLOSED: 'unavailable', never invented numbers (the V1 mock-LLM fallback
+    is a named defect class and is retired)."""
+    config = get_speak_llm_config()
+    if config is None:
+        raise LlmUnavailableError(
+            "SPEAK has no configured LLM provider; the AI surface fails closed "
+            "and never invents content (PRD Ch.11 rule 6)"
+        )
+
+    as_of = datetime.now(timezone.utc)
+    payload, source_refs = ciso_service.build_executive_summary(
+        conn, tenant_id, as_of=as_of
     )
+    wire_payload = _jsonify(payload)
+    messages = llm.build_chat_messages(message, wire_payload)
+    answer = llm.chat_completion(messages, config=config)
+
+    record_audit_event(
+        conn, tenant_id,
+        actor_id=actor_id, actor_role=actor_role,
+        event_name="speak.chat_completed",
+        details={
+            "model": config.model,
+            "message_chars": len(message),
+            "context": "executive_summary",
+            "cited_exposures": len(source_refs.get("exposures", [])),
+        },
+    )
+    return {
+        "answer": answer,
+        "model": config.model,
+        "authority": "interpretation_only",
+        "disclaimer": (
+            "AI interpretation of the cited authoritative objects; never a "
+            "source of record — verify against the sealed reports."
+        ),
+        "as_of": wire_payload.get("as_of"),
+        "citations": _jsonify(source_refs),
+    }

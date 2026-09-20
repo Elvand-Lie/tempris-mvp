@@ -73,7 +73,7 @@ class ExportIn(BaseModel):
 class ChatIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    message: str = Field(..., min_length=1)
+    message: str = Field(..., min_length=1, max_length=4000)
 
 
 _STATUS_BY_ERROR = {
@@ -351,21 +351,28 @@ def export_report(
 
 @router.post(
     "/chat",
-    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-    summary="SPEAK AI chat (fails closed: no LLM provider is configured)",
+    status_code=status.HTTP_200_OK,
+    summary="SPEAK AI chat (interpretation-only; cites sources; fails closed)",
 )
 def speak_chat(
     payload: ChatIn,
     auth: AuthContext = Depends(_require_analyst),
 ):
-    """The system's only LLM surface lives here — and with no provider it
+    """The system's only LLM surface lives here. It interprets one coherent
+    read-only view of THIS tenant's authoritative state, labels its answer
+    as interpretation, and cites the exact source objects it was given.
+    With no configured provider — or an unreachable/malformed one — it
     fails closed: 'unavailable', never invented numbers (the V1 mock-LLM
     fallback is a named defect class and is retired). No session or message
-    rows are written."""
+    rows are written; the only write is the tenant's own audit event."""
     try:
-        service.speak_chat_fail_closed()
-    except LlmUnavailableError as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"code": e.code, "message": str(e)},
-        )
+        with get_db_connection() as conn:
+            _snapshot_boundary(conn)
+            result = service.speak_chat(
+                conn, auth.tenant_id, message=payload.message,
+                actor_id=auth.actor_id, actor_role=auth.role,
+            )
+            conn.commit()
+            return result
+    except SpeakError as e:
+        raise _http_error(e)

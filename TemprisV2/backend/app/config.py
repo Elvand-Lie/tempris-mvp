@@ -3,6 +3,8 @@ import json
 import os
 import uuid
 from pathlib import Path
+from typing import NamedTuple, Optional
+
 from dotenv import load_dotenv
 
 # Load .env from root or backend directory
@@ -140,3 +142,42 @@ VULN_SYNC_ENABLED = os.environ.get("VULN_SYNC_ENABLED", "false").lower() in ("tr
 VULN_SYNC_CHECK_INTERVAL = int(os.environ.get("VULN_SYNC_CHECK_INTERVAL", "60"))
 NVD_API_KEY = os.environ.get("NVD_API_KEY", "").strip() or None
 
+
+# ---------------------------------------------------------------------------
+# SPEAK LLM provider (PRD-000 Ch.11 — the system's only LLM surface lives in
+# SPEAK). Credentials arrive ONLY via the environment — never code, never the
+# API envelope. Read at CALL TIME (the audit-key pattern) so reconfiguration
+# needs no restart and tests can pin it per-test.
+#
+# Unconfigured or misconfigured → None → the AI surface fails closed (503
+# 'unavailable', never invented content). The model MUST be an explicit free-
+# tier id ending ':free'; V1's `model: "auto"` default is a retired defect.
+# ---------------------------------------------------------------------------
+SPEAK_LLM_DEFAULT_BASE_URL = "http://127.0.0.1:3001/v1"  # VPS loopback gateway
+_SPEAK_LLM_FORBIDDEN_MODELS = {"auto"}
+
+
+class SpeakLlmConfig(NamedTuple):
+    base_url: str
+    api_key: str
+    model: str
+
+
+def get_speak_llm_config() -> Optional[SpeakLlmConfig]:
+    """The SPEAK chat provider configuration, or None when the AI surface
+    must fail closed. ``SPEAK_LLM_BASE_URL`` defaults to the VPS loopback
+    gateway; ``SPEAK_LLM_API_KEY`` and ``SPEAK_LLM_MODEL`` have NO defaults
+    and are required. A model that is 'auto' or does not end ':free' is a
+    misconfiguration, not a fallback: it fails closed like an unset key."""
+    base_url = os.environ.get("SPEAK_LLM_BASE_URL", "").strip() or SPEAK_LLM_DEFAULT_BASE_URL
+    api_key = os.environ.get("SPEAK_LLM_API_KEY", "").strip()
+    model = os.environ.get("SPEAK_LLM_MODEL", "").strip()
+    if not api_key or not model:
+        return None
+    if model.lower() in _SPEAK_LLM_FORBIDDEN_MODELS:
+        return None
+    if not model.endswith(":free"):
+        return None
+    if not (base_url.startswith("http://") or base_url.startswith("https://")):
+        return None
+    return SpeakLlmConfig(base_url=base_url, api_key=api_key, model=model)
