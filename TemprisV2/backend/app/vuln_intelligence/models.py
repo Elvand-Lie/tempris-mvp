@@ -78,20 +78,22 @@ class ArchiveLimits:
     extraction_timeout_seconds: float = 300.0           # cumulative extraction budget
 
 
-# CVE/cvelistV5-only preset (P1-02 review fix): the real catalog is ~300 MB
-# compressed expanding to ~3 GB across ~280k files (ratio ~10:1). Caps carry
-# 2x margin over that reality; per-entry ratio/count/size guards are
+# CVE/cvelistV5-only preset (P1-02 review fix; compressed cap raised by the
+# P1-03 hotfix): the live catalog measured 673,227,801 bytes compressed
+# expanding to ~3.1 GB across ~396k files (ratio ~5.6:1) on 2026-09-20 — the
+# previous 600 MB compressed cap failed closed against the real feed. Caps
+# still carry margin over that reality; per-entry ratio/count/size guards are
 # UNCHANGED so genuinely hostile archives still fail closed; the cumulative
 # extraction timeout covers a one-time ~3 GB staged extraction at a
 # conservative >= 2 MB/s sustained rate. Only CveFetchClient uses this.
 CVE_ARCHIVE_LIMITS = ArchiveLimits(
-    max_compressed_bytes=600 * 1024 * 1024,       # 600 MB compressed (2x)
-    max_expanded_bytes=6 * 1024 * 1024 * 1024,    # 6 GB expanded (2x)
-    max_file_count=500_000,                        # cvelistV5 ~280k files
+    max_compressed_bytes=1024 * 1024 * 1024,      # 1 GiB compressed (live feed ~673 MB, 2026-09-20)
+    max_expanded_bytes=6 * 1024 * 1024 * 1024,    # 6 GB expanded (2x over measured ~3.1 GB)
+    max_file_count=500_000,                        # cvelistV5 ~396k files (2026-09-20)
     max_entry_bytes=50 * 1024 * 1024,
     max_compression_ratio=100.0,
     min_ratio_threshold_bytes=1 * 1024 * 1024,
-    extraction_timeout_seconds=1800.0,             # one-time 3 GB stage
+    extraction_timeout_seconds=1800.0,             # one-time ~3 GB stage
 )
 
 

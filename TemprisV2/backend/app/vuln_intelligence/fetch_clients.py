@@ -25,6 +25,8 @@ import io
 import json
 import logging
 import os
+import pathlib
+import tempfile
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -50,6 +52,7 @@ from app.vuln_intelligence.cve_staging import (
     stage_archive,
     load_staged_catalog,
     clear_staging,
+    staging_root,
 )
 
 logger = logging.getLogger(__name__)
@@ -217,36 +220,81 @@ class CveFetchClient:
         download_bytes = 0
         download_hash: Optional[str] = None
         response_url = self.base_url
+        inline_body: Optional[bytes] = None
         if staged is None:
-            resp = http.get(self.base_url)
-            resp.raise_for_status()
-            content_type = resp.headers.get("content-type", "")
-            is_zip = (
-                resp.content.startswith(b"PK")
-                or "zip" in content_type
-                or self.base_url.endswith(".zip")
-            )
-            if is_zip:
-                download_bytes = len(resp.content)
-                download_hash = hashlib.sha256(resp.content).hexdigest()
-                response_url = str(resp.url)
-                staged = stage_archive(
-                    resp.content,
-                    limits=self.archive_limits,
-                    source_url=response_url,
+            # P1-03 hotfix: stream the download to the staging volume instead
+            # of buffering the whole body via resp.content. The live cvelistV5
+            # catalog is ~673 MB compressed; the full-body buffer OOM-killed
+            # the bootstrap on the ~4 GB production VPS. Chunks stream to a
+            # temp file NEXT TO the stage dir (stage_archive wipes and
+            # recreates staging_root itself), hashed incrementally, and capped
+            # at the same compressed limit the extractor enforces.
+            with http.stream("GET", self.base_url) as resp:
+                resp.raise_for_status()
+                content_type = resp.headers.get("content-type", "")
+                chunks = resp.iter_bytes(chunk_size=1024 * 1024)
+                first_chunk = next(chunks, b"")
+                is_zip = (
+                    first_chunk.startswith(b"PK")
+                    or "zip" in content_type
+                    or self.base_url.endswith(".zip")
                 )
-            else:
-                # Tiny inline bodies (single JSON record / small lists): keep
-                # the historical in-memory path; no staging needed.
+                if is_zip:
+                    download_dir = staging_root().parent
+                    download_dir.mkdir(parents=True, exist_ok=True)
+                    tmp_path: Optional[pathlib.Path] = None
+                    try:
+                        with tempfile.NamedTemporaryFile(
+                            dir=download_dir,
+                            prefix="cvelistv5-download-",
+                            suffix=".zip",
+                            delete=False,
+                        ) as tmp:
+                            tmp_path = pathlib.Path(tmp.name)
+                            hasher = hashlib.sha256()
+                            tmp.write(first_chunk)
+                            hasher.update(first_chunk)
+                            downloaded = len(first_chunk)
+                            if downloaded > self.archive_limits.max_compressed_bytes:
+                                raise ArchiveBombError(
+                                    f"Compressed archive download ({downloaded} bytes) exceeds limit ({self.archive_limits.max_compressed_bytes} bytes)"
+                                )
+                            for chunk in chunks:
+                                tmp.write(chunk)
+                                hasher.update(chunk)
+                                downloaded += len(chunk)
+                                if downloaded > self.archive_limits.max_compressed_bytes:
+                                    raise ArchiveBombError(
+                                        f"Compressed archive download ({downloaded} bytes) exceeds limit ({self.archive_limits.max_compressed_bytes} bytes)"
+                                    )
+                        download_bytes = downloaded
+                        download_hash = hasher.hexdigest()
+                        response_url = str(resp.url)
+                        staged = stage_archive(
+                            tmp_path,
+                            limits=self.archive_limits,
+                            source_url=response_url,
+                        )
+                    finally:
+                        if tmp_path is not None:
+                            tmp_path.unlink(missing_ok=True)
+                else:
+                    # Tiny inline bodies (single JSON record / small lists):
+                    # keep the historical in-memory path; no staging needed.
+                    inline_body = first_chunk + b"".join(chunks)
+                    download_bytes = len(inline_body)
+                    download_hash = hashlib.sha256(inline_body).hexdigest()
+                    response_url = str(resp.url)
+            if inline_body is not None:
                 all_records: list[dict] = []
-                if resp.content.startswith(b"{"):
-                    data = resp.json()
+                if inline_body.startswith(b"{"):
+                    data = json.loads(inline_body)
                     if isinstance(data, dict) and data.get("dataType") == "CVE_RECORD":
                         all_records = [data]
                     elif isinstance(data, list):
                         all_records = [r for r in data if isinstance(r, dict) and r.get("dataType") == "CVE_RECORD"]
-                elif resp.content.startswith(b"["):
-                    data = resp.json()
+                elif inline_body.startswith(b"["):
+                    data = json.loads(inline_body)
                     if isinstance(data, list):
                         all_records = [r for r in data if isinstance(r, dict) and r.get("dataType") == "CVE_RECORD"]
                 # P1-02 recheck: this branch exists ONLY for tiny inline
@@ -270,9 +318,9 @@ class CveFetchClient:
                         "count": len(batch_records),
                         "total_entries": len(all_records),
                         "offset": offset,
-                        "url": str(resp.url),
-                        "bytes_downloaded": len(resp.content),
-                        "content_hash": hashlib.sha256(resp.content).hexdigest(),
+                        "url": response_url,
+                        "bytes_downloaded": download_bytes,
+                        "content_hash": download_hash,
                     },
                 )
 
