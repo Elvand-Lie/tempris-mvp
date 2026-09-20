@@ -15,6 +15,16 @@ from app.auth_crypto import (
     generate_scrypt_hash,
 )
 from tests.conftest import TENANT_A
+from app.db import get_db_connection
+
+
+def _fixture_user_id(email: str) -> str:
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM users WHERE LOWER(email) = LOWER(%s);", (email,))
+            row = cur.fetchone()
+    assert row is not None, f"fixture user {email} missing"
+    return str(row["id"])
 
 def test_parse_scrypt_hash_validation_rules():
     # Valid canonical hash
@@ -67,7 +77,8 @@ def test_login_success_and_jwt_claims(client: TestClient):
     # Decode and verify claims
     decoded = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
     assert decoded["tenant_id"] == str(TENANT_A)
-    assert decoded["sub"] == "admin"
+    # sub = user UUID (PRD Ch.5 decision; email is a display/lookup attribute)
+    assert decoded["sub"] == str(_fixture_user_id("admin"))
     assert decoded["role"] == "admin"
     assert isinstance(decoded["iat"], int)
     assert isinstance(decoded["exp"], int)

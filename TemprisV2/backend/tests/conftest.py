@@ -19,6 +19,10 @@ if env_path.exists():
 else:
     load_dotenv()
 
+# Pinned CORS allowlist (Ch.5 transport hardening) must be set before
+# app.config / app.main are imported — one explicit origin for tests.
+os.environ.setdefault("CORS_ALLOW_ORIGINS", "https://console.tempris.test")
+
 from app.main import app
 from app.db import get_db_connection, init_db, close_db
 from app.auth import create_test_token
@@ -179,6 +183,10 @@ def clean_database():
                 )
                 cur.execute("TRUNCATE identity_boundary_audit, tenant_identity_boundary;")
                 cur.execute("DELETE FROM audit_events WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
+                # Sessions (migration 024): FK ON DELETE CASCADE would clear
+                # non-fixture rows with their users; fixture users persist, so
+                # clear the store wholesale for per-test isolation.
+                cur.execute("DELETE FROM user_sessions;")
                 cur.execute("DELETE FROM scout_observations WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
                 cur.execute("DELETE FROM scout_tool_runs WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))
                 cur.execute("DELETE FROM scout_jobs WHERE tenant_id IN (%s, %s);", (str(TENANT_A), str(TENANT_B)))

@@ -46,10 +46,11 @@ def test_login_success_and_jwt_claim_integrity(client: TestClient):
     token = data["token"]
     decoded = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
 
-    # Strict 5 claims verification
-    expected_claims = {"sub", "tenant_id", "role", "iat", "exp"}
+    # Strict 6-claim verification (session-bound shape: jti names the
+    # persisted user_sessions row; sub is the user UUID)
+    expected_claims = {"sub", "tenant_id", "role", "iat", "exp", "jti"}
     assert set(decoded.keys()) == expected_claims
-    assert decoded["sub"] == user_email
+    assert decoded["sub"] == str(user_id)
     assert decoded["tenant_id"] == str(TENANT_A)
     assert decoded["role"] == "admin"
     assert isinstance(decoded["iat"], int)

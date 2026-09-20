@@ -33,6 +33,8 @@ from typing import Any, Callable, Optional, Protocol, Union
 
 import psycopg
 
+from app.audit import record_audit_event
+from app.config import PLATFORM_TENANT_ID
 from app.vuln_intelligence.models import SyncSnapshot, SyncState, MassWithdrawalExceededError
 from app.vuln_intelligence.repository import (
     create_sync_snapshot,
@@ -271,6 +273,47 @@ def _fail_shared_snapshot(
             pass
 
 
+def _record_sync_audit(conn: psycopg.Connection, outcome: SyncOutcome) -> None:
+    """PRD Ch.5 Target architecture item 4: every background engine writes
+    audit events under a service actor — the vuln-sync loop wrote zero
+    (the Ch.5 "sync-engine audit silence" gap). One event per completed sync
+    run under ``system:sync``, on the Platform Control tenant (the sync plane
+    is platform-global, not tenant-scoped).
+
+    Best-effort by design (mirrors _record_failure): an audit failure must
+    never fail the sync it describes."""
+    if outcome.skipped_overlap:
+        return
+    try:
+        record_audit_event(
+            conn=conn,
+            tenant_id=PLATFORM_TENANT_ID,
+            actor_id="system:sync",
+            actor_role="system",
+            event_name=(
+                "vuln.sync.completed" if outcome.success else "vuln.sync.failed"
+            ),
+            details={
+                "source": outcome.source,
+                "snapshot_id": outcome.snapshot_id,
+                "sync_mode": outcome.sync_mode,
+                "records_processed": outcome.records_processed,
+                "records_created": outcome.records_created,
+                "records_failed": outcome.records_failed,
+                "cursor_moved": outcome.cursor_after is not None,
+                "duration_ms": outcome.duration_ms,
+                "error": (outcome.error or "")[:512],
+            },
+        )
+        conn.commit()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error("Failed to record sync audit event for %s: %s", outcome.source, e)
+
+
 def sync_source(
     conn: psycopg.Connection,
     adapter: SourceAdapter,
@@ -407,6 +450,7 @@ def sync_source(
                 continuation_completed=False,
             )
         _log_sync_snapshot(outcome)
+        _record_sync_audit(conn, outcome)
         return outcome
     finally:
         release_advisory_lock(conn, source)

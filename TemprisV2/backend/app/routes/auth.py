@@ -1,20 +1,32 @@
 # backend/app/routes/auth.py
+import hashlib
 import time
 import threading
+import uuid
+from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional
 import jwt
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, model_validator
+from app import config
 from app.config import (
     JWT_SECRET,
     JWT_ALGORITHM,
     PLATFORM_TENANT_ID,
 )
+from app.auth import AuthContext, get_auth_context
 from app.auth_crypto import verify_password_scrypt, compute_dummy_scrypt
 from app.db import get_db_connection
 from app.audit import record_audit_event
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
+
+# Session lifetime is pinned to the token lifetime (exp - iat = 3600):
+# explicit 1-hour re-login — the refresh-vs-relogin decision (PRD Ch.5 open
+# decision #1) is decided for v1 as NO refresh tokens; the user_sessions
+# store (migration 024) is the extension point if refresh is ever
+# productized.
+SESSION_LIFETIME_SECONDS = 3600
 
 class LoginRateGuard:
     """
@@ -193,26 +205,166 @@ def login(creds: LoginRequest, request: Request):
                 detail="Invalid email or password",
             )
 
-        # Exactly 1 active membership in an active tenant -> mint 5-claim JWT
+        # Exactly 1 active membership in an active tenant -> persist a session
+        # (per-token revocation, migration 024) and mint the session-bound JWT:
+        # `sub` is the user UUID (PRD Ch.5 decision), `jti` names the session
+        # (the raw jti is never stored — only its SHA-256).
         tenant_id = str(membership["tenant_id"])
         role = str(membership["role"])
         canonical_email = str(user["email"])
 
         now_ts = int(time.time())
+        jti = str(uuid.uuid4())
+        expires_at = datetime.fromtimestamp(now_ts + SESSION_LIFETIME_SECONDS, tz=timezone.utc)
+
+        with conn.cursor() as cur:
+            # Opportunistic cleanup: drop this user's already-expired sessions.
+            cur.execute(
+                "DELETE FROM user_sessions WHERE user_id = %s AND expires_at < now();",
+                (str(user["id"]),)
+            )
+            cur.execute(
+                """
+                INSERT INTO user_sessions (user_id, tenant_id, jti_hash, issued_at, expires_at)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id;
+                """,
+                (
+                    str(user["id"]),
+                    tenant_id,
+                    hashlib.sha256(jti.encode("utf-8")).hexdigest(),
+                    datetime.fromtimestamp(now_ts, tz=timezone.utc),
+                    expires_at,
+                )
+            )
+            session_id = cur.fetchone()["id"]
+
+        record_audit_event(
+            conn=conn,
+            tenant_id=uuid.UUID(tenant_id),
+            actor_id=str(user["id"]),
+            actor_role=role,
+            event_name="auth.login",
+            details={
+                "email": canonical_email,
+                "session_id": str(session_id),
+            }
+        )
+        conn.commit()
+
         payload = {
             "tenant_id": tenant_id,
-            "sub": canonical_email,
+            "sub": str(user["id"]),
             "role": role,
             "iat": now_ts,
-            "exp": now_ts + 3600,
+            "exp": now_ts + SESSION_LIFETIME_SECONDS,
+            "jti": jti,
         }
 
-        token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+        kid, signing_secret = config.jwt_signing_key()
+        headers = {"kid": kid} if kid else None
+        token = jwt.encode(payload, signing_secret, algorithm="HS256", headers=headers)
 
         return LoginResponse(
             token=token,
             token_type="bearer",
-            expires_in=3600,
+            expires_in=SESSION_LIFETIME_SECONDS,
             tenant_id=tenant_id,
             role=role,
         )
+
+
+@router.post("/logout")
+def logout(auth: AuthContext = Depends(get_auth_context)):
+    """
+    Revoke the caller's current session (per-token revocation). Idempotent:
+    a token without a persisted session (legacy transition shape) logs out
+    with nothing to revoke.
+    """
+    revoked = False
+    if auth.session_id is not None:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE user_sessions
+                    SET revoked_at = now(), revoking_actor = %s, revocation_reason = 'logout'
+                    WHERE id = %s AND user_id = %s AND revoked_at IS NULL;
+                    """,
+                    (auth.actor_id, str(auth.session_id), str(auth.user_id))
+                )
+                revoked = cur.rowcount > 0
+                if revoked:
+                    record_audit_event(
+                        conn=conn,
+                        tenant_id=auth.tenant_id,
+                        actor_id=auth.actor_id,
+                        actor_role=auth.role,
+                        event_name="auth.logout",
+                        details={"session_id": str(auth.session_id), "reason": "logout"}
+                    )
+            conn.commit()
+    return {"status": "logged_out", "session_revoked": revoked}
+
+
+@router.get("/sessions")
+def list_sessions(auth: AuthContext = Depends(get_auth_context)):
+    """List the caller's active (unrevoked, unexpired) sessions in the
+    token's tenant; `current` marks the session the caller's token belongs to."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, issued_at, expires_at
+                FROM user_sessions
+                WHERE user_id = %s AND tenant_id = %s
+                  AND revoked_at IS NULL AND expires_at > now()
+                ORDER BY issued_at DESC;
+                """,
+                (str(auth.user_id), str(auth.tenant_id))
+            )
+            rows = cur.fetchall()
+
+    return {
+        "sessions": [
+            {
+                "id": str(row["id"]),
+                "issued_at": row["issued_at"].isoformat(),
+                "expires_at": row["expires_at"].isoformat(),
+                "current": auth.session_id is not None and row["id"] == auth.session_id,
+            }
+            for row in rows
+        ]
+    }
+
+
+@router.delete("/sessions/{session_id}")
+def revoke_session(session_id: uuid.UUID, auth: AuthContext = Depends(get_auth_context)):
+    """Revoke one of the caller's own sessions in the token's tenant. A
+    session that does not exist, belongs to another user/tenant, or is
+    already revoked is the identical 404 (no existence oracle)."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE user_sessions
+                SET revoked_at = now(), revoking_actor = %s, revocation_reason = 'revoked_by_user'
+                WHERE id = %s AND user_id = %s AND tenant_id = %s AND revoked_at IS NULL;
+                """,
+                (auth.actor_id, str(session_id), str(auth.user_id), str(auth.tenant_id))
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Session not found or already revoked"
+                )
+            record_audit_event(
+                conn=conn,
+                tenant_id=auth.tenant_id,
+                actor_id=auth.actor_id,
+                actor_role=auth.role,
+                event_name="auth.session_revoked",
+                details={"session_id": str(session_id), "reason": "revoked_by_user"}
+            )
+        conn.commit()
+    return {"status": "revoked", "session_id": str(session_id)}

@@ -54,6 +54,9 @@ def clean_ticket04_platform_rows():
                 DELETE FROM audit_events
                 WHERE details->>'target_tenant_id' IN (
                     SELECT id::text FROM tenants WHERE slug LIKE 'ticket04-%'
+                )
+                OR tenant_id IN (
+                    SELECT id FROM tenants WHERE slug LIKE 'ticket04-%'
                 );
                 """
             )
@@ -414,7 +417,7 @@ def test_pending_user_list_activation_and_login_preserve_five_claim_jwt(client):
     login = client.post("/api/auth/login", json={"email": email, "password": password})
     assert login.status_code == 200
     claims = jwt.decode(login.json()["token"], JWT_SECRET, algorithms=["HS256"])
-    assert set(claims) == {"sub", "tenant_id", "role", "iat", "exp"}
+    assert set(claims) == {"sub", "tenant_id", "role", "iat", "exp", "jti"}
     assert "is_platform_admin" not in claims
 
 

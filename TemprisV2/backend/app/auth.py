@@ -1,9 +1,11 @@
 # backend/app/auth.py
+import hashlib
 import uuid
 from typing import Optional, List
 import jwt
 from fastapi import Header, HTTPException, status, Depends
 from pydantic import BaseModel
+from app import config
 from app.config import JWT_SECRET, JWT_ALGORITHM, PLATFORM_TENANT_ID
 from app.db import get_db_connection
 from app.services.entitlements import resolve_effective_modules
@@ -14,6 +16,8 @@ class AuthContext(BaseModel):
     role: str
     is_platform_admin: bool = False
     user_id: Optional[uuid.UUID] = None
+    # Session-bound tokens (jti claim): the persisted user_sessions row id.
+    session_id: Optional[uuid.UUID] = None
 
 def get_auth_context(
     authorization: Optional[str] = Header(None, alias="Authorization")
@@ -32,10 +36,28 @@ def get_auth_context(
         )
 
     token = parts[1]
+
+    # Key selection by `kid` header (PRD Ch.5: JWT kid + rotation path).
+    # Tokens without a kid verify against JWT_SECRET; an unknown kid fails closed.
+    try:
+        kid = jwt.get_unverified_header(token).get("kid")
+    except jwt.PyJWTError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid or expired token: {str(e)}"
+        )
+    try:
+        verification_secret = config.jwt_verification_secret(kid)
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token: unknown token key id"
+        )
+
     try:
         payload = jwt.decode(
             token,
-            JWT_SECRET,
+            verification_secret,
             algorithms=["HS256"],
             options={"verify_exp": True, "verify_iat": True}
         )
@@ -83,27 +105,82 @@ def get_auth_context(
             detail=f"Invalid role claim '{role}'. Must be analyst, admin, or superadmin."
         )
 
-    # Execute database point-join query for real-time revocation and role enforcement
+    # Session-bound token (jti claim — the shape /api/auth/login mints since
+    # migration 024): `sub` is the user UUID and the token must resolve to an
+    # unrevoked, unexpired persisted session (per-token revocation, PRD Ch.5
+    # Target architecture item 2). The point-join still enforces the coarse
+    # revocation invariants on top.
+    jti = payload.get("jti")
+    session_id_val: Optional[uuid.UUID] = None
+
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    u.id AS user_id,
-                    u.status AS user_status,
-                    u.is_platform_admin,
-                    t.status AS tenant_status,
-                    m.id AS membership_id,
-                    m.status AS membership_status,
-                    m.role AS membership_role
-                FROM users u
-                JOIN tenant_memberships m ON m.user_id = u.id AND m.tenant_id = %s
-                JOIN tenants t ON t.id = m.tenant_id
-                WHERE LOWER(u.email) = LOWER(%s);
-                """,
-                (str(tenant_uuid), str(actor_id))
-            )
-            row = cur.fetchone()
+            if jti is not None:
+                if not isinstance(jti, str) or not jti.strip():
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Session invalid or expired"
+                    )
+                jti_hash = hashlib.sha256(jti.encode("utf-8")).hexdigest()
+                cur.execute(
+                    """
+                    SELECT
+                        u.id AS user_id,
+                        u.status AS user_status,
+                        u.is_platform_admin,
+                        t.status AS tenant_status,
+                        m.id AS membership_id,
+                        m.status AS membership_status,
+                        m.role AS membership_role,
+                        s.id AS session_id
+                    FROM user_sessions s
+                    JOIN users u ON u.id = s.user_id
+                    JOIN tenant_memberships m ON m.user_id = u.id AND m.tenant_id = %s
+                    JOIN tenants t ON t.id = m.tenant_id
+                    WHERE s.jti_hash = %s
+                      AND s.tenant_id = %s
+                      AND s.revoked_at IS NULL
+                      AND s.expires_at > now();
+                    """,
+                    (str(tenant_uuid), jti_hash, str(tenant_uuid))
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Session invalid or expired"
+                    )
+                # The `sub` claim and the session row must name the same user.
+                if str(row["user_id"]) != str(actor_id):
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Session invalid or expired"
+                    )
+                session_id_val = row["session_id"] if isinstance(row["session_id"], uuid.UUID) else uuid.UUID(str(row["session_id"]))
+            else:
+                # Legacy transition shape (no jti): only tokens minted before
+                # the session store shipped (<= 1 h of token lifetime) and the
+                # test helper. `sub` resolves by user UUID or email — the PRD
+                # decision is sub = user UUID; email remains a lookup
+                # attribute. Production login never mints this shape.
+                cur.execute(
+                    """
+                    SELECT
+                        u.id AS user_id,
+                        u.status AS user_status,
+                        u.is_platform_admin,
+                        t.status AS tenant_status,
+                        m.id AS membership_id,
+                        m.status AS membership_status,
+                        m.role AS membership_role
+                    FROM users u
+                    JOIN tenant_memberships m ON m.user_id = u.id AND m.tenant_id = %s
+                    JOIN tenants t ON t.id = m.tenant_id
+                    WHERE u.id::text = %s OR LOWER(u.email) = LOWER(%s);
+                    """,
+                    (str(tenant_uuid), str(actor_id), str(actor_id))
+                )
+                row = cur.fetchone()
 
     if not row:
         raise HTTPException(
@@ -129,7 +206,8 @@ def get_auth_context(
         actor_id=str(actor_id),
         role=role,
         is_platform_admin=bool(row["is_platform_admin"]),
-        user_id=user_id_val
+        user_id=user_id_val,
+        session_id=session_id_val
     )
 
 def require_roles(allowed_roles: List[str]):
@@ -171,7 +249,10 @@ def require_platform_admin(auth: AuthContext = Depends(get_auth_context)) -> Aut
         )
     return auth
 
-# Helper for minting test tokens
+# Helper for minting test tokens. Deliberately the LEGACY token shape (no
+# `jti`, email-or-uuid `sub`): it exercises the transition verification path
+# without touching the user_sessions store. Tokens minted by
+# /api/auth/login carry `jti` + user-UUID `sub` and are session-bound.
 def create_test_token(
     tenant_id: str,
     actor_id: str = "test-user",

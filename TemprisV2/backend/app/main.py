@@ -9,11 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.db import init_db, close_db, get_db_connection
-from app.config import VULN_SYNC_ENABLED, VULN_SYNC_CHECK_INTERVAL
+from app.config import VULN_SYNC_ENABLED, VULN_SYNC_CHECK_INTERVAL, CORS_ALLOW_ORIGINS
 from app.migrations_check import ensure_migrations_applied
 from app.routes.assets import router as assets_router
 from app.routes.collectors import router as collectors_router, v1_router as collectors_v1_router
 from app.routes.auth import router as auth_router
+from app.routes.audit import router as audit_router
 from app.routes.org import router as org_router
 from app.routes.platform import router as platform_router
 from app.routes.vuln_intelligence import router as vuln_intelligence_router
@@ -66,10 +67,13 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Cross-origin resource sharing
+# Cross-origin resource sharing — pinned origins (PRD Ch.5 transport/config
+# hardening). CORS_ALLOW_ORIGINS is an explicit allowlist; empty means no
+# cross-origin browser access (fail-closed; the same-origin frontend needs no
+# CORS). The previous `allow_origins=["*"]` with credentials is retired.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ALLOW_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -91,6 +95,7 @@ def health_check():
     return {"status": "ok", "service": "tempris-v2-assets"}
 
 app.include_router(auth_router)
+app.include_router(audit_router)
 app.include_router(assets_router)
 app.include_router(collectors_router)
 app.include_router(collectors_v1_router)
