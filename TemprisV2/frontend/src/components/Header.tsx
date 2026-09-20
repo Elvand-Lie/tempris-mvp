@@ -30,9 +30,9 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="brand-section">
         <div className="brand-logo">T2</div>
         <div>
-          <h1 className="brand-title">Tempris V2 — Assets & Collectors</h1>
+          <h1 className="brand-title">Tempris V2 — Security Operations</h1>
           <p className="brand-subtitle">
-            Enterprise Asset Inventory, Exact-Target Scan Authorization & Internal Reachability Probing
+            Cybersecurity Operations Platform
           </p>
         </div>
       </div>

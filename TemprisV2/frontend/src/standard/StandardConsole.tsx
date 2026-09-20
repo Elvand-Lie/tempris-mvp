@@ -82,7 +82,7 @@ export const StandardConsole: React.FC = () => {
   }, []);
 
   return (
-    <section className="spectrum-workbench" aria-labelledby="standard-title">
+    <section className="spectrum-workbench module-group-governance" aria-labelledby="standard-title">
       <div className="scout-hero">
         <div>
           <p className="scout-kicker">STANDARD</p>

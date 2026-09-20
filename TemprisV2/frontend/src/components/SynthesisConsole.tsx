@@ -113,7 +113,7 @@ export const SynthesisConsole: React.FC = () => {
   const columns = useMemo(() => COLUMNS[selected], [selected]);
 
   return (
-    <section className="spectrum-workbench" aria-labelledby="synthesis-title">
+    <section className="spectrum-workbench module-group-analysis" aria-labelledby="synthesis-title">
       <div className="scout-hero">
         <div>
           <p className="scout-kicker">SYNTHESIS</p>
@@ -129,7 +129,7 @@ export const SynthesisConsole: React.FC = () => {
         </button>
       </div>
 
-      <div role="tablist" aria-label="Correlation questions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+      <div role="tablist" aria-label="Correlation questions" className="synthesis-tabs">
         {QUERIES.map((query) => (
           <button
             key={query.key}
@@ -184,7 +184,7 @@ export const SynthesisConsole: React.FC = () => {
                 : 'No rows matched this correlation.'}
             </p>
           ) : columns.length > 0 ? (
-            <div style={{ overflowX: 'auto' }}>
+            <div className="table-scroll">
               <table className="table" style={{ width: '100%' }}>
                 <thead>
                   <tr>{columns.map((c) => <th key={c}>{c}</th>)}</tr>

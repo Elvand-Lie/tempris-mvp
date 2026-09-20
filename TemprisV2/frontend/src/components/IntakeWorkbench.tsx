@@ -61,7 +61,7 @@ export const IntakeWorkbench: React.FC = () => {
   }, [selected]);
 
   return (
-    <section className="intake-workbench" aria-labelledby="intake-title">
+    <section className="intake-workbench module-group-operations" aria-labelledby="intake-title">
       <div className="scout-hero">
         <div>
           <p className="scout-kicker">INTAKE &amp; TRIAGE</p>

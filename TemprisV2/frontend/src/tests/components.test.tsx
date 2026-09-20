@@ -213,7 +213,7 @@ describe('Tempris V2 Frontend Components', () => {
       });
     });
 
-    expect(await screen.findByText(/Tempris V2 — Assets & Collectors/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Tempris V2 — Security Operations/i)).toBeInTheDocument();
     expect(screen.getByText('ADMIN')).toBeInTheDocument();
   });
 
@@ -227,7 +227,7 @@ describe('Tempris V2 Frontend Components', () => {
     fireEvent.click(screen.getByRole('button', { name: /Sign In/i }));
 
     expect(await screen.findByText(/Invalid username or password/i)).toBeInTheDocument();
-    expect(screen.queryByText(/Tempris V2 — Assets & Collectors/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tempris V2 — Security Operations/i)).not.toBeInTheDocument();
   });
 
   it('handles logout and returns React to login screen', async () => {
@@ -246,7 +246,7 @@ describe('Tempris V2 Frontend Components', () => {
 
     render(<App />);
 
-    expect(await screen.findByText(/Tempris V2 — Assets & Collectors/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Tempris V2 — Security Operations/i)).toBeInTheDocument();
 
     const logoutBtn = screen.getByRole('button', { name: /Sign Out/i });
     fireEvent.click(logoutBtn);
@@ -271,7 +271,7 @@ describe('Tempris V2 Frontend Components', () => {
 
     render(<App />);
 
-    expect(await screen.findByText(/Tempris V2 — Assets & Collectors/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Tempris V2 — Security Operations/i)).toBeInTheDocument();
 
     // Broadcast 401 event as fired by api.ts
     act(() => {
@@ -279,7 +279,7 @@ describe('Tempris V2 Frontend Components', () => {
     });
 
     expect(await screen.findByRole('heading', { name: /Sign In/i })).toBeInTheDocument();
-    expect(screen.queryByText(/Tempris V2 — Assets & Collectors/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tempris V2 — Security Operations/i)).not.toBeInTheDocument();
   });
 
   it('shows the unentitled fallback without calling Assets or Collectors APIs', async () => {

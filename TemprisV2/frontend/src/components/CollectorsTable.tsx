@@ -103,7 +103,7 @@ export const CollectorsTable: React.FC<CollectorsTableProps> = ({
   if (loading && collectors.length === 0) {
     return (
       <div className="table-container">
-        <div className="empty-state">Loading collectors inventory...</div>
+        <div className="empty-state" role="status">Loading collectors inventory…</div>
       </div>
     );
   }
@@ -112,7 +112,12 @@ export const CollectorsTable: React.FC<CollectorsTableProps> = ({
     return (
       <div className="table-container">
         <div className="empty-state">
-          <div className="empty-icon">📡</div>
+          <div className="empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="2" />
+              <path d="M7.5 7.5a6.4 6.4 0 000 9M16.5 7.5a6.4 6.4 0 010 9M4.6 4.6a10.5 10.5 0 000 14.8M19.4 4.6a10.5 10.5 0 010 14.8" />
+            </svg>
+          </div>
           <h3>No Registered Collectors</h3>
           <p>
             No collectors registered in current tenant. Register a collector to enable internal network reachability verification.

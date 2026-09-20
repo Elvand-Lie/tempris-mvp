@@ -69,7 +69,7 @@ export const EdipWorkbench: React.FC = () => {
   }, [loadQueue, loadDetail, selectedId]);
 
   return (
-    <section className="spectrum-workbench" aria-labelledby="edip-title">
+    <section className="spectrum-workbench module-group-governance" aria-labelledby="edip-title">
       <div className="scout-hero">
         <div>
           <p className="scout-kicker">EDIP</p>

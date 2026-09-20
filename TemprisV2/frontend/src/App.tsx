@@ -642,69 +642,23 @@ const AppShell: React.FC = () => {
 
         <div className="shell-content">
         {error && (
-        <div
-          className="mutation-warning"
-          style={{
-            backgroundColor: 'var(--color-danger-bg)',
-            borderColor: 'var(--color-danger)',
-            color: '#fca5a5',
-          }}
-        >
-          <strong>Error connecting to server:</strong> {error}
+        <div className="feedback-banner feedback-error" role="alert">
+          <span><strong>Error connecting to server:</strong> {error}</span>
         </div>
       )}
 
       {feedbackNotice && (
         <div
-          className="feedback-banner"
+          className={`feedback-banner feedback-${feedbackNotice.type}`}
           id="feedback-notice-banner"
-          style={{
-            padding: '10px 16px',
-            marginBottom: '16px',
-            borderRadius: '6px',
-            fontSize: '13px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            background:
-              feedbackNotice.type === 'success'
-                ? 'rgba(5, 150, 105, 0.15)'
-                : feedbackNotice.type === 'warning'
-                ? 'rgba(217, 119, 6, 0.15)'
-                : feedbackNotice.type === 'error'
-                ? 'rgba(239, 68, 68, 0.15)'
-                : 'rgba(59, 130, 246, 0.15)',
-            border: `1px solid ${
-              feedbackNotice.type === 'success'
-                ? '#059669'
-                : feedbackNotice.type === 'warning'
-                ? '#d97706'
-                : feedbackNotice.type === 'error'
-                ? '#ef4444'
-                : '#3b82f6'
-            }`,
-            color:
-              feedbackNotice.type === 'success'
-                ? '#34d399'
-                : feedbackNotice.type === 'warning'
-                ? '#fbbf24'
-                : feedbackNotice.type === 'error'
-                ? '#f87171'
-                : '#93c5fd',
-          }}
+          role={feedbackNotice.type === 'error' ? 'alert' : 'status'}
         >
           <span>{feedbackNotice.message}</span>
           <button
             type="button"
+            className="feedback-dismiss"
             onClick={() => setFeedbackNotice(null)}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'inherit',
-              cursor: 'pointer',
-              fontWeight: 700,
-              fontSize: '16px',
-            }}
+            aria-label="Dismiss notification"
           >
             ×
           </button>

@@ -86,7 +86,7 @@ export const SpotlightExecutive: React.FC = () => {
 
   if (loading) {
     return (
-      <section className="spectrum-workbench" aria-labelledby="spotlight-title">
+      <section className="spectrum-workbench module-group-executive" aria-labelledby="spotlight-title">
         <div className="scout-hero">
           <div>
             <p className="scout-kicker">SPOTLIGHT</p>
@@ -102,7 +102,7 @@ export const SpotlightExecutive: React.FC = () => {
 
   if (error && !summary) {
     return (
-      <section className="spectrum-workbench" aria-labelledby="spotlight-title">
+      <section className="spectrum-workbench module-group-executive" aria-labelledby="spotlight-title">
         <div className="scout-hero">
           <div>
             <p className="scout-kicker">SPOTLIGHT</p>
@@ -123,7 +123,7 @@ export const SpotlightExecutive: React.FC = () => {
   const trend = summary!.trend;
 
   return (
-    <section className="spectrum-workbench" aria-labelledby="spotlight-title">
+    <section className="spectrum-workbench module-group-executive" aria-labelledby="spotlight-title">
       <div className="scout-hero">
         <div>
           <p className="scout-kicker">SPOTLIGHT</p>
@@ -154,7 +154,7 @@ export const SpotlightExecutive: React.FC = () => {
         <div className="mutation-warning" role="alert">{error}</div>
       )}
 
-      <div style={{ display: 'grid', gap: '16px', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
+      <div className="spotlight-grid">
         <Tile
           title="Severe exposures"
           definition={summary!.metric_definitions.severe_count}

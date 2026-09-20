@@ -209,7 +209,7 @@ export const AssetTable: React.FC<AssetTableProps> = ({
   if (loading && assets.length === 0) {
     return (
       <div className="table-container">
-        <div className="empty-state">Loading assets inventory...</div>
+        <div className="empty-state" role="status">Loading assets inventory…</div>
       </div>
     );
   }
@@ -218,7 +218,11 @@ export const AssetTable: React.FC<AssetTableProps> = ({
     return (
       <div className="table-container">
         <div className="empty-state">
-          <div className="empty-icon">🛡️</div>
+          <div className="empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 3l7 3v5c0 4.4-3 8.4-7 10-4-1.6-7-5.6-7-10V6l7-3z" />
+            </svg>
+          </div>
           <h3>No Active Assets</h3>
           <p>No active assets found in current tenant inventory. Click "Add Asset" above to register an asset.</p>
         </div>

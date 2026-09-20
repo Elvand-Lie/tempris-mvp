@@ -154,7 +154,7 @@ export const StrikeConsole: React.FC = () => {
     }, 'Engagement draft created — submit it for dual-control authorization.');
 
   return (
-    <section className="strike-console" aria-labelledby="strike-title">
+    <section className="strike-console module-group-operations" aria-labelledby="strike-title">
       <div className="scout-hero">
         <div>
           <p className="scout-kicker">STRIKE</p>

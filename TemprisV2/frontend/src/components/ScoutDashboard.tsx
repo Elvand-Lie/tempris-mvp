@@ -155,7 +155,7 @@ export const ScoutDashboard: React.FC<Props> = ({ assets, authorizations, onOpen
   const exposureCount = vulnerabilities.filter((row) => row.normalized_exposure).length;
 
   return (
-    <section className="scout-dashboard" aria-labelledby="scout-title">
+    <section className="scout-dashboard module-group-operations" aria-labelledby="scout-title">
       <div className="scout-hero">
         <div>
           <p className="scout-kicker">CENTRAL &amp; COLLECTOR ROUTING</p>

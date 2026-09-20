@@ -20,6 +20,20 @@ describe('Sidebar and module fallback', () => {
     expect(screen.queryByRole('button', { name: 'SCOUT' })).not.toBeInTheDocument();
   });
 
+  it('shows Intake & Triage without an INTAKE entitlement, but only when the tenant console is reachable', () => {
+    // Intake is gated by role on the backend, not by a module — but like the
+    // pre-redesign sidebar it hides entirely once no module is entitled.
+    const { rerender } = render(
+      <Sidebar activeTab="assets" onTabChange={vi.fn()} effectiveModules={['SPECTRUM']} currentRole="analyst" />
+    );
+    expect(screen.getByRole('button', { name: 'Intake & Triage' })).toBeInTheDocument();
+
+    rerender(
+      <Sidebar activeTab="assets" onTabChange={vi.fn()} effectiveModules={[]} currentRole="analyst" />
+    );
+    expect(screen.queryByRole('button', { name: 'Intake & Triage' })).not.toBeInTheDocument();
+  });
+
   it('gates Organization by role independently of module entitlement', () => {
     const { rerender } = render(
       <Sidebar activeTab="org" onTabChange={vi.fn()} effectiveModules={[]} currentRole="admin" />

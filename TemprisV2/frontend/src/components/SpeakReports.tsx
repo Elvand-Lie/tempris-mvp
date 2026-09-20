@@ -86,7 +86,7 @@ export const SpeakReports: React.FC = () => {
   const reports = listing?.items ?? [];
 
   return (
-    <section className="spectrum-workbench" aria-labelledby="speak-title">
+    <section className="spectrum-workbench module-group-executive" aria-labelledby="speak-title">
       <div className="scout-hero">
         <div>
           <p className="scout-kicker">SPEAK</p>
@@ -107,7 +107,7 @@ export const SpeakReports: React.FC = () => {
 
       <div className="scout-panel">
         <h3>Register a report</h3>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div className="speak-register-row">
           <div>
             <label htmlFor="speak-register-type" className="form-label">Type</label>
             <select
@@ -143,7 +143,7 @@ export const SpeakReports: React.FC = () => {
           <p className="scout-empty" role="status">No reports registered yet.</p>
         )}
         {reports.length > 0 && (
-          <div style={{ overflowX: 'auto' }}>
+          <div className="table-scroll">
             <table className="table" style={{ width: '100%' }}>
               <thead>
                 <tr>
@@ -169,7 +169,7 @@ export const SpeakReports: React.FC = () => {
                     <td title={report.content_hash ?? ''}>
                       {report.content_hash ? `${report.content_hash.slice(0, 10)}…` : '—'}
                     </td>
-                    <td style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                    <td className="speak-actions">
                       {report.status === 'draft' && !report.content_hash && (
                         <button
                           className="btn btn-secondary btn-sm"

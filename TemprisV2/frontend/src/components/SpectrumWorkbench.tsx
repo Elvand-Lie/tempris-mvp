@@ -45,7 +45,7 @@ export const SpectrumWorkbench: React.FC = () => {
   }, [selected]);
 
   return (
-    <section className="spectrum-workbench" aria-labelledby="spectrum-title">
+    <section className="spectrum-workbench module-group-analysis" aria-labelledby="spectrum-title">
       <div className="scout-hero">
         <div>
           <p className="scout-kicker">SPECTRUM</p>
