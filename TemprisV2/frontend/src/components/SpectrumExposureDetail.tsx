@@ -1,11 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import {
-  EdipHandoffResult,
   ScoringInputsSnapshot,
   SpectrumAnalysisState,
-  SpectrumExposureDetail as SpectrumExposureDetailData,
-  StrikeRequestResult,
+  SpectrumBusinessImpactSummary,
+  SpectrumEdipHandoffResult,
+  SpectrumExposureDetailData,
+  SpectrumFindingSummary,
+  SpectrumHistoryEntry,
+  SpectrumQueueItem,
+  SpectrumStrikeRequestResult,
   TesCurrentPayload,
   TesDecompositionRow,
 } from '../types';
@@ -13,24 +17,35 @@ import { ANALYSIS_STATES, ANALYSIS_STATE_LABELS, AXIS_LABELS, decimalText, stamp
 
 interface Props {
   exposureId: string;
+  /** The selected queue row — display context (title/asset/severity) + finding_id for the roll-up. */
+  context: SpectrumQueueItem | null;
   /** Notifies the workbench that workflow/score inputs changed (queue row refresh). */
   onChanged: () => void;
   onBack: () => void;
 }
 
+const EVENT_LABELS: Record<string, string> = {
+  assigned: 'Assigned',
+  unassigned: 'Unassigned',
+  analysis_state_changed: 'Analysis state changed',
+  note_added: 'Note',
+  strike_requested: 'STRIKE requested',
+  edip_handoff: 'EDIP handoff',
+};
+
 /**
  * The workbench over ONE confirmed exposure. Every score is read through the
- * Chapter 3 routes at render time — this component never computes or caches
- * authority; mutations refresh by re-reading.
+ * workbench detail (one REPEATABLE READ recompute server-side) — this
+ * component never computes or caches authority; mutations refresh by
+ * re-reading.
  */
-export const SpectrumExposureDetail: React.FC<Props> = ({ exposureId, onChanged, onBack }) => {
+export const SpectrumExposureDetail: React.FC<Props> = ({ exposureId, context, onChanged, onBack }) => {
   const [detail, setDetail] = useState<SpectrumExposureDetailData | null>(null);
   const [detailLoading, setDetailLoading] = useState(true);
   const [detailError, setDetailError] = useState<string | null>(null);
 
-  const [tes, setTes] = useState<TesCurrentPayload | null>(null);
-  const [tesLoading, setTesLoading] = useState(true);
-  const [tesError, setTesError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<SpectrumFindingSummary | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   const [inputs, setInputs] = useState<ScoringInputsSnapshot | null>(null);
   const [inputsLoading, setInputsLoading] = useState(true);
@@ -48,19 +63,18 @@ export const SpectrumExposureDetail: React.FC<Props> = ({ exposureId, onChanged,
     }
   }, [exposureId]);
 
-  // Read-through score: recomputed server-side on every fetch (never local).
-  const loadTes = useCallback(async () => {
-    setTesLoading(true);
-    setTesError(null);
+  // The locked six-field finding roll-up stays on its frozen Ch.3 route.
+  const findingId = context?.finding_id ?? null;
+  const loadSummary = useCallback(async () => {
+    if (!findingId) return;
+    setSummaryError(null);
     try {
-      setTes(await api.exposure.getCurrentTes(exposureId));
+      setSummary(await api.exposure.getFindingTesSummary(findingId));
     } catch (cause: any) {
-      setTes(null);
-      setTesError(cause.message || 'Current TES could not be loaded.');
-    } finally {
-      setTesLoading(false);
+      setSummary(null);
+      setSummaryError(cause.message || 'Finding roll-up could not be loaded.');
     }
-  }, [exposureId]);
+  }, [findingId]);
 
   const loadInputs = useCallback(async () => {
     setInputsLoading(true);
@@ -77,20 +91,20 @@ export const SpectrumExposureDetail: React.FC<Props> = ({ exposureId, onChanged,
 
   useEffect(() => {
     setDetail(null);
-    setTes(null);
+    setSummary(null);
     setInputs(null);
     void loadDetail();
-    void loadTes();
+    void loadSummary();
     void loadInputs();
-  }, [loadDetail, loadTes, loadInputs]);
+  }, [loadDetail, loadSummary, loadInputs]);
 
   /** After any mutation: re-read everything (fresh state on next read). */
   const refreshAll = useCallback(() => {
     onChanged();
     void loadDetail();
-    void loadTes();
+    void loadSummary();
     void loadInputs();
-  }, [loadDetail, loadTes, loadInputs, onChanged]);
+  }, [loadDetail, loadSummary, loadInputs, onChanged]);
 
   if (detailLoading && !detail) {
     return (
@@ -113,18 +127,25 @@ export const SpectrumExposureDetail: React.FC<Props> = ({ exposureId, onChanged,
 
   if (!detail) return null;
 
+  const title = context?.canonical_cve_id || detail.tes.canonical_cve_id || 'Non-CVE finding';
+  const findingTitle = context?.finding_title ?? title;
+
   return (
     <section className="scout-panel spectrum-detail" aria-labelledby="spectrum-detail-title">
       <div className="spectrum-detail-head">
         <div>
           <p className="scout-kicker">EXPOSURE WORKBENCH</p>
           <h2 id="spectrum-detail-title">
-            {detail.finding.canonical_cve_id || 'Non-CVE finding'} · {detail.finding.title}
+            {title} · {findingTitle}
           </h2>
           <p className="spectrum-target">
-            <strong>{detail.asset.name}</strong> · {detail.asset.normalized_target} ·{' '}
-            {detail.asset.network_scope.toUpperCase()} · criticality {detail.asset.criticality ?? 'unreported'} ·{' '}
-            asset {detail.asset.status} · confirmed {stamp(detail.confirmed_at)} by {detail.confirmed_by}
+            {context && (
+              <>
+                <strong>{context.asset_name}</strong> · {context.asset_normalized_target} · severity{' '}
+                {context.finding_severity} · confirmed {stamp(context.exposure_confirmed_at)}
+              </>
+            )}
+            {!context && <>Exposure {detail.exposure_id}</>}
           </p>
         </div>
         <div className="spectrum-detail-actions">
@@ -137,19 +158,26 @@ export const SpectrumExposureDetail: React.FC<Props> = ({ exposureId, onChanged,
         </div>
       </div>
 
-      <FindingSummary detail={detail} />
+      <FindingSummary summary={summary} error={summaryError} onRetry={loadSummary} />
 
-      <TesPanel tes={tes} loading={tesLoading} error={tesError} onRetry={loadTes} />
+      <TesPanel tes={detail.tes} />
 
       <WorkflowPanel detail={detail} onMutated={refreshAll} />
 
       <div className="spectrum-columns">
         <BusinessImpactPanel
-          inputs={inputs}
-          inputsLoading={inputsLoading}
+          exposureId={exposureId}
+          current={detail.business_impact}
           onSaved={refreshAll}
         />
-        <EvidencePanel inputs={inputs} inputsLoading={inputsLoading} inputsError={inputsError} onRetry={loadInputs} onRecorded={refreshAll} exposureId={exposureId} />
+        <EvidencePanel
+          inputs={inputs}
+          inputsLoading={inputsLoading}
+          inputsError={inputsError}
+          onRetry={loadInputs}
+          onRecorded={refreshAll}
+          exposureId={exposureId}
+        />
       </div>
 
       <HandoffPanel exposureId={exposureId} analysisState={detail.workflow.analysis_state} onMutated={onChanged} />
@@ -161,97 +189,93 @@ export const SpectrumExposureDetail: React.FC<Props> = ({ exposureId, onChanged,
 // Finding roll-up: the locked six-field summary (the finding is grouping only)
 // ---------------------------------------------------------------------------
 
-const FindingSummary: React.FC<{ detail: SpectrumExposureDetailData }> = ({ detail }) => {
-  const s = detail.finding.tes_summary;
-  return (
-    <div className="spectrum-metrics" aria-label="Finding roll-up summary">
-      <article><strong>{decimalText(s.max_final_tes) ?? '—'}</strong><span>Max FINAL TES</span></article>
-      <article><strong>{decimalText(s.max_provisional_tes) ?? '—'}</strong><span>Max PROVISIONAL TES</span></article>
-      <article><strong>{s.final_count}</strong><span>FINAL exposures</span></article>
-      <article><strong>{s.provisional_count}</strong><span>PROVISIONAL exposures</span></article>
-      <article><strong>{s.unscoreable_count}</strong><span>UNSCOREABLE (counted)</span></article>
-      <article><strong>{s.total_current_exposures}</strong><span>Current exposures on finding</span></article>
-    </div>
-  );
-};
-
-// ---------------------------------------------------------------------------
-// Read-through TES panel
-// ---------------------------------------------------------------------------
-
-const TesPanel: React.FC<{
-  tes: TesCurrentPayload | null;
-  loading: boolean;
+const FindingSummary: React.FC<{
+  summary: SpectrumFindingSummary | null;
   error: string | null;
   onRetry: () => void;
-}> = ({ tes, loading, error, onRetry }) => (
-  <div className="spectrum-section" aria-labelledby="spectrum-tes-title">
-    <h3 id="spectrum-tes-title">Current TES — recomputed at read (never stored here)</h3>
-    {loading && !tes && <div role="status" className="spectrum-state">Recomputing current TES…</div>}
-    {error && !tes && (
+}> = ({ summary, error, onRetry }) => (
+  <div className="spectrum-section" aria-labelledby="spectrum-finding-title">
+    <h3 id="spectrum-finding-title">Finding roll-up (six-field summary)</h3>
+    {error && (
       <div role="alert" className="scout-alert">
         {error}
         <button type="button" onClick={onRetry}>Retry</button>
       </div>
     )}
-    {tes && (
-      <>
-        <div className="spectrum-tes-head">
-          <span className={`spectrum-tes-value spectrum-tes-${tes.state}`}>
-            {tes.state === 'UNSCOREABLE' ? 'UNSCOREABLE' : tes.display_value ?? decimalText(tes.value) ?? '—'}
-          </span>
-          <span className={`badge badge-spectrum-tes-${tes.state}`}>{tes.state}</span>
-          <span className="spectrum-muted">
-            formula {tes.formula_version} · coverage {tes.known_axes}
-            {tes.known_weight && <> · known weight {decimalText(tes.known_weight)}</>} · as of {stamp(tes.source_view.as_of)}
-          </span>
-        </div>
-
-        {tes.state === 'UNSCOREABLE' && (
-          <div role="alert" className="spectrum-unscoreable">
-            <strong>This exposure cannot be scored.</strong>{' '}
-            {tes.source_view.cvss_unscoreable_reason_code && (
-              <>Intrinsic reason: <code>{String(tes.source_view.cvss_unscoreable_reason_code)}</code>. </>
-            )}
-            {tes.missing_inputs.length > 0 && (
-              <>
-                Missing axes: <ul>{tes.missing_inputs.map((reason) => <li key={reason}>{reason}</li>)}</ul>
-              </>
-            )}
-          </div>
-        )}
-
-        {tes.missing_inputs.length > 0 && tes.state !== 'UNSCOREABLE' && (
-          <p className="spectrum-muted">Provisional — unresolved axes: {tes.missing_inputs.join('; ')}</p>
-        )}
-
-        <div className="table-wrapper">
-          <table className="data-table">
-            <caption className="sr-only">TES decomposition by axis</caption>
-            <thead>
-              <tr>
-                <th scope="col">Axis</th>
-                <th scope="col">Value</th>
-                <th scope="col">Base weight</th>
-                <th scope="col">Effective weight</th>
-                <th scope="col">Contribution</th>
-                <th scope="col">State</th>
-                <th scope="col">Freshness · source</th>
-                <th scope="col">Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tes.decomposition.map((row) => (
-                <DecompositionRow key={row.axis} row={row} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="spectrum-muted">
-          Stale or unknown feeds render as stale/unknown here — never silently refreshed or hidden (§3.3.5).
-        </p>
-      </>
+    {summary && (
+      <div className="spectrum-metrics" aria-label="Finding roll-up summary">
+        <article><strong>{decimalText(summary.max_final_tes) ?? '—'}</strong><span>Max FINAL TES</span></article>
+        <article><strong>{decimalText(summary.max_provisional_tes) ?? '—'}</strong><span>Max PROVISIONAL TES</span></article>
+        <article><strong>{summary.final_count}</strong><span>FINAL exposures</span></article>
+        <article><strong>{summary.provisional_count}</strong><span>PROVISIONAL exposures</span></article>
+        <article><strong>{summary.unscoreable_count}</strong><span>UNSCOREABLE (counted)</span></article>
+        <article><strong>{summary.total_current_exposures}</strong><span>Current exposures on finding</span></article>
+      </div>
     )}
+  </div>
+);
+
+// ---------------------------------------------------------------------------
+// Read-through TES panel
+// ---------------------------------------------------------------------------
+
+const TesPanel: React.FC<{ tes: TesCurrentPayload }> = ({ tes }) => (
+  <div className="spectrum-section" aria-labelledby="spectrum-tes-title">
+    <h3 id="spectrum-tes-title">Current TES — recomputed at read (never stored here)</h3>
+    <div className="spectrum-tes-head">
+      <span className={`spectrum-tes-value spectrum-tes-${tes.state}`}>
+        {tes.state === 'UNSCOREABLE' ? 'UNSCOREABLE' : tes.display_value ?? decimalText(tes.value) ?? '—'}
+      </span>
+      <span className={`badge badge-spectrum-tes-${tes.state}`}>{tes.state}</span>
+      <span className="spectrum-muted">
+        formula {tes.formula_version} · coverage {tes.known_axes}
+        {tes.known_weight && <> · known weight {decimalText(tes.known_weight)}</>} · as of {stamp(tes.source_view.as_of)}
+      </span>
+    </div>
+
+    {tes.state === 'UNSCOREABLE' && (
+      <div role="alert" className="spectrum-unscoreable">
+        <strong>This exposure cannot be scored.</strong>{' '}
+        {tes.source_view.cvss_unscoreable_reason_code && (
+          <>Intrinsic reason: <code>{String(tes.source_view.cvss_unscoreable_reason_code)}</code>. </>
+        )}
+        {tes.missing_inputs.length > 0 && (
+          <>
+            Missing axes: <ul>{tes.missing_inputs.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+          </>
+        )}
+      </div>
+    )}
+
+    {tes.missing_inputs.length > 0 && tes.state !== 'UNSCOREABLE' && (
+      <p className="spectrum-muted">Provisional — unresolved axes: {tes.missing_inputs.join('; ')}</p>
+    )}
+
+    <div className="table-wrapper">
+      <table className="data-table">
+        <caption className="sr-only">TES decomposition by axis</caption>
+        <thead>
+          <tr>
+            <th scope="col">Axis</th>
+            <th scope="col">Value</th>
+            <th scope="col">Base weight</th>
+            <th scope="col">Effective weight</th>
+            <th scope="col">Contribution</th>
+            <th scope="col">State</th>
+            <th scope="col">Freshness · source</th>
+            <th scope="col">Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tes.decomposition.map((row) => (
+            <DecompositionRow key={row.axis} row={row} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <p className="spectrum-muted">
+      Stale or unknown feeds render as stale/unknown here — never silently refreshed or hidden (§3.3.5).
+    </p>
   </div>
 );
 
@@ -314,6 +338,21 @@ const ExploitRealityExtras: React.FC<{ row: TesDecompositionRow }> = ({ row }) =
 // Workflow panel: exposure-grain assignment, analysis_state, notes, history
 // ---------------------------------------------------------------------------
 
+const HistoryEntryRow: React.FC<{ entry: SpectrumHistoryEntry }> = ({ entry }) => {
+  const from = typeof entry.detail?.from === 'string' ? (entry.detail.from as SpectrumAnalysisState) : null;
+  const to = typeof entry.detail?.to === 'string' ? (entry.detail.to as SpectrumAnalysisState) : null;
+  return (
+    <li>
+      <strong>{EVENT_LABELS[entry.event] ?? entry.event}</strong> · {entry.actor} ({entry.actor_role}) ·{' '}
+      {stamp(entry.created_at)}
+      {from && to && (
+        <> · {ANALYSIS_STATE_LABELS[from]} → {ANALYSIS_STATE_LABELS[to]}</>
+      )}
+      {entry.note && <span className="spectrum-history-note">{entry.note}</span>}
+    </li>
+  );
+};
+
 const WorkflowPanel: React.FC<{ detail: SpectrumExposureDetailData; onMutated: () => void }> = ({ detail, onMutated }) => {
   const [assignee, setAssignee] = useState(detail.workflow.assigned_to || '');
   const [nextState, setNextState] = useState<SpectrumAnalysisState>(detail.workflow.analysis_state);
@@ -335,9 +374,13 @@ const WorkflowPanel: React.FC<{ detail: SpectrumExposureDetailData; onMutated: (
     setError(null);
     setNotice(null);
     try {
-      const nextAssignee = assignee.trim() || null;
-      if (nextAssignee !== detail.workflow.assigned_to) {
-        await api.spectrum.assignExposure(detail.exposure_id, nextAssignee);
+      const nextAssignee = assignee.trim();
+      if (nextAssignee !== (detail.workflow.assigned_to || '')) {
+        if (nextAssignee) {
+          await api.spectrum.assignExposure(detail.exposure_id, nextAssignee);
+        } else {
+          await api.spectrum.unassignExposure(detail.exposure_id);
+        }
       }
       if (stateChanged) {
         await api.spectrum.setAnalysisState(detail.exposure_id, nextState, note.trim() || null);
@@ -403,7 +446,7 @@ const WorkflowPanel: React.FC<{ detail: SpectrumExposureDetailData; onMutated: (
           <button type="button" className="btn btn-primary" onClick={save} disabled={saving || !dirty}>
             {saving ? 'Saving…' : 'Save workflow update'}
           </button>
-          {assignee.trim() && detail.workflow.assigned_to && (
+          {detail.workflow.assigned_to && (
             <button
               type="button"
               className="btn btn-secondary"
@@ -413,7 +456,7 @@ const WorkflowPanel: React.FC<{ detail: SpectrumExposureDetailData; onMutated: (
                 setSaving(true);
                 setError(null);
                 try {
-                  await api.spectrum.assignExposure(detail.exposure_id, null);
+                  await api.spectrum.unassignExposure(detail.exposure_id);
                   setNotice('Assignment cleared.');
                   onMutated();
                 } catch (cause: any) {
@@ -443,17 +486,8 @@ const WorkflowPanel: React.FC<{ detail: SpectrumExposureDetailData; onMutated: (
       )}
       {detail.history.length > 0 && (
         <ul className="spectrum-history">
-          {detail.history.map((entry) => (
-            <li key={entry.id}>
-              <strong>{entry.changed_by}</strong> · {stamp(entry.changed_at)}
-              {entry.to_analysis_state && (
-                <>
-                  {' '}· {entry.from_analysis_state ? `${ANALYSIS_STATE_LABELS[entry.from_analysis_state]} → ` : ''}
-                  {ANALYSIS_STATE_LABELS[entry.to_analysis_state]}
-                </>
-              )}
-              {entry.note && <span className="spectrum-history-note">{entry.note}</span>}
-            </li>
+          {[...detail.history].reverse().map((entry) => (
+            <HistoryEntryRow key={entry.id} entry={entry} />
           ))}
         </ul>
       )}
@@ -468,11 +502,10 @@ const WorkflowPanel: React.FC<{ detail: SpectrumExposureDetailData; onMutated: (
 const BI_VALUE_PATTERN = /^\d{1,2}(\.\d{1,4})?$/;
 
 const BusinessImpactPanel: React.FC<{
-  inputs: ScoringInputsSnapshot | null;
-  inputsLoading: boolean;
+  exposureId: string;
+  current: SpectrumBusinessImpactSummary | null;
   onSaved: () => void;
-}> = ({ inputs, inputsLoading, onSaved }) => {
-  const current = inputs?.business_impact?.record ?? null;
+}> = ({ exposureId, current, onSaved }) => {
   const [value, setValue] = useState('');
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
@@ -493,7 +526,7 @@ const BusinessImpactPanel: React.FC<{
     setError(null);
     setNotice(null);
     try {
-      await api.exposure.setBusinessImpact(inputs!.exposure_id, value.trim(), reason.trim() || null);
+      await api.exposure.setBusinessImpact(exposureId, value.trim(), reason.trim() || null);
       setNotice('Business Impact recorded — the exposure score will reflect it on the next read.');
       setValue('');
       setReason('');
@@ -508,14 +541,14 @@ const BusinessImpactPanel: React.FC<{
   return (
     <div className="spectrum-section" aria-labelledby="spectrum-bi-title">
       <h3 id="spectrum-bi-title">Business Impact (per exposure)</h3>
-      {inputsLoading && !inputs && <div role="status" className="spectrum-state">Loading scoring inputs…</div>}
       {current ? (
         <p className="spectrum-muted">
-          Current: <strong>{String(current.value)}</strong> — assessed by {current.assessed_by} at {stamp(current.created_at)}
+          Current: <strong>{decimalText(current.value)}</strong> — assessed by {current.assessed_by} at{' '}
+          {stamp(current.created_at)}
           {current.reason && <> · “{current.reason}”</>}
         </p>
       ) : (
-        !inputsLoading && <p className="scout-empty">No Business Impact assessed for this exposure yet.</p>
+        <p className="scout-empty">No Business Impact assessed for this exposure yet.</p>
       )}
       <div className="form-group">
         <label htmlFor="spectrum-bi-value">Assess Business Impact (0–10)</label>
@@ -551,7 +584,7 @@ const BusinessImpactPanel: React.FC<{
         type="button"
         className="btn btn-primary"
         onClick={save}
-        disabled={saving || !inputs || !value.trim() || Boolean(validationError)}
+        disabled={saving || !value.trim() || Boolean(validationError)}
       >
         {saving ? 'Recording…' : 'Record Business Impact'}
       </button>
@@ -782,24 +815,23 @@ const HandoffPanel: React.FC<{
   analysisState: SpectrumAnalysisState;
   onMutated: () => void;
 }> = ({ exposureId, analysisState, onMutated }) => {
-  const [strikeJustification, setStrikeJustification] = useState('');
+  const [strikeNote, setStrikeNote] = useState('');
   const [strikeSaving, setStrikeSaving] = useState(false);
   const [strikeError, setStrikeError] = useState<string | null>(null);
-  const [strikeResult, setStrikeResult] = useState<StrikeRequestResult | null>(null);
+  const [strikeResult, setStrikeResult] = useState<SpectrumStrikeRequestResult | null>(null);
 
   const [edipNote, setEdipNote] = useState('');
   const [edipSaving, setEdipSaving] = useState(false);
   const [edipError, setEdipError] = useState<string | null>(null);
-  const [edipResult, setEdipResult] = useState<EdipHandoffResult | null>(null);
+  const [edipResult, setEdipResult] = useState<SpectrumEdipHandoffResult | null>(null);
 
   const requestStrike = async () => {
-    if (!strikeJustification.trim()) return;
     setStrikeSaving(true);
     setStrikeError(null);
     try {
-      const result = await api.spectrum.requestStrike(exposureId, strikeJustification.trim());
+      const result = await api.spectrum.requestStrike(exposureId, strikeNote.trim() || null);
       setStrikeResult(result);
-      setStrikeJustification('');
+      setStrikeNote('');
       onMutated();
     } catch (cause: any) {
       // STRIKE unavailable ⇒ the request stays retryable here — never silent.
@@ -818,7 +850,7 @@ const HandoffPanel: React.FC<{
       setEdipNote('');
       onMutated();
     } catch (cause: any) {
-      // EDIP unavailable ⇒ the handoff is retryable; upstream truth intact.
+      // EDIP unavailable / open handoff ⇒ retryable; upstream truth intact.
       setEdipError(cause.message || 'EDIP handoff failed; no decision was created.');
     } finally {
       setEdipSaving(false);
@@ -833,13 +865,13 @@ const HandoffPanel: React.FC<{
           <h4>STRIKE engagement draft</h4>
           <p className="spectrum-muted">Creates a STRIKE engagement draft pre-bound to this exposure (Chapter 4 owns everything after).</p>
           <div className="form-group">
-            <label htmlFor="spectrum-strike-justification">Justification</label>
+            <label htmlFor="spectrum-strike-note">Justification</label>
             <textarea
-              id="spectrum-strike-justification"
+              id="spectrum-strike-note"
               className="form-control"
               rows={2}
-              value={strikeJustification}
-              onChange={(event) => setStrikeJustification(event.target.value)}
+              value={strikeNote}
+              onChange={(event) => setStrikeNote(event.target.value)}
               placeholder="Why controlled validation of this exposure is warranted"
             />
           </div>
@@ -847,21 +879,20 @@ const HandoffPanel: React.FC<{
             type="button"
             className="btn btn-primary"
             onClick={requestStrike}
-            disabled={strikeSaving || !strikeJustification.trim()}
+            disabled={strikeSaving}
           >
             {strikeSaving ? 'Requesting…' : 'Request STRIKE engagement draft'}
           </button>
           {strikeResult && (
             <div role="status" className="spectrum-notice">
-              STRIKE engagement draft queued — request <code>{strikeResult.strike_request_id}</code>, draft{' '}
-              <code>{strikeResult.engagement_draft_id ?? 'pending'}</code> ({strikeResult.status}). Results return via the
-              Chapter 3 evidence contract.
+              STRIKE engagement draft queued — request <code>{strikeResult.strike_request.id}</code>, state{' '}
+              <strong>{strikeResult.strike_request.state}</strong>. Results return via the Chapter 3 evidence contract.
             </div>
           )}
           {strikeError && (
             <div role="alert" className="scout-alert">
               {strikeError}
-              <button type="button" onClick={requestStrike} disabled={!strikeJustification.trim()}>Retry</button>
+              <button type="button" onClick={requestStrike}>Retry</button>
             </div>
           )}
         </div>
@@ -888,7 +919,9 @@ const HandoffPanel: React.FC<{
           </button>
           {edipResult && (
             <div role="status" className="spectrum-notice">
-              EDIP decision <code>{edipResult.decision_id}</code> created in <strong>{edipResult.state}</strong>.
+              EDIP handoff <code>{edipResult.edip_handoff.id}</code> recorded in{' '}
+              <strong>{edipResult.edip_handoff.state}</strong>; analysis state is now{' '}
+              {ANALYSIS_STATE_LABELS[edipResult.workflow.analysis_state]}.
             </div>
           )}
           {edipError && (

@@ -1,23 +1,25 @@
 import React, { useMemo, useState } from 'react';
 import { SpectrumQueueItem, SpectrumAnalysisState, TesState } from '../types';
-import { ANALYSIS_STATES, ANALYSIS_STATE_LABELS, TES_STATES, stamp } from '../spectrumFormat';
+import { ANALYSIS_STATES, ANALYSIS_STATE_LABELS, TES_STATES, decimalText, stamp } from '../spectrumFormat';
 
 interface Props {
   items: SpectrumQueueItem[];
+  total: number;
   loading: boolean;
   error: string | null;
   selectedId: string | null;
-  onSelect: (exposureId: string) => void;
+  onSelect: (item: SpectrumQueueItem) => void;
   onRefresh: () => void;
 }
 
 /**
  * The SPECTRUM operational queue: one row per current confirmed exposure
- * (exposure grain — the work item; the finding is roll-up only).
- * UNSCOREABLE exposures render explicitly and are counted (Ch.3 forbids
- * hiding them); they are never dropped from the list.
+ * (exposure grain — the work item; the finding is roll-up only). Rows are
+ * read-through: each carries its own recomputed TES. UNSCOREABLE exposures
+ * render explicitly and are counted (Ch.3 forbids hiding them); they are
+ * never dropped from the list.
  */
-export const SpectrumQueue: React.FC<Props> = ({ items, loading, error, selectedId, onSelect, onRefresh }) => {
+export const SpectrumQueue: React.FC<Props> = ({ items, total, loading, error, selectedId, onSelect, onRefresh }) => {
   const [analysisFilter, setAnalysisFilter] = useState<'all' | SpectrumAnalysisState>('all');
   const [tesFilter, setTesFilter] = useState<'all' | TesState>('all');
   const [query, setQuery] = useState('');
@@ -26,7 +28,7 @@ export const SpectrumQueue: React.FC<Props> = ({ items, loading, error, selected
     const needle = query.trim().toLowerCase();
     return items.filter((item) => {
       if (analysisFilter !== 'all' && item.analysis_state !== analysisFilter) return false;
-      if (tesFilter !== 'all' && item.tes_state !== tesFilter) return false;
+      if (tesFilter !== 'all' && item.tes.state !== tesFilter) return false;
       if (!needle) return true;
       const haystack = [
         item.canonical_cve_id || '',
@@ -41,7 +43,7 @@ export const SpectrumQueue: React.FC<Props> = ({ items, loading, error, selected
     });
   }, [items, analysisFilter, tesFilter, query]);
 
-  const unscoreableCount = items.filter((item) => item.tes_state === 'UNSCOREABLE').length;
+  const unscoreableCount = items.filter((item) => item.tes.state === 'UNSCOREABLE').length;
   const actionRequiredCount = items.filter((item) => item.analysis_state === 'action_required').length;
 
   return (
@@ -51,7 +53,9 @@ export const SpectrumQueue: React.FC<Props> = ({ items, loading, error, selected
           <p className="scout-kicker">CONFIRMED-EXPOSURE WORKBENCH</p>
           <h2 id="spectrum-queue-title">Current exposure queue</h2>
           <p>
-            {items.length} current confirmed exposure{items.length === 1 ? '' : 's'}
+            {items.length === total
+              ? `${total} current confirmed exposure${total === 1 ? '' : 's'}`
+              : `${items.length} of ${total} shown`}
             {unscoreableCount > 0 && <> · {unscoreableCount} UNSCOREABLE (counted, never hidden)</>}
             {actionRequiredCount > 0 && <> · {actionRequiredCount} action required</>}
           </p>
@@ -146,6 +150,7 @@ export const SpectrumQueue: React.FC<Props> = ({ items, loading, error, selected
                 <th scope="col">TES (read-through)</th>
                 <th scope="col">Analysis state</th>
                 <th scope="col">Assignee</th>
+                <th scope="col">Business Impact</th>
                 <th scope="col">Confirmed</th>
               </tr>
             </thead>
@@ -154,7 +159,7 @@ export const SpectrumQueue: React.FC<Props> = ({ items, loading, error, selected
                 <tr
                   key={item.exposure_id}
                   className={selectedId === item.exposure_id ? 'spectrum-row selected' : 'spectrum-row'}
-                  onClick={() => onSelect(item.exposure_id)}
+                  onClick={() => onSelect(item)}
                 >
                   <td>
                     <button
@@ -162,7 +167,7 @@ export const SpectrumQueue: React.FC<Props> = ({ items, loading, error, selected
                       className="spectrum-open-link"
                       onClick={(event) => {
                         event.stopPropagation();
-                        onSelect(item.exposure_id);
+                        onSelect(item);
                       }}
                       aria-pressed={selectedId === item.exposure_id}
                     >
@@ -178,12 +183,12 @@ export const SpectrumQueue: React.FC<Props> = ({ items, loading, error, selected
                     <span className={`badge badge-crit-${item.finding_severity}`}>{item.finding_severity}</span>
                   </td>
                   <td>
-                    {item.tes_state === 'UNSCOREABLE' ? (
+                    {item.tes.state === 'UNSCOREABLE' ? (
                       <span className="badge badge-spectrum-unscoreable">UNSCOREABLE</span>
                     ) : (
                       <>
-                        <strong>{item.tes_display_value ?? '—'}</strong>{' '}
-                        <span className={`badge badge-spectrum-tes-${item.tes_state}`}>{item.tes_state}</span>
+                        <strong>{item.tes.display_value ?? '—'}</strong>{' '}
+                        <span className={`badge badge-spectrum-tes-${item.tes.state}`}>{item.tes.state}</span>
                       </>
                     )}
                   </td>
@@ -194,7 +199,14 @@ export const SpectrumQueue: React.FC<Props> = ({ items, loading, error, selected
                   </td>
                   <td>{item.assigned_to || <span className="spectrum-muted">Unassigned</span>}</td>
                   <td>
-                    <small>{stamp(item.confirmed_at)}</small>
+                    {item.business_impact ? (
+                      decimalText(item.business_impact.value)
+                    ) : (
+                      <span className="spectrum-muted">Not assessed</span>
+                    )}
+                  </td>
+                  <td>
+                    <small>{stamp(item.exposure_confirmed_at)}</small>
                   </td>
                 </tr>
               ))}

@@ -4,39 +4,51 @@ import { api } from '../api';
 import { SpectrumWorkbench } from '../components/SpectrumWorkbench';
 import {
   ScoringInputsSnapshot,
-  SpectrumExposureDetail,
+  SpectrumExposureDetailData,
+  SpectrumFindingSummary,
   SpectrumQueueItem,
+  SpectrumWorkflow,
   TesCurrentPayload,
 } from '../types';
 
 vi.mock('../api', () => ({ api: {
   spectrum: {
-    getQueue: vi.fn(), getExposureDetail: vi.fn(), assignExposure: vi.fn(), setAnalysisState: vi.fn(),
+    getQueue: vi.fn(), getExposureDetail: vi.fn(), getExposureHistory: vi.fn(),
+    assignExposure: vi.fn(), unassignExposure: vi.fn(), setAnalysisState: vi.fn(),
     addExposureNote: vi.fn(), requestStrike: vi.fn(), requestEdipHandoff: vi.fn(),
   },
   exposure: {
-    getCurrentTes: vi.fn(), getScoringInputs: vi.fn(), setBusinessImpact: vi.fn(),
+    getFindingTesSummary: vi.fn(), getScoringInputs: vi.fn(), setBusinessImpact: vi.fn(),
     recordExploitationEvidence: vi.fn(), recordReachabilityEvidence: vi.fn(),
   },
 } }));
 
 const EXPOSURE_ID = 'e1111111-1111-1111-1111-111111111111';
+const FINDING_ID = 'f1111111-1111-1111-1111-111111111111';
 
 const queueItem: SpectrumQueueItem = {
   exposure_id: EXPOSURE_ID,
-  finding_id: 'f1111111-1111-1111-1111-111111111111',
+  finding_id: FINDING_ID,
   asset_id: 'a1111111-1111-1111-1111-111111111111',
   canonical_cve_id: 'CVE-2026-0001',
   finding_title: 'Edge service RCE',
   finding_severity: 'critical',
   asset_name: 'Edge service',
+  asset_target_type: 'hostname',
   asset_normalized_target: 'edge.example.test',
-  asset_network_scope: 'internet',
-  confirmed_at: '2026-09-10T00:00:00Z',
+  exposure_confirmed_at: '2026-09-10T00:00:00Z',
+  tes: {
+    state: 'FINAL',
+    value: { __decimal__: '7.2525' },
+    display_value: '7.25',
+    formula_version: 'tes-1.0',
+  },
   analysis_state: 'new',
   assigned_to: null,
-  tes_state: 'FINAL',
-  tes_display_value: '7.25',
+  assigned_at: null,
+  analysis_state_changed_at: null,
+  edip_handoff_at: null,
+  business_impact: null,
 };
 
 const unscoreableItem: SpectrumQueueItem = {
@@ -48,61 +60,36 @@ const unscoreableItem: SpectrumQueueItem = {
   asset_normalized_target: 'portal.example.test',
   analysis_state: 'action_required',
   assigned_to: 'analyst@example.test',
-  tes_state: 'UNSCOREABLE',
-  tes_display_value: null,
+  assigned_at: '2026-09-11T00:00:00Z',
+  analysis_state_changed_at: '2026-09-11T00:00:00Z',
+  edip_handoff_at: null,
+  tes: {
+    state: 'UNSCOREABLE',
+    value: null,
+    display_value: null,
+    formula_version: 'tes-1.0',
+  },
+  business_impact: {
+    value: { __decimal__: '6.5' },
+    reason: 'Customer-facing',
+    assessed_by: 'admin@example.test',
+    created_at: '2026-09-06T00:00:00Z',
+  },
 };
 
-const detail: SpectrumExposureDetail = {
-  exposure_id: EXPOSURE_ID,
-  finding_id: 'f1111111-1111-1111-1111-111111111111',
-  asset_id: 'a1111111-1111-1111-1111-111111111111',
-  exposure_status: 'confirmed',
-  confirmed_by: 'scanner@example.test',
-  confirmed_at: '2026-09-10T00:00:00Z',
-  evidence: { source: 'test' },
-  finding: {
-    finding_id: 'f1111111-1111-1111-1111-111111111111',
-    title: 'Edge service RCE',
-    canonical_cve_id: 'CVE-2026-0001',
-    severity: 'critical',
-    status: 'open',
-    tes_summary: {
-      max_final_tes: { __decimal__: '7.25' },
-      max_provisional_tes: { __decimal__: '5.00' },
-      final_count: 3,
-      provisional_count: 1,
-      unscoreable_count: 1,
-      total_current_exposures: 5,
-    },
-  },
-  asset: {
-    asset_id: 'a1111111-1111-1111-1111-111111111111',
-    name: 'Edge service',
-    normalized_target: 'edge.example.test',
-    target_type: 'hostname',
-    network_scope: 'internet',
-    status: 'active',
-    criticality: 'high',
-  },
-  workflow: {
-    analysis_state: 'assigned',
-    assigned_to: 'analyst@example.test',
-    updated_at: '2026-09-11T00:00:00Z',
-    updated_by: 'admin@example.test',
-  },
-  history: [{
-    id: 'h1',
-    changed_by: 'admin@example.test',
-    changed_at: '2026-09-11T00:00:00Z',
-    note: 'Assigned for triage',
-    from_analysis_state: 'new',
-    to_analysis_state: 'assigned',
-  }],
+const workflow: SpectrumWorkflow = {
+  analysis_state: 'assigned',
+  assigned_to: 'analyst@example.test',
+  assigned_by: 'admin@example.test',
+  assigned_at: '2026-09-11T00:00:00Z',
+  state_changed_by: 'admin@example.test',
+  state_changed_at: '2026-09-11T00:00:00Z',
+  edip_handoff_at: null,
 };
 
 const tes: TesCurrentPayload = {
   exposure_id: EXPOSURE_ID,
-  finding_id: 'f1111111-1111-1111-1111-111111111111',
+  finding_id: FINDING_ID,
   asset_id: 'a1111111-1111-1111-1111-111111111111',
   tenant_id: 't1',
   canonical_cve_id: 'CVE-2026-0001',
@@ -179,6 +166,36 @@ const unscoreableTes: TesCurrentPayload = {
   },
 };
 
+const summary: SpectrumFindingSummary = {
+  max_final_tes: { __decimal__: '7.25' },
+  max_provisional_tes: { __decimal__: '5.00' },
+  final_count: 3,
+  provisional_count: 1,
+  unscoreable_count: 1,
+  total_current_exposures: 5,
+};
+
+const detail: SpectrumExposureDetailData = {
+  exposure_id: EXPOSURE_ID,
+  tes,
+  workflow,
+  history: [{
+    id: 'h1',
+    event: 'analysis_state_changed',
+    actor: 'admin@example.test',
+    actor_role: 'admin',
+    note: 'Assigned for triage',
+    detail: { from: 'new', to: 'assigned' },
+    created_at: '2026-09-11T00:00:00Z',
+  }],
+  business_impact: {
+    value: { __decimal__: '6.5' },
+    reason: 'Customer-facing',
+    assessed_by: 'admin@example.test',
+    created_at: '2026-09-06T00:00:00Z',
+  },
+};
+
 const inputs: ScoringInputsSnapshot = {
   exposure_id: EXPOSURE_ID,
   tenant_id: 't1',
@@ -212,9 +229,9 @@ const inputs: ScoringInputsSnapshot = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(api.spectrum.getQueue).mockResolvedValue([queueItem]);
+  vi.mocked(api.spectrum.getQueue).mockResolvedValue({ total: 1, items: [queueItem] });
   vi.mocked(api.spectrum.getExposureDetail).mockResolvedValue(detail);
-  vi.mocked(api.exposure.getCurrentTes).mockResolvedValue(tes);
+  vi.mocked(api.exposure.getFindingTesSummary).mockResolvedValue(summary);
   vi.mocked(api.exposure.getScoringInputs).mockResolvedValue(inputs);
 });
 
@@ -226,7 +243,7 @@ async function openDetail() {
 
 describe('SPECTRUM queue', () => {
   it('renders current exposures with read-through TES and counts UNSCOREABLE explicitly', async () => {
-    vi.mocked(api.spectrum.getQueue).mockResolvedValue([queueItem, unscoreableItem]);
+    vi.mocked(api.spectrum.getQueue).mockResolvedValue({ total: 2, items: [queueItem, unscoreableItem] });
     render(<SpectrumWorkbench />);
     await screen.findByText('CVE-2026-0001');
     expect(screen.getByText(/2 current confirmed exposures/)).toBeInTheDocument();
@@ -235,11 +252,13 @@ describe('SPECTRUM queue', () => {
     expect(screen.getByRole('button', { name: /CVE-2026-0002/ })).toBeInTheDocument();
     expect(screen.getByText('Unassigned')).toBeInTheDocument();
     expect(screen.getByText('analyst@example.test')).toBeInTheDocument();
+    expect(screen.getByText('6.5')).toBeInTheDocument();
+    expect(screen.getByText('Not assessed')).toBeInTheDocument();
     expect(api.spectrum.getQueue).toHaveBeenCalled();
   });
 
   it('shows an empty state with no confirmed exposures', async () => {
-    vi.mocked(api.spectrum.getQueue).mockResolvedValue([]);
+    vi.mocked(api.spectrum.getQueue).mockResolvedValue({ total: 0, items: [] });
     render(<SpectrumWorkbench />);
     expect(await screen.findByText(/No current confirmed exposures for this tenant/)).toBeInTheDocument();
   });
@@ -253,7 +272,7 @@ describe('SPECTRUM queue', () => {
   });
 
   it('filters by analysis state and search text', async () => {
-    vi.mocked(api.spectrum.getQueue).mockResolvedValue([queueItem, unscoreableItem]);
+    vi.mocked(api.spectrum.getQueue).mockResolvedValue({ total: 2, items: [queueItem, unscoreableItem] });
     render(<SpectrumWorkbench />);
     await screen.findByText('CVE-2026-0001');
     fireEvent.change(screen.getByLabelText('Filter by analysis state'), { target: { value: 'action_required' } });
@@ -276,7 +295,8 @@ describe('SPECTRUM exposure detail', () => {
     expect(screen.getByText('2.90')).toBeInTheDocument();
     expect(screen.getByText('Exploit reality')).toBeInTheDocument();
     expect(screen.getAllByText('known', { selector: 'span' })).toHaveLength(5);
-    expect(api.exposure.getCurrentTes).toHaveBeenCalledWith(EXPOSURE_ID);
+    expect(api.spectrum.getExposureDetail).toHaveBeenCalledWith(EXPOSURE_ID);
+    expect(api.exposure.getFindingTesSummary).toHaveBeenCalledWith(FINDING_ID);
   });
 
   it('exposes exploit-reality rung detail on demand', async () => {
@@ -288,7 +308,7 @@ describe('SPECTRUM exposure detail', () => {
   });
 
   it('renders UNSCOREABLE explicitly with reasons, never a fabricated value', async () => {
-    vi.mocked(api.exposure.getCurrentTes).mockResolvedValue(unscoreableTes);
+    vi.mocked(api.spectrum.getExposureDetail).mockResolvedValue({ ...detail, tes: unscoreableTes });
     await openDetail();
     expect(await screen.findByText(/This exposure cannot be scored/)).toBeInTheDocument();
     expect(screen.getByText('no_cvss_assessment')).toBeInTheDocument();
@@ -298,8 +318,8 @@ describe('SPECTRUM exposure detail', () => {
     expect(within(table).getAllByText('not applied')).toHaveLength(2);
   });
 
-  it('updates assignment at exposure grain', async () => {
-    vi.mocked(api.spectrum.assignExposure).mockResolvedValue(detail.workflow);
+  it('updates assignment at exposure grain through POST /assign', async () => {
+    vi.mocked(api.spectrum.assignExposure).mockResolvedValue(workflow);
     await openDetail();
     const assignee = screen.getByLabelText('Assignee (exposure grain)');
     fireEvent.change(assignee, { target: { value: 'someone.else@example.test' } });
@@ -310,9 +330,18 @@ describe('SPECTRUM exposure detail', () => {
     );
   });
 
+  it('unassigns through POST /unassign, keeping the analysis state', async () => {
+    vi.mocked(api.spectrum.unassignExposure).mockResolvedValue({ ...workflow, assigned_to: null });
+    await openDetail();
+    fireEvent.click(screen.getByRole('button', { name: 'Unassign' }));
+    await screen.findByText('Assignment cleared.');
+    expect(api.spectrum.unassignExposure).toHaveBeenCalledWith(EXPOSURE_ID);
+    expect(api.spectrum.assignExposure).not.toHaveBeenCalled();
+  });
+
   it('records a note alone and an analysis-state transition with its note', async () => {
-    vi.mocked(api.spectrum.addExposureNote).mockResolvedValue(detail.history[0]);
-    vi.mocked(api.spectrum.setAnalysisState).mockResolvedValue(detail.workflow);
+    vi.mocked(api.spectrum.addExposureNote).mockResolvedValue({ exposure_id: EXPOSURE_ID, ok: true });
+    vi.mocked(api.spectrum.setAnalysisState).mockResolvedValue(workflow);
     await openDetail();
 
     fireEvent.change(screen.getByLabelText(/Workflow note/), { target: { value: 'Checked exploitability' } });
@@ -330,10 +359,11 @@ describe('SPECTRUM exposure detail', () => {
     expect(api.spectrum.addExposureNote).toHaveBeenCalledTimes(1);
   });
 
-  it('shows workflow history with transitions', async () => {
+  it('shows the workflow journal with who/when and state transitions', async () => {
     await openDetail();
     expect(await screen.findByText('Assigned for triage')).toBeInTheDocument();
     expect(screen.getByText(/New → Assigned/)).toBeInTheDocument();
+    expect(screen.getByText(/admin@example\.test \(admin\)/)).toBeInTheDocument();
   });
 });
 
@@ -395,37 +425,52 @@ describe('SPECTRUM analyst-reviewed evidence', () => {
 describe('SPECTRUM handoffs', () => {
   it('queues a STRIKE engagement draft and confirms it is never silent', async () => {
     vi.mocked(api.spectrum.requestStrike).mockResolvedValue({
-      strike_request_id: 'sr-1',
-      engagement_draft_id: 'ed-9',
-      status: 'draft_queued',
+      exposure_id: EXPOSURE_ID,
+      strike_request: {
+        id: 'sr-1', state: 'draft', requested_by: 'analyst@example.test',
+        note: 'Controlled validation requested', created_at: '2026-09-20T12:00:00Z',
+      },
     });
     await openDetail();
     fireEvent.change(screen.getByLabelText('Justification'), { target: { value: 'Controlled validation requested' } });
     fireEvent.click(screen.getByRole('button', { name: 'Request STRIKE engagement draft' }));
     expect(await screen.findByText(/STRIKE engagement draft queued/)).toBeInTheDocument();
     expect(screen.getByText('sr-1')).toBeInTheDocument();
-    expect(screen.getByText('ed-9')).toBeInTheDocument();
+    expect(screen.getByText('draft', { selector: 'strong' })).toBeInTheDocument();
     expect(api.spectrum.requestStrike).toHaveBeenCalledWith(EXPOSURE_ID, 'Controlled validation requested');
   });
 
   it('surfaces a failed STRIKE request with retry instead of silently dropping it', async () => {
     vi.mocked(api.spectrum.requestStrike)
       .mockRejectedValueOnce(new Error('STRIKE unavailable'))
-      .mockResolvedValue({ strike_request_id: 'sr-2', engagement_draft_id: null, status: 'draft_queued' });
+      .mockResolvedValue({
+        exposure_id: EXPOSURE_ID,
+        strike_request: {
+          id: 'sr-2', state: 'draft', requested_by: 'analyst@example.test',
+          note: null, created_at: '2026-09-20T12:00:00Z',
+        },
+      });
     await openDetail();
-    fireEvent.change(screen.getByLabelText('Justification'), { target: { value: 'Controlled validation requested' } });
     fireEvent.click(screen.getByRole('button', { name: 'Request STRIKE engagement draft' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('STRIKE unavailable');
     fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Retry' }));
     expect(await screen.findByText(/STRIKE engagement draft queued/)).toBeInTheDocument();
+    expect(screen.getByText('sr-2')).toBeInTheDocument();
   });
 
-  it('creates the EDIP decision in Needs-Decision state via manual handoff', async () => {
-    vi.mocked(api.spectrum.requestEdipHandoff).mockResolvedValue({ decision_id: 'dec-1', state: 'needs_decision' });
+  it('creates the EDIP handoff in Needs-Decision state via manual handoff', async () => {
+    vi.mocked(api.spectrum.requestEdipHandoff).mockResolvedValue({
+      exposure_id: EXPOSURE_ID,
+      edip_handoff: {
+        id: 'dec-1', state: 'NEEDS_DECISION', requested_by: 'analyst@example.test',
+        note: 'Patching scheduled', created_at: '2026-09-20T12:00:00Z',
+      },
+      workflow: { ...workflow, analysis_state: 'action_required', edip_handoff_at: '2026-09-20T12:00:00Z' },
+    });
     await openDetail();
     fireEvent.change(screen.getByLabelText('Handoff note'), { target: { value: 'Patching scheduled' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create EDIP decision (Needs Decision)' }));
-    expect(await screen.findByText(/needs_decision/)).toBeInTheDocument();
+    expect(await screen.findByText(/NEEDS_DECISION/)).toBeInTheDocument();
     expect(screen.getByText('dec-1')).toBeInTheDocument();
     expect(api.spectrum.requestEdipHandoff).toHaveBeenCalledWith(EXPOSURE_ID, 'Patching scheduled');
   });
@@ -433,7 +478,14 @@ describe('SPECTRUM handoffs', () => {
   it('keeps a failed EDIP handoff retryable with upstream truth intact', async () => {
     vi.mocked(api.spectrum.requestEdipHandoff)
       .mockRejectedValueOnce(new Error('EDIP unavailable'))
-      .mockResolvedValue({ decision_id: 'dec-2', state: 'needs_decision' });
+      .mockResolvedValue({
+        exposure_id: EXPOSURE_ID,
+        edip_handoff: {
+          id: 'dec-2', state: 'NEEDS_DECISION', requested_by: 'analyst@example.test',
+          note: null, created_at: '2026-09-20T12:00:00Z',
+        },
+        workflow: { ...workflow, analysis_state: 'action_required', edip_handoff_at: '2026-09-20T12:00:00Z' },
+      });
     await openDetail();
     fireEvent.click(screen.getByRole('button', { name: 'Create EDIP decision (Needs Decision)' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('EDIP unavailable');

@@ -30,17 +30,18 @@ import {
   ScoutProfile,
   ScoutReadiness,
   BusinessImpactRecord,
-  EdipHandoffResult,
   ExploitationEvidenceRecord,
   ReachabilityEvidenceRecord,
   ScoringInputsSnapshot,
   SpectrumAnalysisState,
-  SpectrumExposureDetail,
+  SpectrumEdipHandoffResult,
+  SpectrumExposureDetailData,
+  SpectrumFindingSummary,
   SpectrumHistoryEntry,
-  SpectrumQueueItem,
+  SpectrumQueueParams,
+  SpectrumQueueResponse,
+  SpectrumStrikeRequestResult,
   SpectrumWorkflow,
-  StrikeRequestResult,
-  TesCurrentPayload,
 } from './types';
 
 const AUTH_API_BASE = new URL('api/auth', document.baseURI).pathname;
@@ -463,57 +464,76 @@ export const api = {
     });
   },
 
-  // SPECTRUM endpoints (Chapter 7 workbench — workflow state at exposure grain).
-  // Reads are read-through: scores themselves come from the exposure namespace
-  // below, which fronts the frozen Chapter 3 routes.
+  // SPECTRUM endpoints (Chapter 7 workbench — backend efc3d79; workflow state
+  // at exposure grain). Reads are read-through: the queue and detail carry
+  // their recomputed TES; nothing here stores or derives a score.
   spectrum: {
-    getQueue: (): Promise<SpectrumQueueItem[]> =>
-      request<SpectrumQueueItem[]>(`${SPECTRUM_API_BASE}/queue`),
+    getQueue: (params: SpectrumQueueParams = {}): Promise<SpectrumQueueResponse> => {
+      const query = new URLSearchParams();
+      if (params.finding_id) query.set('finding_id', params.finding_id);
+      if (params.asset_id) query.set('asset_id', params.asset_id);
+      if (params.analysis_state) query.set('analysis_state', params.analysis_state);
+      if (params.assigned_to) query.set('assigned_to', params.assigned_to);
+      query.set('limit', String(params.limit ?? 500));
+      if (params.offset) query.set('offset', String(params.offset));
+      return request<SpectrumQueueResponse>(`${SPECTRUM_API_BASE}/queue?${query.toString()}`);
+    },
 
-    getExposureDetail: (exposureId: string): Promise<SpectrumExposureDetail> =>
-      request<SpectrumExposureDetail>(`${SPECTRUM_API_BASE}/exposures/${exposureId}`),
+    getExposureDetail: (exposureId: string): Promise<SpectrumExposureDetailData> =>
+      request<SpectrumExposureDetailData>(`${SPECTRUM_API_BASE}/exposures/${exposureId}`),
 
-    assignExposure: (exposureId: string, assignedTo: string | null): Promise<SpectrumWorkflow> =>
-      request<SpectrumWorkflow>(`${SPECTRUM_API_BASE}/exposures/${exposureId}/assignment`, {
-        method: 'PATCH',
-        body: JSON.stringify({ assigned_to: assignedTo }),
-      }),
+    getExposureHistory: (exposureId: string): Promise<{ exposure_id: string; history: SpectrumHistoryEntry[] }> =>
+      request<{ exposure_id: string; history: SpectrumHistoryEntry[] }>(
+        `${SPECTRUM_API_BASE}/exposures/${exposureId}/history`
+      ),
+
+    assignExposure: (exposureId: string, assignee: string): Promise<SpectrumWorkflow> =>
+      request<{ exposure_id: string; workflow: SpectrumWorkflow }>(
+        `${SPECTRUM_API_BASE}/exposures/${exposureId}/assign`,
+        { method: 'POST', body: JSON.stringify({ assignee }) }
+      ).then((result) => result.workflow),
+
+    unassignExposure: (exposureId: string): Promise<SpectrumWorkflow> =>
+      request<{ exposure_id: string; workflow: SpectrumWorkflow }>(
+        `${SPECTRUM_API_BASE}/exposures/${exposureId}/unassign`,
+        { method: 'POST' }
+      ).then((result) => result.workflow),
 
     setAnalysisState: (
       exposureId: string,
       analysisState: SpectrumAnalysisState,
       note?: string | null
     ): Promise<SpectrumWorkflow> =>
-      request<SpectrumWorkflow>(`${SPECTRUM_API_BASE}/exposures/${exposureId}/analysis-state`, {
-        method: 'PATCH',
-        body: JSON.stringify({ analysis_state: analysisState, note: note || null }),
-      }),
+      request<{ exposure_id: string; workflow: SpectrumWorkflow }>(
+        `${SPECTRUM_API_BASE}/exposures/${exposureId}/analysis-state`,
+        { method: 'POST', body: JSON.stringify({ analysis_state: analysisState, note: note || null }) }
+      ).then((result) => result.workflow),
 
-    addExposureNote: (exposureId: string, note: string): Promise<SpectrumHistoryEntry> =>
-      request<SpectrumHistoryEntry>(`${SPECTRUM_API_BASE}/exposures/${exposureId}/notes`, {
+    addExposureNote: (exposureId: string, note: string): Promise<{ exposure_id: string; ok: boolean }> =>
+      request<{ exposure_id: string; ok: boolean }>(
+        `${SPECTRUM_API_BASE}/exposures/${exposureId}/notes`,
+        { method: 'POST', body: JSON.stringify({ note }) }
+      ),
+
+    requestStrike: (exposureId: string, note?: string | null): Promise<SpectrumStrikeRequestResult> =>
+      request<SpectrumStrikeRequestResult>(`${SPECTRUM_API_BASE}/exposures/${exposureId}/strike-request`, {
         method: 'POST',
-        body: JSON.stringify({ note }),
+        body: JSON.stringify({ note: note || null }),
       }),
 
-    requestStrike: (exposureId: string, justification: string): Promise<StrikeRequestResult> =>
-      request<StrikeRequestResult>(`${SPECTRUM_API_BASE}/exposures/${exposureId}/strike-request`, {
-        method: 'POST',
-        body: JSON.stringify({ justification }),
-      }),
-
-    requestEdipHandoff: (exposureId: string, note?: string | null): Promise<EdipHandoffResult> =>
-      request<EdipHandoffResult>(`${SPECTRUM_API_BASE}/exposures/${exposureId}/edip-handoff`, {
+    requestEdipHandoff: (exposureId: string, note?: string | null): Promise<SpectrumEdipHandoffResult> =>
+      request<SpectrumEdipHandoffResult>(`${SPECTRUM_API_BASE}/exposures/${exposureId}/edip-handoff`, {
         method: 'POST',
         body: JSON.stringify({ note: note || null }),
       }),
   },
 
   // Exposure Domain endpoints (Chapter 3 authority — frozen contracts reused
-  // by the SPECTRUM UI: current-TES read model, scoring-input snapshot,
+  // by the SPECTRUM UI: the six-field finding summary, scoring-input snapshot,
   // per-exposure Business Impact input, analyst-reviewed evidence).
   exposure: {
-    getCurrentTes: (exposureId: string): Promise<TesCurrentPayload> =>
-      request<TesCurrentPayload>(`${EXPOSURE_API_BASE}/${exposureId}/tes`),
+    getFindingTesSummary: (findingId: string): Promise<SpectrumFindingSummary> =>
+      request<SpectrumFindingSummary>(`${EXPOSURE_API_BASE}/findings/${findingId}/tes-summary`),
 
     getScoringInputs: (exposureId: string): Promise<ScoringInputsSnapshot> =>
       request<ScoringInputsSnapshot>(`${EXPOSURE_API_BASE}/${exposureId}/scoring-inputs`),

@@ -425,6 +425,23 @@ export interface DecimalWire {
   __decimal__: string;
 }
 
+/** Queue-row TES summary (read-through recompute per row). */
+export interface SpectrumQueueTes {
+  state: TesState;
+  value: DecimalWire | null;
+  /** Two-decimal presentation rounding from the kernel; null when UNSCOREABLE. */
+  display_value: string | null;
+  formula_version: string;
+}
+
+/** Current Business Impact as rendered by the workbench (Ch.3 ledger read). */
+export interface SpectrumBusinessImpactSummary {
+  value: DecimalWire;
+  reason: string | null;
+  assessed_by: string;
+  created_at: string;
+}
+
 /** One queue row = one current confirmed exposure (exposure grain). */
 export interface SpectrumQueueItem {
   exposure_id: string;
@@ -434,14 +451,32 @@ export interface SpectrumQueueItem {
   finding_title: string;
   finding_severity: string;
   asset_name: string;
+  asset_target_type: string;
   asset_normalized_target: string;
-  asset_network_scope: string;
-  confirmed_at: string;
+  exposure_confirmed_at: string;
+  tes: SpectrumQueueTes;
   analysis_state: SpectrumAnalysisState;
   assigned_to: string | null;
-  tes_state: TesState;
-  /** Two-decimal presentation rounding from the kernel; null when UNSCOREABLE. */
-  tes_display_value: string | null;
+  assigned_at: string | null;
+  analysis_state_changed_at: string | null;
+  edip_handoff_at: string | null;
+  business_impact: SpectrumBusinessImpactSummary | null;
+}
+
+/** GET /api/spectrum/queue response. */
+export interface SpectrumQueueResponse {
+  total: number;
+  items: SpectrumQueueItem[];
+}
+
+/** Server-side queue filters (backend efc3d79). */
+export interface SpectrumQueueParams {
+  finding_id?: string;
+  asset_id?: string;
+  analysis_state?: SpectrumAnalysisState;
+  assigned_to?: string;
+  limit?: number;
+  offset?: number;
 }
 
 /** The locked six-field finding roll-up (PRD-000 §3.5 #6). */
@@ -454,51 +489,39 @@ export interface SpectrumFindingSummary {
   total_current_exposures: number;
 }
 
+/** Exposure-grain workflow view (synthesized default 'new' when untouched). */
 export interface SpectrumWorkflow {
   analysis_state: SpectrumAnalysisState;
   assigned_to: string | null;
-  updated_at: string | null;
-  updated_by: string | null;
+  assigned_by: string | null;
+  assigned_at: string | null;
+  state_changed_by: string | null;
+  state_changed_at: string | null;
+  edip_handoff_at: string | null;
 }
 
-/** FindingStatusHistory shape — workflow narrative, distinct from scoring. */
+/** Workflow journal entry (spectrum_workflow_history). */
 export interface SpectrumHistoryEntry {
   id: string;
-  changed_by: string;
-  changed_at: string;
+  event: string;
+  actor: string;
+  actor_role: string;
   note: string | null;
-  from_analysis_state: SpectrumAnalysisState | null;
-  to_analysis_state: SpectrumAnalysisState | null;
+  detail: Record<string, unknown> | null;
+  created_at: string;
 }
 
-/** GET /api/spectrum/exposures/{id} — context + workflow only; scores are read through Ch.3. */
-export interface SpectrumExposureDetail {
+/**
+ * GET /api/spectrum/exposures/{id} — the workbench detail: the full §3.3.5
+ * decomposition payload (read-through), the workflow view, the journal, and
+ * the current Business Impact.
+ */
+export interface SpectrumExposureDetailData {
   exposure_id: string;
-  finding_id: string;
-  asset_id: string;
-  exposure_status: string;
-  confirmed_by: string;
-  confirmed_at: string;
-  evidence: Record<string, unknown>;
-  finding: {
-    finding_id: string;
-    title: string;
-    canonical_cve_id: string | null;
-    severity: string;
-    status: string;
-    tes_summary: SpectrumFindingSummary;
-  };
-  asset: {
-    asset_id: string;
-    name: string;
-    normalized_target: string;
-    target_type: string;
-    network_scope: string;
-    status: string;
-    criticality: string | null;
-  };
+  tes: TesCurrentPayload;
   workflow: SpectrumWorkflow;
   history: SpectrumHistoryEntry[];
+  business_impact: SpectrumBusinessImpactSummary | null;
 }
 
 // --- Ch.3 current-TES read model (GET /api/exposure/{id}/tes, §3.3.5) -------
@@ -618,17 +641,34 @@ export interface ScoringInputsSnapshot {
   }>;
 }
 
-// --- Ch.7 action payloads / results -----------------------------------------
+// --- Ch.7 action payloads / results (backend efc3d79) ------------------------
 
-export interface StrikeRequestResult {
-  strike_request_id: string;
-  engagement_draft_id: string | null;
-  /** e.g. 'draft_queued' — STRIKE unavailable ⇒ queued as draft, never silent. */
-  status: string;
+/** STRIKE engagement draft pre-bound to the exposure (Ch.4 owns the rest). */
+export interface SpectrumStrikeDraft {
+  id: string;
+  state: string;
+  requested_by: string;
+  note: string | null;
+  created_at: string;
 }
 
-export interface EdipHandoffResult {
-  decision_id: string;
-  /** Initial state 'needs_decision'. */
+export interface SpectrumStrikeRequestResult {
+  exposure_id: string;
+  strike_request: SpectrumStrikeDraft;
+}
+
+/** EDIP decision handoff recorded in Needs-Decision state. */
+export interface SpectrumEdipHandoff {
+  id: string;
   state: string;
+  requested_by: string;
+  note: string | null;
+  created_at: string;
+}
+
+export interface SpectrumEdipHandoffResult {
+  exposure_id: string;
+  edip_handoff: SpectrumEdipHandoff;
+  /** analysis_state is 'action_required' after the handoff. */
+  workflow: SpectrumWorkflow;
 }
