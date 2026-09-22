@@ -8,24 +8,30 @@ PATCH-14 remediation-recurrence rule (resolved predecessors only —
 false_positive and superseded are never recurrence evidence); the
 unremediated-serious threshold join with workflow state; coverage gaps
 naming UNSCOREABLE reasons and missing evidence; the accepted-risk ⋈
-obligation join degrading LOUDLY while Ch.8/Ch.9 are absent; determinism;
-queries that write nothing; feed staleness rendering on rows; analyst+
-reads, module gate, tenant isolation.
+obligation join over the shipped Ch.8/Ch.9 tables by reference ids
+(missing domains, when one ever is, must still be NAMED — the degrade-
+loudly envelope stays); determinism; queries that write nothing; feed
+staleness rendering on rows; analyst+ reads, module gate, tenant
+isolation.
 """
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from app.db import get_db_connection
 from tests.ch10_12_helpers import (
+    audit_event_count,
     ch10_12_fixture,
     confirm_finding_on_asset,
     make_final_episode,
     make_unscoreable_episode,
     read_live_tes,
     resolve_episode,
+    seed_edip_decision,
+    seed_obligation,
     set_bi,
     upstream_row_counts,
 )
@@ -145,28 +151,140 @@ class TestUnremediatedSerious:
 
 
 # ---------------------------------------------------------------------------
-# Accepted risks ⋈ obligations: degrade loudly
+# Accepted risks ⋈ obligations: the EDIP ⋈ STANDARD reference-id join
 # ---------------------------------------------------------------------------
 
 
-class TestAcceptedRisksDegradeLoudly:
-    def test_missing_domains_are_named_loudly(self, client, analyst_headers):
+class TestAcceptedRisksVsObligations:
+    def test_join_matches_by_exposure_reference(
+        self, client, analyst_headers
+    ):
+        episode = make_unscoreable_episode("CVE-2026-82018")
+        decision_id = seed_edip_decision(
+            episode["exposure_id"], state="accepted_risk",
+            decision_type="accept-risk",
+            review_due_at=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+        obligation = seed_obligation(
+            {
+                "incident_kind": "cyber_security_incident",
+                "exposure_id": str(episode["exposure_id"]),
+            },
+            due_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        )
+
         answer = _get(
             client, analyst_headers, "/accepted-risks-vs-obligations"
         ).json()
-        # the missing decision domains are NAMED — never a silent empty join
-        assert answer["degraded"] is True
-        assert "edip_decisions" in answer["missing_domains"]
-        assert "standard_obligations" in answer["missing_domains"]
-        assert answer["rows"] == []
-        assert answer["availability"]["edip_decisions"]["reason"] == (
-            "chapter8_edip_domain_not_present"
+        # both decision domains are shipped state: available, not degraded
+        assert answer["degraded"] is False
+        assert answer["missing_domains"] == []
+        assert answer["availability"]["edip_decisions"]["status"] == (
+            "available"
         )
         assert answer["availability"]["standard_obligations"]["status"] == (
-            "unavailable"
+            "available"
         )
-        # the available domains are declared available, not missing
         assert answer["availability"]["exposures_tes"]["status"] == "available"
+        assert answer["row_count"] == 1
+        row = answer["rows"][0]
+        # links back to every source row
+        assert row["decision_id"] == str(decision_id)
+        assert row["exposure_id"] == str(episode["exposure_id"])
+        assert row["finding_id"] == str(episode["finding_id"])
+        assert row["asset_id"] == str(episode["asset_id"])
+        assert row["matched_by"] == ["exposure_id"]
+        assert row["decision_state"] == "accepted_risk"
+        assert row["review_expired"] is False
+        assert row["obligation"]["obligation_id"] == str(
+            obligation["obligation_id"]
+        )
+        assert row["obligation"]["overdue"] is True
+
+    def test_finding_and_asset_references_match_too(
+        self, client, analyst_headers
+    ):
+        episode = make_unscoreable_episode("CVE-2026-82019")
+        seed_edip_decision(
+            episode["exposure_id"], state="accepted_risk",
+            decision_type="accept-risk",
+            review_due_at=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+        seed_obligation({"finding_id": str(episode["finding_id"])})
+        seed_obligation({"asset_id": str(episode["asset_id"])})
+
+        answer = _get(
+            client, analyst_headers, "/accepted-risks-vs-obligations"
+        ).json()
+        assert answer["row_count"] == 2
+        assert {tuple(r["matched_by"]) for r in answer["rows"]} == {
+            ("finding_id",), ("asset_id",),
+        }
+
+    def test_unreferenced_incidents_map_to_nothing(
+        self, client, analyst_headers
+    ):
+        """An incident that declares no reference ids maps to nothing. With
+        both domains present this is a TRUE empty join — degraded stays
+        False, because degradation would claim a missing input domain."""
+        episode = make_unscoreable_episode("CVE-2026-82020")
+        seed_edip_decision(
+            episode["exposure_id"], state="accepted_risk",
+            decision_type="accept-risk",
+            review_due_at=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+        seed_obligation({"incident_kind": "cyber_security_incident"})
+
+        answer = _get(
+            client, analyst_headers, "/accepted-risks-vs-obligations"
+        ).json()
+        assert answer["degraded"] is False
+        assert answer["row_count"] == 0
+
+    def test_only_current_active_dispositions_join(
+        self, client, analyst_headers
+    ):
+        episode = make_unscoreable_episode("CVE-2026-82021")
+        now = datetime.now(timezone.utc)
+        exposure_ref = {"exposure_id": str(episode["exposure_id"])}
+        # a replaced revision and a terminal decision never join
+        seed_edip_decision(
+            episode["exposure_id"], state="accepted_risk",
+            decision_type="accept-risk", review_due_at=now,
+            replaced_at=now,
+        )
+        seed_edip_decision(
+            episode["exposure_id"], state="needs_decision",
+            decision_type="remediate", replaced_at=now,
+        )
+        # the current deferred disposition joins, its expired review
+        # DERIVED — Ch.8's effective-state materialization stays Ch.8's write
+        current_id = seed_edip_decision(
+            episode["exposure_id"], state="deferred",
+            decision_type="defer", review_due_at=now - timedelta(days=1),
+        )
+        seed_obligation(exposure_ref)
+
+        answer = _get(
+            client, analyst_headers, "/accepted-risks-vs-obligations"
+        ).json()
+        assert answer["row_count"] == 1
+        row = answer["rows"][0]
+        assert row["decision_id"] == str(current_id)
+        assert row["decision_state"] == "deferred"
+        assert row["review_expired"] is True
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT state, review_due_at FROM edip_decisions "
+                    "WHERE id = %s;",
+                    (str(current_id),),
+                )
+                persisted = cur.fetchone()
+        assert persisted["state"] == "deferred"
+        assert persisted["review_due_at"] is not None
+        assert audit_event_count("edip.review_expired") == 0
 
 
 # ---------------------------------------------------------------------------
@@ -383,16 +501,31 @@ class TestDeterminismAndIsolation:
         self, client, analyst_headers, auth_headers_tenant_b_admin
     ):
         make_final_episode("CVE-2026-82017", business_impact=9)
+        episode = make_unscoreable_episode("CVE-2026-82022")
+        seed_edip_decision(
+            episode["exposure_id"], state="accepted_risk",
+            decision_type="accept-risk",
+            review_due_at=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+        seed_obligation({"exposure_id": str(episode["exposure_id"])})
 
         answer_a = _get(
             client, analyst_headers, "/unremediated-serious"
         ).json()
         assert answer_a["row_count"] == 1
+        join_a = _get(
+            client, analyst_headers, "/accepted-risks-vs-obligations"
+        ).json()
+        assert join_a["row_count"] == 1
 
         answer_b = _get(
             client, auth_headers_tenant_b_admin, "/unremediated-serious"
         ).json()
         assert answer_b["row_count"] == 0
+        join_b = _get(
+            client, auth_headers_tenant_b_admin, "/accepted-risks-vs-obligations"
+        ).json()
+        assert join_b["row_count"] == 0
         gaps_b = _get(
             client, auth_headers_tenant_b_admin, "/coverage-gaps"
         ).json()

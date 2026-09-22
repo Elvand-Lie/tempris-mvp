@@ -57,8 +57,9 @@ def _snapshot_boundary(conn) -> None:
 def get_summary(auth: AuthContext = Depends(_require_read)):
     """Severe-exposure tiles (counts + maxima by score state — FINAL and
     PROVISIONAL rendered separately, never a mean), workflow posture, the
-    coverage/quality strip, and the upstream decision domains. A domain that
-    is not present renders 'unavailable' — never zero."""
+    coverage/quality strip, and the upstream decision domains (EDIP
+    remediation posture, accepted/deferred risk register, regulatory
+    pressure) read through — never written."""
     try:
         with get_db_connection() as conn:
             _snapshot_boundary(conn)

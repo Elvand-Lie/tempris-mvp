@@ -534,16 +534,24 @@ class TestArtifacts:
         assert "<script>" not in html
         assert "&lt;script&gt;" in html
 
-    def test_executive_summary_renders_unavailable_loudly(
+    def test_executive_summary_renders_decision_domain_tiles(
         self, client, analyst_headers
     ):
+        """The decision domains are shipped upstream state: the executive
+        summary renders their wired tiles (true zeros on empty state) — the
+        stale not-present reasons are retired everywhere."""
         report = _generate_executive(client, analyst_headers)
         html = client.get(
             f"/api/speak/reports/{report['id']}/artifacts/html",
             headers=analyst_headers,
         ).text
-        assert "unavailable" in html
-        assert "chapter8_edip_domain_not_present" in html
+        assert "remediation_posture" in html
+        assert "accepted_risk_register" in html
+        assert "regulatory_pressure" in html
+        assert "0 current decisions" in html
+        assert "0 accepted/deferred dispositions" in html
+        assert "0 obligations" in html
+        assert "not_present" not in html
 
 
 def make_unscoreable_with_title(cve: str, title: str):

@@ -11,8 +11,9 @@ the way the Ch.3 authority's own suite does — never a second scoring path.
 """
 from __future__ import annotations
 
+import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -47,6 +48,20 @@ def clean_ch10_12():
     feed-health tile's factual baseline)."""
     with get_db_connection() as conn:
         with conn.cursor() as cur:
+            # the decision cluster first: edip_decisions FK-RESTRICTs the
+            # exposure deletes below once this suite seeds decision rows
+            # (test DB only; TRUNCATE fires no row triggers)
+            cur.execute(
+                "TRUNCATE standard_control_evidence, grc_exceptions, "
+                "standard_policies, standard_control_assessments, "
+                "standard_submission_records, standard_obligations, "
+                "standard_incident_rule_evaluations, "
+                "standard_incident_revisions, standard_incidents, "
+                "edip_accepted_risk_bindings, edip_verifications, "
+                "edip_decisions, spectrum_workflow_history, "
+                "spectrum_strike_requests, spectrum_edip_handoffs, "
+                "spectrum_exposure_workflow;"
+            )
             cur.execute(
                 "TRUNCATE posture_snapshots, report_artifacts, reports;"
             )
@@ -262,6 +277,9 @@ def upstream_row_counts() -> dict:
                 "exposure_reachability_evidence",
                 "spectrum_exposure_workflow", "spectrum_workflow_history",
                 "spectrum_edip_handoffs", "spectrum_strike_requests",
+                "edip_decisions", "edip_verifications",
+                "standard_obligations", "standard_incidents",
+                "standard_incident_revisions",
             ):
                 cur.execute(f"SELECT COUNT(*) AS n FROM {table};")
                 counts[table] = cur.fetchone()["n"]
@@ -276,3 +294,107 @@ def audit_event_count(event_name: str) -> int:
                 (event_name,),
             )
             return cur.fetchone()["n"]
+
+
+# ---------------------------------------------------------------------------
+# Decision-domain seeding (READ-model rows for the Ch.10/Ch.12 consumers).
+# These are direct row writes ONLY so the read-side suites stand alone —
+# lifecycle writes belong to Ch.8/Ch.9's own suites through their services.
+# ---------------------------------------------------------------------------
+
+
+def seed_edip_decision(
+    exposure_id: uuid.UUID, *, state: str = "accepted_risk",
+    decision_type: str = "accept-risk", owner: str = "owner-a",
+    rationale: str = "suite decision", due_at=None, review_due_at=None,
+    closed_at=None, replaced_at=None, superseded_reason=None,
+    tenant_id=None, created_by: str = "admin-a",
+) -> uuid.UUID:
+    """One CURRENT decision revision row (replaced_at NULL unless driven)."""
+    decision_id = uuid.uuid4()
+    snapshot = {
+        "value": {"__decimal__": "9.525"},
+        "state": "FINAL",
+        "formula_version": "tes-v1",
+    }
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO edip_decisions (
+                    id, tenant_id, exposure_id, decision_group_id, revision,
+                    decision_type, state, superseded_reason, owner, rationale,
+                    due_at, review_due_at, consumed_snapshot, snapshot_as_of,
+                    created_by, created_at, closed_at, replaced_at
+                ) VALUES (%s, %s, %s, %s, 1, %s, %s, %s, %s, %s, %s, %s,
+                          %s::jsonb, %s, %s, now(), %s, %s);
+                """,
+                (
+                    str(decision_id), str(tenant_id or TENANT_A),
+                    str(exposure_id), str(decision_id), decision_type,
+                    state, superseded_reason, owner, rationale, due_at,
+                    review_due_at, json.dumps(snapshot),
+                    datetime.now(timezone.utc), created_by, closed_at,
+                    replaced_at,
+                ),
+            )
+        conn.commit()
+    return decision_id
+
+
+def seed_obligation(
+    inputs=None, *, state: str = "open", due_at=None, breached_at=None,
+    fulfilled_at=None, kind: str = "regulator_notification",
+    title: str = "Suite obligation", tenant_id=None,
+    created_by: str = "admin-a",
+) -> dict:
+    """One incident + its current input revision + one obligation, with the
+    exact inputs dict the correlation join reads reference ids from."""
+    incident_id = uuid.uuid4()
+    obligation_id = uuid.uuid4()
+    event_time = datetime.now(timezone.utc) - timedelta(hours=3)
+    if due_at is None:
+        due_at = event_time + timedelta(seconds=3600)
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO standard_incidents (
+                    id, tenant_id, source, external_event_id, title,
+                    event_time, created_by
+                ) VALUES (%s, %s, 'suite', %s, 'Suite incident', %s, %s);
+                """,
+                (str(incident_id), str(tenant_id or TENANT_A),
+                 str(uuid.uuid4()), event_time, created_by),
+            )
+            revision_inputs = dict(inputs or {})
+            revision_inputs["event_time"] = event_time.isoformat()
+            cur.execute(
+                """
+                INSERT INTO standard_incident_revisions (
+                    id, tenant_id, incident_id, revision_no, inputs, created_by
+                ) VALUES (%s, %s, %s, 1, %s::jsonb, %s);
+                """,
+                (str(uuid.uuid4()), str(tenant_id or TENANT_A),
+                 str(incident_id), json.dumps(revision_inputs), created_by),
+            )
+            cur.execute(
+                """
+                INSERT INTO standard_obligations (
+                    id, tenant_id, incident_id, obligation_key, kind, title,
+                    trigger_at, due_at, clock_seconds, state, fulfilled_at,
+                    closed_at, breached_at, created_by
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 3600, %s, %s, NULL,
+                          %s, %s);
+                """,
+                (str(obligation_id), str(tenant_id or TENANT_A),
+                 str(incident_id), f"suite:{obligation_id}", kind, title,
+                 event_time, due_at, state, fulfilled_at, breached_at,
+                 created_by),
+            )
+        conn.commit()
+    return {
+        "incident_id": incident_id,
+        "obligation_id": obligation_id,
+        "event_time": event_time,
+    }

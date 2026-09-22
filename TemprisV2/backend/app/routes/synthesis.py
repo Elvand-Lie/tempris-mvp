@@ -81,7 +81,7 @@ def unremediated_serious(
 @router.get(
     "/accepted-risks-vs-obligations",
     status_code=status.HTTP_200_OK,
-    summary="Accepted risks ⋈ obligations (degrades loudly while Ch.8/Ch.9 are absent)",
+    summary="Accepted risks ⋈ obligations (read-time join by reference ids)",
 )
 def accepted_risks_vs_obligations(
     auth: AuthContext = Depends(_require_analyst),
