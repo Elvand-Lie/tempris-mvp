@@ -16,8 +16,12 @@ Lifecycle (DB-pinned to exactly these edges, migration 021):
 
 Invariants enforced BY THE PRIMITIVE (not by consumer discipline):
 
-  * HARD dual control — the approver can never equal the proposer. Enforced
-    twice: in the decide service and in the migration-021 trigger (DB layer);
+  * HARD dual control — the approver can never be the proposer. Both actor
+    ids are compared as CANONICAL user identity (resolved to users.id the
+    same way login resolves a token subject — user UUID or email), so the
+    same human presenting two token shapes cannot self-approve. Enforced
+    twice: in the decide service and in the DB trigger (migration-021
+    function replaced by migration 038);
   * decide-time authority — the approver must hold an admin/superadmin
     membership that is CURRENT (active user, active tenant, active membership,
     matching role) at the decision instant, re-verified in the deciding
@@ -103,8 +107,9 @@ class ApprovalStateError(ApprovalDomainError):
 
 
 class ApprovalDualControlError(ApprovalDomainError):
-    """The approver equals the proposer (HARD dual control) — refused at the
-    service layer and again by the migration-021 trigger."""
+    """The approver is the proposer (HARD dual control, compared as canonical
+    user identity) — refused at the service layer and again by the DB
+    trigger."""
 
 
 class ApprovalAuthorityError(ApprovalDomainError):
@@ -211,35 +216,67 @@ def _hash_of(handler: SubjectHandler, payload: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _canonical_actor_user_id(
+    cur: psycopg.Cursor, actor_id: str
+) -> Optional[str]:
+    """Resolve a token actor-id to the canonical user identity (users.id as
+    text) exactly the way login resolves the subject (auth.py): the id may be
+    the user UUID or the email. Returns None when no user matches — callers
+    fail closed. Identity reads users only, never memberships: the
+    dual-control compare must not depend on membership state at compare
+    time (membership currency is authorization, checked separately)."""
+    cur.execute(
+        """
+        SELECT u.id::text AS canonical_user_id
+        FROM users u
+        WHERE u.id::text = %s OR LOWER(u.email) = LOWER(%s)
+        ORDER BY (u.id::text = %s) DESC, u.id
+        LIMIT 1;
+        """,
+        (actor_id, actor_id, actor_id),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    return row["canonical_user_id"]
+
+
 def _require_current_decider_authority(
     cur: psycopg.Cursor, tenant_id: uuid.UUID, actor_id: str, role: str
-) -> None:
+) -> str:
     """The actor must hold an admin/superadmin membership that is CURRENT at
     the decision instant: active user, active tenant, active membership, and
-    the membership role matching the claimed role. Called inside the deciding
-    transaction, so a revocation committing before the decision is seen; one
-    committing concurrently serializes at the row level (decide re-reads the
-    approval FOR UPDATE under the advisory lock)."""
+    the membership role matching the claimed role. The actor is resolved to
+    the canonical user identity the same way login resolves the token
+    subject (user UUID or email — auth.py) and authorization is decided on
+    that canonical UUID, so a real-session (UUID sub) token and a legacy
+    (email sub) token of the same admin carry the same authority. Returns
+    the canonical user UUID (text). Called inside the deciding transaction,
+    so a revocation committing before the decision is seen; one committing
+    concurrently serializes at the row level (decide re-reads the approval
+    FOR UPDATE under the advisory lock)."""
+    canonical_user_id = _canonical_actor_user_id(cur, actor_id)
     cur.execute(
         """
         SELECT 1
         FROM users u
         JOIN tenant_memberships m ON m.user_id = u.id AND m.tenant_id = %s
         JOIN tenants t ON t.id = m.tenant_id
-        WHERE LOWER(u.email) = LOWER(%s)
+        WHERE u.id::text = %s
           AND u.status = 'active'
           AND t.status = 'active'
           AND m.status = 'active'
           AND m.role = %s
           AND m.role IN ('admin', 'superadmin');
         """,
-        (str(tenant_id), actor_id, role),
+        (str(tenant_id), canonical_user_id, role),
     )
-    if cur.fetchone() is None:
+    if canonical_user_id is None or cur.fetchone() is None:
         raise ApprovalAuthorityError(
             f"actor {actor_id!r} does not hold current admin/superadmin "
             f"authority in tenant {tenant_id} (claimed role {role!r})"
         )
+    return canonical_user_id
 
 
 # ---------------------------------------------------------------------------
@@ -417,14 +454,24 @@ def decide(
             )
         # EVERY decision out of pending — approve, reject, or cancel — is a
         # judgment act recorded with an approver identity: it requires CURRENT
-        # decider authority and HARD dual control (approver ≠ proposer; the
-        # migration-021 trigger enforces the same at the DB layer). A proposer
-        # who wants their proposal gone asks a decider, or lets it expire.
-        _require_current_decider_authority(cur, tenant_id, approver_id, approver_role)
-        if approver_id == row["proposer_id"]:
+        # decider authority and HARD dual control (approver ≠ proposer,
+        # compared as canonical user identity so two token shapes of the same
+        # human cannot self-approve; the DB trigger enforces the same at the
+        # DB layer). A proposer who wants their proposal gone asks a decider,
+        # or lets it expire.
+        canonical_approver_id = _require_current_decider_authority(
+            cur, tenant_id, approver_id, approver_role
+        )
+        canonical_proposer_id = _canonical_actor_user_id(cur, row["proposer_id"])
+        if approver_id == row["proposer_id"] or (
+            canonical_proposer_id is not None
+            and canonical_proposer_id == canonical_approver_id
+        ):
             raise ApprovalDualControlError(
-                f"self-approval refused: approver {approver_id!r} is the "
-                f"proposer of approval {approval_id}"
+                f"self-approval refused: approver {approver_id!r} and "
+                f"proposer {row['proposer_id']!r} are the same user "
+                f"(canonical user {canonical_approver_id}) of approval "
+                f"{approval_id}"
             )
         cur.execute(
             """
