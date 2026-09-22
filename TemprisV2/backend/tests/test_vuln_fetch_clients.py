@@ -239,6 +239,65 @@ class TestKevFetchClient:
         assert result.cursor_after == "2026-09-01T08:00:00.000Z"
         assert result.metadata["catalogVersion"] == "2026.09.01"
 
+    def test_continuation_resumes_at_entry_offset_and_exhausts(self):
+        """KEV round-cap regression (prd-finish/kev-round-cap): a continuation
+        cursor's entry_offset/seen_ids must actually be HONORED. The P1-02
+        hash-guard rewrite dropped the resume on the hash-match path, so every
+        round re-read batch 0, the artifact never exhausted, and the engine's
+        atomic round cap rolled the run back."""
+        date_released = "2026-09-01T08:00:00.000Z"
+        entries = [
+            {
+                "cveID": f"CVE-2026-{1000 + i}",
+                "vendorProject": "V",
+                "product": "P",
+                "vulnerabilityName": f"Vuln {i}",
+                "dateAdded": "2026-08-15",
+                "shortDescription": "d",
+                "requiredAction": "a",
+                "dueDate": "2026-09-15",
+                "knownRansomwareCampaignUse": "Unknown",
+                "notes": "",
+            }
+            for i in range(5)
+        ]
+        payload = {
+            "title": "CISA KEV",
+            "catalogVersion": "2026.09.01",
+            "dateReleased": date_released,
+            "count": len(entries),
+            "vulnerabilities": entries,
+        }
+
+        transport = httpx.MockTransport(lambda req: httpx.Response(200, json=payload))
+        fetcher = KevFetchClient(client=httpx.Client(transport=transport))
+
+        # Round 1: batch 0.
+        r1 = fetcher.fetch(cursor=None, batch_size=2)
+        assert r1.error is None
+        assert [r["cveID"] for r in r1.records] == ["CVE-2026-1000", "CVE-2026-1001"]
+        assert r1.is_exhausted is False
+        cursor1 = json.loads(r1.cursor_after)
+        assert cursor1["phase"] == "bootstrap"
+        assert cursor1["entry_offset"] == 2
+        assert cursor1["catalog_hash"]
+
+        # Round 2: MUST be entries 2-3, not batch 0 again.
+        r2 = fetcher.fetch(cursor=r1.cursor_after, batch_size=2)
+        assert r2.error is None
+        assert [r["cveID"] for r in r2.records] == ["CVE-2026-1002", "CVE-2026-1003"]
+        assert r2.is_exhausted is False
+        cursor2 = json.loads(r2.cursor_after)
+        assert cursor2["entry_offset"] == 4
+
+        # Round 3: final entry, exhausted, full seen_ids across ALL rounds.
+        r3 = fetcher.fetch(cursor=r2.cursor_after, batch_size=2)
+        assert r3.error is None
+        assert [r["cveID"] for r in r3.records] == ["CVE-2026-1004"]
+        assert r3.is_exhausted is True
+        assert r3.cursor_after == date_released
+        assert sorted(r3.seen_ids) == sorted(e["cveID"] for e in entries)
+
 
 class TestEpssFetchClient:
     """Offline tests for FIRST EPSS bulk CSV fetch client."""

@@ -38,31 +38,25 @@ SERIOUS_TES_THRESHOLD = Decimal("8.0")
 
 QUERY_LIMIT = 500
 
-# The upstream decision domains the joins below want but that are not part
-# of the integrated Ch.1-7 baseline this build runs on. They are NAMED, per
-# the degrade-loudly rule — never silently dropped, never rendered as empty
-# "no rows" answers.
-DOMAIN_UNAVAILABLE = {
-    "edip_decisions": "chapter8_edip_domain_not_present",
-    "standard_obligations": "chapter9_standard_domain_not_present",
-}
+# Every input domain this module correlates is shipped authoritative state
+# (Ch.1 feeds, Ch.3 exposures, Ch.7 workflow, Ch.8 EDIP, Ch.9 STANDARD): all
+# render AVAILABLE. The availability block stays the degrade-loudly
+# contract's carrier — a future missing/failed input domain must be NAMED in
+# it (the ai_context.py:351 lesson), never silently dropped.
+AVAILABILITY_DOMAINS = (
+    "exposures_tes", "spectrum_workflow", "feed_health",
+    "edip_decisions", "standard_obligations",
+)
+
+# The reference ids an incident's input revision may declare (free-form JSON
+# object): the EDIP ⋈ STANDARD join keys. A key whose value is not a string
+# is not a reference.
+REFERENCE_KEYS = ("exposure_id", "finding_id", "asset_id")
 
 
-def _availability(*provided: str) -> dict:
+def _availability() -> dict:
     """The per-domain availability block every answer carries."""
-    domains: dict[str, dict] = {}
-    for name in (
-        "exposures_tes", "spectrum_workflow", "feed_health",
-        "edip_decisions", "standard_obligations",
-    ):
-        if name in DOMAIN_UNAVAILABLE and name not in (provided or ()):
-            domains[name] = {
-                "status": "unavailable",
-                "reason": DOMAIN_UNAVAILABLE[name],
-            }
-        else:
-            domains[name] = {"status": "available"}
-    return domains
+    return {name: {"status": "available"} for name in AVAILABILITY_DOMAINS}
 
 
 def _envelope(
@@ -212,23 +206,138 @@ def unremediated_serious(
 
 def accepted_risks_vs_obligations(
     conn: psycopg.Connection, tenant_id: uuid.UUID, *, as_of: datetime,
+    limit: int = QUERY_LIMIT,
 ) -> dict:
-    """EDIP accepted/deferred risk decisions joined to STANDARD obligations
-    by reference ids. Both upstream domains are outside the integrated
-    Ch.1-7 baseline: the answer NAMES them (degrade loudly) and returns no
-    rows — an empty result here would read as 'no accepted risks map to
-    obligations', which is not a fact anyone has."""
+    """The PRD's headline correlation (Ch.12): 'which accepted risks map to
+    regulatory obligations' = EDIP accepted-risk decisions ⋈ STANDARD
+    obligations, by reference ids. Read-time join over the shipped tables:
+    every CURRENT accepted/deferred EDIP decision meets every STANDARD
+    obligation whose incident's current input revision declares a matching
+    reference id (exposure_id / finding_id / asset_id). One row per mapped
+    (decision, obligation) pair; an incident that declares no references
+    maps to nothing — an empty join with both domains present is a TRUE
+    empty answer, not a degradation. Nothing is written, nothing stored."""
     definition = (
-        "EDIP accepted/deferred risk decisions joined to STANDARD "
-        "obligations by reference ids (read-time join; both are upstream "
-        "authoritative domains — SYNTHESIS stores none of it)."
+        "EDIP accepted/deferred risk decisions (current revision) joined to "
+        "STANDARD obligations whose incident's current input revision "
+        "references the same exposure_id, finding_id, or asset_id. Read-time "
+        "join over authoritative state by reference ids — SYNTHESIS stores "
+        "none of it, writes nothing, and derives deadline/review state "
+        "against as_of only."
     )
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """
+            SELECT d.id AS decision_id, d.decision_group_id, d.revision,
+                   d.decision_type, d.state, d.owner, d.rationale,
+                   d.due_at, d.review_due_at, d.snapshot_as_of, d.created_at,
+                   e.id AS exposure_id, e.finding_id, e.asset_id
+            FROM edip_decisions d
+            JOIN asset_exposures e
+              ON e.tenant_id = d.tenant_id AND e.id = d.exposure_id
+            WHERE d.tenant_id = %s AND d.replaced_at IS NULL
+              AND d.state IN ('accepted_risk', 'deferred')
+            ORDER BY d.created_at ASC, d.id ASC;
+            """,
+            (str(tenant_id),),
+        )
+        decisions = cur.fetchall()
+
+        cur.execute(
+            """
+            SELECT o.id AS obligation_id, o.kind, o.title, o.state,
+                   o.due_at, o.trigger_at, o.breached_at, o.incident_id,
+                   i.source AS incident_source, i.state AS incident_state,
+                   i.event_time,
+                   ir.inputs
+            FROM standard_obligations o
+            JOIN standard_incidents i
+              ON i.tenant_id = o.tenant_id AND i.id = o.incident_id
+            LEFT JOIN standard_incident_revisions ir
+              ON ir.tenant_id = i.tenant_id AND ir.incident_id = i.id
+             AND ir.revision_no = i.current_revision
+            WHERE o.tenant_id = %s
+            ORDER BY o.created_at ASC, o.id ASC;
+            """,
+            (str(tenant_id),),
+        )
+        obligations = cur.fetchall()
+
+    referenced: list[tuple[dict, dict]] = []
+    for obligation in obligations:
+        inputs = obligation.pop("inputs") or {}
+        refs = {
+            key: inputs[key] for key in REFERENCE_KEYS
+            if isinstance(inputs.get(key), str)
+        }
+        referenced.append((obligation, refs))
+
+    cap = max(1, min(limit, QUERY_LIMIT))
     rows: list[dict] = []
+    truncated = False
+    for decision in decisions:
+        identity = {
+            "exposure_id": str(decision["exposure_id"]),
+            "finding_id": str(decision["finding_id"]),
+            "asset_id": str(decision["asset_id"]),
+        }
+        for obligation, refs in referenced:
+            if len(rows) >= cap:
+                truncated = True
+                break
+            matched_by = sorted(
+                key for key in REFERENCE_KEYS
+                if refs.get(key) == identity[key]
+            )
+            if not matched_by:
+                continue
+            rows.append({
+                "decision_id": str(decision["decision_id"]),
+                "decision_group_id": str(decision["decision_group_id"]),
+                "revision": decision["revision"],
+                "decision_type": decision["decision_type"],
+                "decision_state": decision["state"],
+                "owner": decision["owner"],
+                "rationale": decision["rationale"],
+                "due_at": decision["due_at"],
+                "review_due_at": decision["review_due_at"],
+                "review_expired": bool(
+                    decision["review_due_at"] is not None
+                    and decision["review_due_at"] <= as_of
+                ),
+                "snapshot_as_of": decision["snapshot_as_of"],
+                "decision_created_at": decision["created_at"],
+                "exposure_id": identity["exposure_id"],
+                "finding_id": identity["finding_id"],
+                "asset_id": identity["asset_id"],
+                "matched_by": matched_by,
+                "obligation": {
+                    "obligation_id": str(obligation["obligation_id"]),
+                    "kind": obligation["kind"],
+                    "title": obligation["title"],
+                    "state": obligation["state"],
+                    "due_at": obligation["due_at"],
+                    "overdue": bool(
+                        obligation["due_at"] is not None
+                        and obligation["due_at"] < as_of
+                        and obligation["state"] in ("open", "in_progress")
+                    ),
+                    "trigger_at": obligation["trigger_at"],
+                    "breached_at": obligation["breached_at"],
+                    "incident_id": (
+                        str(obligation["incident_id"])
+                        if obligation["incident_id"] else None
+                    ),
+                    "incident_source": obligation["incident_source"],
+                    "incident_state": obligation["incident_state"],
+                },
+            })
+        if truncated:
+            break
+
     return _envelope(
         "accepted_risks_vs_obligations",
-        definition, rows,
-        _availability(),  # edip_decisions + standard_obligations named missing
-        as_of=as_of,
+        definition, rows, _availability(), as_of=as_of, truncated=truncated,
     )
 
 

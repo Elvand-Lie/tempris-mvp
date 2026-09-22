@@ -21,6 +21,7 @@ import psycopg
 import pytest
 
 from app.db import get_db_connection
+from app.speak import service as speak_service
 from tests.ch10_12_helpers import (
     audit_event_count,
     ch10_12_fixture,
@@ -534,21 +535,111 @@ class TestArtifacts:
         assert "<script>" not in html
         assert "&lt;script&gt;" in html
 
-    def test_executive_summary_renders_unavailable_loudly(
+    def test_executive_summary_renders_decision_domain_tiles(
         self, client, analyst_headers
     ):
+        """The decision domains are shipped upstream state: the executive
+        summary renders their wired tiles (true zeros on empty state) — the
+        stale not-present reasons are retired everywhere."""
         report = _generate_executive(client, analyst_headers)
         html = client.get(
             f"/api/speak/reports/{report['id']}/artifacts/html",
             headers=analyst_headers,
         ).text
-        assert "unavailable" in html
-        assert "chapter8_edip_domain_not_present" in html
+        assert "remediation_posture" in html
+        assert "accepted_risk_register" in html
+        assert "regulatory_pressure" in html
+        assert "0 current decisions" in html
+        assert "0 accepted/deferred dispositions" in html
+        assert "0 obligations" in html
+        assert "not_present" not in html
 
 
 def make_unscoreable_with_title(cve: str, title: str):
     from tests.ch10_12_helpers import make_unscoreable_episode
     return make_unscoreable_episode(cve, title=title)
+
+
+# ---------------------------------------------------------------------------
+# Generation: retryable conflicts (audit-chain advance under the snapshot)
+# ---------------------------------------------------------------------------
+
+
+def _raise_chain_advanced(conn, tenant_id, **kwargs):
+    raise psycopg.errors.SerializationFailure(
+        "audit chain advanced during a repeatable-read transaction"
+    )
+
+
+class TestGenerationRetryableConflicts:
+    """The proven production defect: the tenant's audit chain advanced
+    during the REPEATABLE READ generation boundary (audit.py refuses to
+    re-chain from a provably stale head and raises SerializationFailure).
+    The route maps it to the same retryable 409 shape as tes_read_conflict
+    — never a bare 500 — and the audit chain itself is untouched."""
+
+    def _register_draft(self, client, headers, cve):
+        episode = make_final_episode(cve)
+        registered = _register_one(client, headers, episode)
+        assert registered.status_code == 201, registered.text
+        return registered.json()["id"]
+
+    def test_generate_audit_chain_advance_is_retryable_409_not_500(
+        self, client, analyst_headers, monkeypatch
+    ):
+        report_id = self._register_draft(client, analyst_headers, "CVE-2026-81301")
+        monkeypatch.setattr(
+            speak_service, "record_audit_event", _raise_chain_advanced
+        )
+        r = _generate(client, analyst_headers, report_id)
+        assert r.status_code == 409, r.text
+        detail = r.json()["detail"]
+        assert detail["code"] == "tes_read_conflict"
+        assert detail["retry"] is True
+        assert "audit chain advanced" in detail["message"]
+
+    def test_generate_audit_chain_advance_rolls_the_seal_back(
+        self, client, analyst_headers, monkeypatch
+    ):
+        report_id = self._register_draft(client, analyst_headers, "CVE-2026-81302")
+        monkeypatch.setattr(
+            speak_service, "record_audit_event", _raise_chain_advanced
+        )
+        r = _generate(client, analyst_headers, report_id)
+        assert r.status_code == 409, r.text
+        # the whole publication rolled back: still an unsealed draft
+        fetched = client.get(
+            f"/api/speak/reports/{report_id}", headers=analyst_headers
+        ).json()
+        assert fetched["status"] == "draft"
+        assert fetched["sealed_payload"] is None
+
+    def test_regenerate_audit_chain_advance_is_retryable_409(
+        self, client, analyst_headers, monkeypatch
+    ):
+        report_id = self._register_draft(client, analyst_headers, "CVE-2026-81303")
+        generated = _generate(client, analyst_headers, report_id)
+        assert generated.status_code == 200, generated.text
+
+        monkeypatch.setattr(
+            speak_service, "record_audit_event", _raise_chain_advanced
+        )
+        r = client.post(
+            f"/api/speak/reports/{report_id}/regenerate",
+            headers=analyst_headers,
+        )
+        assert r.status_code == 409, r.text
+        detail = r.json()["detail"]
+        assert detail["code"] == "tes_read_conflict"
+        assert detail["retry"] is True
+        # the new version row rolled back with the publication
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) AS n FROM reports WHERE parent_report_id = %s;",
+                    (report_id,),
+                )
+                assert cur.fetchone()["n"] == 0
 
 
 # ---------------------------------------------------------------------------

@@ -48,6 +48,17 @@ class LlmUnavailableError(SpeakError):
     code = "llm_unavailable"
 
 
+class LlmEmptyResponseError(SpeakError):
+    """The provider answered HTTP 200 with a structurally valid completion
+    whose content is empty — a known transient of the free model tier.
+    Retryable at the client (the same 409/retry envelope as
+    tes_read_conflict), and still fail-closed: the gap is surfaced, never
+    filled with an invented answer."""
+
+    code = "llm_empty_response"
+    retry = True
+
+
 class PromptInjectionBlockedError(SpeakError):
     """The chat message matched the prompt-injection guardrail (the V1
     SPEAK input guardrail, kept per the Ch.11/Ch.12 boundary). Blocked

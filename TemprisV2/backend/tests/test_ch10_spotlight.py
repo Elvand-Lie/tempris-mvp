@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import psycopg
@@ -27,6 +28,8 @@ from tests.ch10_12_helpers import (
     make_final_episode,
     make_provisional_episode,
     make_unscoreable_episode,
+    seed_edip_decision,
+    seed_obligation,
 )
 from tests.conftest import TENANT_A
 
@@ -164,25 +167,6 @@ class TestSummaryTiles:
             for row in tile["severe_exposures"]
         )
 
-    def test_missing_upstream_domains_render_unavailable_not_zero(
-        self, client, analyst_headers
-    ):
-        """EDIP (Ch.8) and STANDARD (Ch.9) are not in the integrated
-        baseline: their tiles render 'unavailable' with a reason — a zero
-        would read as 'no accepted risks' / 'no overdue obligations'."""
-        payload = client.get("/api/ciso/summary", headers=analyst_headers).json()
-        for tile_name in (
-            "remediation_posture", "accepted_risk_register",
-            "regulatory_pressure",
-        ):
-            tile = payload[tile_name]
-            assert tile["status"] == "unavailable", tile_name
-            assert tile["reason"], tile_name
-            for key, value in tile.items():
-                assert not isinstance(value, int), (
-                    f"{tile_name} must not carry fabricated counts ({key})"
-                )
-
     def test_severe_tile_carries_source_identities(
         self, client, analyst_headers
     ):
@@ -244,6 +228,156 @@ class TestSummaryTiles:
         ]
         assert workflow["analysis_state_new"] == 0
         assert workflow["analysis_state_assigned"] == 1
+
+
+# ---------------------------------------------------------------------------
+# The decision-domain tiles: EDIP remediation posture / risk register,
+# STANDARD regulatory pressure — read through the shipped tables
+# ---------------------------------------------------------------------------
+
+
+class TestDecisionDomainTiles:
+    def test_present_domains_render_true_zeros_when_data_absent(
+        self, client, analyst_headers
+    ):
+        """The decision domains are shipped upstream state: a domain present
+        with no rows renders its TRUE zeros. 'Unavailable' would claim the
+        data is absent — it is not; there simply are no decisions yet."""
+        payload = client.get("/api/ciso/summary", headers=analyst_headers).json()
+        assert payload["remediation_posture"]["status"] == "ok"
+        assert payload["remediation_posture"]["total_current_decisions"] == 0
+        assert payload["accepted_risk_register"]["status"] == "ok"
+        assert payload["accepted_risk_register"]["register_count"] == 0
+        assert payload["regulatory_pressure"]["status"] == "ok"
+        assert payload["regulatory_pressure"]["total_obligations"] == 0
+        # the stale not-present reasons are retired everywhere
+        assert "not_present" not in json.dumps(payload)
+
+    def test_remediation_posture_reads_edip_states_and_aging(
+        self, client, analyst_headers
+    ):
+        accepted = make_unscoreable_episode("CVE-2026-80012")
+        planned = make_unscoreable_episode("CVE-2026-80013")
+        closed = make_unscoreable_episode("CVE-2026-80023")
+        now = datetime.now(timezone.utc)
+        seed_edip_decision(
+            accepted["exposure_id"], state="accepted_risk",
+            decision_type="accept-risk",
+            review_due_at=now - timedelta(hours=1),
+        )
+        seed_edip_decision(
+            planned["exposure_id"], state="planned",
+            decision_type="remediate", due_at=now - timedelta(hours=2),
+        )
+        seed_edip_decision(
+            closed["exposure_id"], state="closed",
+            decision_type="remediate", closed_at=now,
+        )
+        # a replaced revision is history, not current
+        seed_edip_decision(
+            accepted["exposure_id"], state="needs_decision",
+            decision_type="remediate", replaced_at=now,
+        )
+
+        tile = client.get("/api/ciso/summary", headers=analyst_headers).json()[
+            "remediation_posture"
+        ]
+        assert tile["status"] == "ok"
+        assert tile["total_current_decisions"] == 3
+        assert tile["states"]["accepted_risk"] == 1
+        assert tile["states"]["planned"] == 1
+        assert tile["states"]["closed"] == 1
+        assert tile["overdue_open"] == 1
+        assert tile["review_expired"] == 1
+
+        # the review expiry is DERIVED here — Ch.8's effective-state
+        # materialization stays Ch.8's write
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT state FROM edip_decisions "
+                    "WHERE tenant_id = %s AND review_due_at IS NOT NULL;",
+                    (str(TENANT_A),),
+                )
+                assert cur.fetchone()["state"] == "accepted_risk"
+        assert audit_event_count("edip.review_expired") == 0
+
+    def test_accepted_risk_register_lists_active_dispositions(
+        self, client, analyst_headers
+    ):
+        accepted = make_unscoreable_episode("CVE-2026-80014")
+        deferred = make_unscoreable_episode("CVE-2026-80015")
+        now = datetime.now(timezone.utc)
+        accepted_id = seed_edip_decision(
+            accepted["exposure_id"], state="accepted_risk",
+            decision_type="accept-risk", owner="owner-a",
+            review_due_at=now + timedelta(days=90),
+        )
+        seed_edip_decision(
+            deferred["exposure_id"], state="deferred",
+            decision_type="defer", owner="owner-b",
+            review_due_at=now - timedelta(days=1),
+        )
+
+        tile = client.get("/api/ciso/summary", headers=analyst_headers).json()[
+            "accepted_risk_register"
+        ]
+        assert tile["status"] == "ok"
+        assert tile["register_count"] == 2
+        assert tile["truncated"] is False
+        row = next(
+            r for r in tile["register"] if r["decision_id"] == str(accepted_id)
+        )
+        # drill-down is identity, not copy
+        assert row["exposure_id"] == str(accepted["exposure_id"])
+        assert row["finding_id"] == str(accepted["finding_id"])
+        assert row["asset_id"] == str(accepted["asset_id"])
+        assert row["state"] == "accepted_risk"
+        assert row["owner"] == "owner-a"
+        assert row["review_expired"] is False
+        # the sealed snapshot the decision consumed — carried, never recomputed
+        assert row["snapshot_tes_state"] == "FINAL"
+        assert row["snapshot_formula_version"] == "tes-v1"
+        expired = next(
+            r for r in tile["register"] if r["state"] == "deferred"
+        )
+        assert expired["review_expired"] is True
+
+    def test_regulatory_pressure_reads_obligation_deadline_state(
+        self, client, analyst_headers
+    ):
+        now = datetime.now(timezone.utc)
+        overdue = seed_obligation(
+            {"incident_kind": "cyber_security_incident"},
+            state="open", due_at=now - timedelta(hours=2),
+        )
+        seed_obligation(state="in_progress", due_at=now + timedelta(days=1))
+        seed_obligation(
+            state="fulfilled", due_at=now - timedelta(hours=1),
+            fulfilled_at=now - timedelta(minutes=30),  # completed late
+        )
+        seed_obligation(
+            state="closed", due_at=now - timedelta(days=2),
+            breached_at=now - timedelta(days=1),
+        )
+
+        tile = client.get("/api/ciso/summary", headers=analyst_headers).json()[
+            "regulatory_pressure"
+        ]
+        assert tile["status"] == "ok"
+        assert tile["total_obligations"] == 4
+        assert tile["obligations_open"] == 1
+        assert tile["obligations_in_progress"] == 1
+        assert tile["obligations_fulfilled"] == 1
+        assert tile["obligations_closed"] == 1
+        # PATCH-12 derivations: overdue read-time, lateness survives closure,
+        # breach = recorded facts only
+        assert tile["overdue"] == 1
+        assert tile["completed_late"] == 1
+        assert tile["breached_recorded"] == 1
+        assert [r["obligation_id"] for r in tile["overdue_obligations"]] == [
+            str(overdue["obligation_id"])
+        ]
 
 
 def read_tile_value(exposure_id: uuid.UUID) -> dict | None:

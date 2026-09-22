@@ -171,6 +171,26 @@ def _esc(value: Any) -> str:
     return html.escape("" if value is None else str(value))
 
 
+def _decision_tile_summary(name: str, section: dict) -> str:
+    """The one-line render of a wired decision-domain tile (the counts come
+    from the sealed payload — this adds no numbers of its own)."""
+    if name == "remediation_posture":
+        return (
+            f"{section.get('total_current_decisions')} current decisions; "
+            f"{section.get('overdue_open')} overdue; "
+            f"{section.get('review_expired')} past review"
+        )
+    if name == "accepted_risk_register":
+        return (
+            f"{section.get('register_count')} accepted/deferred dispositions"
+        )
+    return (
+        f"{section.get('total_obligations')} obligations; "
+        f"{section.get('overdue')} overdue; "
+        f"{section.get('breached_recorded')} breached"
+    )
+
+
 def render_html(report_type: str, payload: dict, title: str) -> bytes:
     """Minimal, self-contained HTML rendered from the sealed payload. Every
     value is escaped; unavailable sections render 'unavailable', never a
@@ -217,11 +237,18 @@ def render_html(report_type: str, payload: dict, title: str) -> bytes:
     for name in ("remediation_posture", "accepted_risk_register",
                  "regulatory_pressure"):
         section = payload.get(name)
-        if isinstance(section, dict) and section.get("status") == "unavailable":
+        if not isinstance(section, dict):
+            continue
+        if section.get("status") == "unavailable":
             parts.append(
                 f"<p><strong>{_esc(name)}</strong>: unavailable "
                 f"({_esc(section.get('reason'))}) — no value is rendered, "
                 "because none is known.</p>"
+            )
+        elif section.get("status") == "ok":
+            parts.append(
+                f"<p><strong>{_esc(name)}</strong>: "
+                f"{_esc(_decision_tile_summary(name, section))}</p>"
             )
 
     parts.append("</body></html>")

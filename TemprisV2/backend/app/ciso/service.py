@@ -58,14 +58,20 @@ MAX_SEVERE_IDENTITIES = 25
 
 SNAPSHOT_LIST_LIMIT = 100
 
-# The upstream domains whose tiles need Chapters 8/9 (not part of the
-# integrated Ch.1-7 baseline this build runs on). They render UNAVAILABLE —
-# the PRD's fail-closed rendering rule — until their domains land; a zero
-# would read as "no accepted risks" / "no overdue obligations".
-DOMAIN_UNAVAILABLE = {
-    "edip": "chapter8_edip_domain_not_present",
-    "standard": "chapter9_standard_domain_not_present",
-}
+# Drill-down identity bound for the regulatory-pressure tile (oldest-overdue
+# first). REGISTER_LIMIT bounds the accepted/deferred risk register rows; a
+# bound that bites sets the tile's truncated flag — never a silent subset.
+MAX_OBLIGATION_IDENTITIES = 25
+REGISTER_LIMIT = 500
+
+# The shipped EDIP vocabulary (migration 030): the tile carries every state
+# zero-filled, so a missing state is never confused with an unrendered one.
+EDIP_STATES = (
+    "needs_decision", "planned", "in_progress", "mitigated", "verification",
+    "accepted_risk", "deferred", "closed", "superseded",
+)
+EDIP_TERMINAL_STATES = ("closed", "superseded")
+EDIP_ACTIVE_BRANCH_STATES = ("accepted_risk", "deferred")
 
 
 def _canonical_payload_json(payload: dict) -> str:
@@ -81,10 +87,6 @@ def _hash_payload(payload: dict) -> str:
     return hashlib.sha256(
         _canonical_payload_json(payload).encode("utf-8")
     ).hexdigest()
-
-
-def _unavailable(reason: str) -> dict:
-    return {"status": "unavailable", "reason": reason}
 
 
 def _tile_ok(**metrics) -> dict:
@@ -306,6 +308,224 @@ def _coverage_quality_tile(cur: psycopg.Cursor) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Inputs: decision domains (Ch.8 EDIP, Ch.9 STANDARD) — read-through only
+# ---------------------------------------------------------------------------
+
+
+def _remediation_posture_tile(
+    cur: psycopg.Cursor, tenant_id: uuid.UUID, as_of: datetime
+) -> dict:
+    """EDIP states/aging read through the decision revision chain: every
+    CURRENT decision (replaced_at IS NULL) counted per lifecycle state —
+    states absent from the tenant render as explicit zeros, never blanks.
+    Aging derives at read (no scheduler exists): overdue = a non-terminal
+    decision past its due_at; review-expired = an accepted/deferred decision
+    past review_due_at. Ch.8's effective-state MATERIALIZATION (the audited
+    revert to needs_decision) stays Ch.8's write — this tile derives the
+    flag and mutates nothing."""
+    cur.execute(
+        """
+        SELECT state,
+               COUNT(*) AS n,
+               COUNT(*) FILTER (
+                   WHERE due_at IS NOT NULL AND due_at < %s
+               ) AS overdue
+        FROM edip_decisions
+        WHERE tenant_id = %s AND replaced_at IS NULL
+        GROUP BY state;
+        """,
+        (as_of, str(tenant_id)),
+    )
+    by_state = {row["state"]: row for row in cur.fetchall()}
+
+    states = {state: 0 for state in EDIP_STATES}
+    total = 0
+    overdue_open = 0
+    for state, row in by_state.items():
+        states[state] = row["n"]
+        total += row["n"]
+        if state not in EDIP_TERMINAL_STATES:
+            overdue_open += row["overdue"]
+
+    review_expired = _count_review_expired(cur, tenant_id, as_of)
+
+    return _tile_ok(
+        total_current_decisions=total,
+        states=states,
+        overdue_open=overdue_open,
+        review_expired=review_expired,
+    )
+
+
+def _count_review_expired(
+    cur: psycopg.Cursor, tenant_id: uuid.UUID, as_of: datetime
+) -> int:
+    cur.execute(
+        """
+        SELECT COUNT(*) AS n
+        FROM edip_decisions
+        WHERE tenant_id = %s AND replaced_at IS NULL
+          AND state IN ('accepted_risk', 'deferred')
+          AND review_due_at IS NOT NULL AND review_due_at <= %s;
+        """,
+        (str(tenant_id), as_of),
+    )
+    return cur.fetchone()["n"]
+
+
+def _accepted_risk_register_tile(
+    cur: psycopg.Cursor, tenant_id: uuid.UUID, as_of: datetime
+) -> dict:
+    """The accepted/deferred risk register (from EDIP): every CURRENT
+    ACTIVE-branch disposition with the identity of the exposure it keeps
+    confirmed, its owner/rationale, the mandatory review date (expired
+    derived at read, never materialized here), and the sealed score snapshot
+    the decision consumed (carried as-is — §3.3.6 history, never recomputed).
+    The cap is defensive and visible via the truncated flag."""
+    cur.execute(
+        """
+        SELECT COUNT(*) AS n
+        FROM edip_decisions
+        WHERE tenant_id = %s AND replaced_at IS NULL
+          AND state IN ('accepted_risk', 'deferred');
+        """,
+        (str(tenant_id),),
+    )
+    total = cur.fetchone()["n"]
+
+    cur.execute(
+        """
+        SELECT d.id AS decision_id, d.decision_group_id, d.revision,
+               d.decision_type, d.state, d.owner, d.rationale, d.due_at,
+               d.review_due_at, d.mitigation_type, d.snapshot_as_of,
+               d.created_at, d.exposure_id,
+               d.consumed_snapshot->'value' AS snapshot_tes_value,
+               d.consumed_snapshot->'state' AS snapshot_tes_state,
+               d.consumed_snapshot->'formula_version'
+                   AS snapshot_formula_version,
+               e.finding_id, e.asset_id
+        FROM edip_decisions d
+        JOIN asset_exposures e
+          ON e.tenant_id = d.tenant_id AND e.id = d.exposure_id
+        WHERE d.tenant_id = %s AND d.replaced_at IS NULL
+          AND d.state IN ('accepted_risk', 'deferred')
+        ORDER BY d.review_due_at ASC NULLS LAST, d.created_at ASC, d.id ASC
+        LIMIT %s;
+        """,
+        (str(tenant_id), REGISTER_LIMIT),
+    )
+    register = [
+        {
+            "decision_id": str(row["decision_id"]),
+            "decision_group_id": str(row["decision_group_id"]),
+            "revision": row["revision"],
+            "decision_type": row["decision_type"],
+            "state": row["state"],
+            "owner": row["owner"],
+            "rationale": row["rationale"],
+            "due_at": row["due_at"],
+            "review_due_at": row["review_due_at"],
+            "review_expired": bool(
+                row["review_due_at"] is not None
+                and row["review_due_at"] <= as_of
+            ),
+            "mitigation_type": row["mitigation_type"],
+            "exposure_id": str(row["exposure_id"]),
+            "finding_id": str(row["finding_id"]),
+            "asset_id": str(row["asset_id"]),
+            "snapshot_as_of": row["snapshot_as_of"],
+            "snapshot_tes_value": row["snapshot_tes_value"],
+            "snapshot_tes_state": row["snapshot_tes_state"],
+            "snapshot_formula_version": row["snapshot_formula_version"],
+            "created_at": row["created_at"],
+        }
+        for row in cur.fetchall()
+    ]
+    return _tile_ok(
+        register_count=total,
+        register=register,
+        truncated=total > len(register),
+    )
+
+
+def _regulatory_pressure_tile(
+    cur: psycopg.Cursor, tenant_id: uuid.UUID, as_of: datetime
+) -> dict:
+    """Obligations overdue/breached read through the Ch.9 deadline contract
+    (PATCH-12): overdue derives at read (due_at < as_of while still
+    open/in_progress — no scheduler exists); completed-late derives
+    separately and survives closure; breached counts the breach RECORDS
+    materialized by STANDARD's own first observation — this tile writes
+    nothing and records nothing itself."""
+    cur.execute(
+        """
+        SELECT state,
+               COUNT(*) AS n,
+               COUNT(*) FILTER (
+                   WHERE state IN ('open', 'in_progress') AND due_at < %s
+               ) AS overdue,
+               COUNT(*) FILTER (
+                   WHERE fulfilled_at IS NOT NULL AND fulfilled_at > due_at
+               ) AS completed_late,
+               COUNT(*) FILTER (WHERE breached_at IS NOT NULL) AS breached
+        FROM standard_obligations
+        WHERE tenant_id = %s
+        GROUP BY state;
+        """,
+        (as_of, str(tenant_id)),
+    )
+    by_state = {row["state"]: row for row in cur.fetchall()}
+
+    states = {"open": 0, "in_progress": 0, "fulfilled": 0, "closed": 0}
+    total = 0
+    overdue = 0
+    completed_late = 0
+    breached = 0
+    for state, row in by_state.items():
+        states[state] = row["n"]
+        total += row["n"]
+        overdue += row["overdue"]
+        completed_late += row["completed_late"]
+        breached += row["breached"]
+
+    cur.execute(
+        """
+        SELECT id, kind, title, state, due_at, trigger_at, breached_at
+        FROM standard_obligations
+        WHERE tenant_id = %s
+          AND state IN ('open', 'in_progress') AND due_at < %s
+        ORDER BY due_at ASC, id ASC
+        LIMIT %s;
+        """,
+        (str(tenant_id), as_of, MAX_OBLIGATION_IDENTITIES),
+    )
+    overdue_obligations = [
+        {
+            "obligation_id": str(row["id"]),
+            "kind": row["kind"],
+            "title": row["title"],
+            "state": row["state"],
+            "due_at": row["due_at"],
+            "trigger_at": row["trigger_at"],
+            "breached_at": row["breached_at"],
+        }
+        for row in cur.fetchall()
+    ]
+
+    return _tile_ok(
+        total_obligations=total,
+        obligations_open=states["open"],
+        obligations_in_progress=states["in_progress"],
+        obligations_fulfilled=states["fulfilled"],
+        obligations_closed=states["closed"],
+        overdue=overdue,
+        breached_recorded=breached,
+        completed_late=completed_late,
+        overdue_obligations=overdue_obligations,
+    )
+
+
+# ---------------------------------------------------------------------------
 # The executive summary (one coherent source view)
 # ---------------------------------------------------------------------------
 
@@ -344,6 +564,38 @@ def build_executive_summary(
             "unknown = never synced, healthy = healthy with at least one "
             "successful sync."
         ),
+        "remediation_states": (
+            "Counts of CURRENT EDIP decisions (replaced_at IS NULL) per "
+            "lifecycle state — every shipped state renders, zero-filled; "
+            "aging (overdue/review-expired) derives at read against as_of "
+            "and Ch.8's effective-state materialization stays Ch.8's write."
+        ),
+        "remediation_overdue_open": (
+            "Count of current non-terminal EDIP decisions whose due_at is "
+            "before as_of — read-time derivation, never a fabricated zero."
+        ),
+        "accepted_risk_register": (
+            "Current EDIP accepted/deferred dispositions with the identity "
+            "of the exposure each keeps confirmed, its owner, rationale, "
+            "mandatory review date (expiry derived at read), and the sealed "
+            "score snapshot the decision consumed — carried, never "
+            "recomputed."
+        ),
+        "regulatory_overdue": (
+            "Count of STANDARD obligations still open/in_progress whose "
+            "due_at is before as_of (PATCH-12 read-time derivation; no "
+            "scheduler exists)."
+        ),
+        "regulatory_breached_recorded": (
+            "Count of obligations carrying a breached_at materialized by "
+            "STANDARD's own first observation — recorded facts carried "
+            "through; this projection records nothing."
+        ),
+        "regulatory_completed_late": (
+            "Count of obligations whose fulfilled_at is after their due_at "
+            "— derives separately from overdue and survives closure "
+            "(PATCH-12 lateness rule)."
+        ),
     }
 
     severe_tile, exposure_refs = _severe_exposures_tile(conn, tenant_id, as_of)
@@ -351,6 +603,9 @@ def build_executive_summary(
     with conn.cursor(row_factory=dict_row) as cur:
         workflow_tile = _workflow_posture_tile(cur, tenant_id)
         coverage_tile = _coverage_quality_tile(cur)
+        remediation_tile = _remediation_posture_tile(cur, tenant_id, as_of)
+        register_tile = _accepted_risk_register_tile(cur, tenant_id, as_of)
+        regulatory_tile = _regulatory_pressure_tile(cur, tenant_id, as_of)
 
     feed_refs = [
         {"source": f["source"], "last_good_snapshot_id": f["last_good_snapshot_id"]}
@@ -366,12 +621,13 @@ def build_executive_summary(
         "severe_exposures": severe_tile,
         "workflow_posture": workflow_tile,
         "coverage_quality": coverage_tile,
-        # Upstream decision domains (Ch.8 EDIP / Ch.9 STANDARD) are not part
-        # of the integrated baseline this build runs on: their tiles render
-        # UNAVAILABLE — loudly — never zero.
-        "remediation_posture": _unavailable(DOMAIN_UNAVAILABLE["edip"]),
-        "accepted_risk_register": _unavailable(DOMAIN_UNAVAILABLE["edip"]),
-        "regulatory_pressure": _unavailable(DOMAIN_UNAVAILABLE["standard"]),
+        # The decision domains (Ch.8 EDIP / Ch.9 STANDARD) are shipped
+        # upstream state: their tiles read through, with counts+max rules
+        # binding here too — a domain present with no rows renders its true
+        # zeros; aging derives at read and never mutates upstream.
+        "remediation_posture": remediation_tile,
+        "accepted_risk_register": register_tile,
+        "regulatory_pressure": regulatory_tile,
     }
     source_refs = {
         "exposures": exposure_refs,

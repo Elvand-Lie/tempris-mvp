@@ -7,10 +7,11 @@ Covers: a successful chat that answers as labeled INTERPRETATION with
 server-built citations to the exact source objects it was given; the
 fail-closed contract (unconfigured, misconfigured model, missing key,
 timeout, upstream HTTP error, malformed body — always 503 'unavailable',
-never invented numbers); secret non-leakage (the API key appears nowhere
-outside the outbound Authorization header); tenant-scoped context; the
-input bound; and the write-guard (no upstream state, only the tenant's
-own audit event).
+never invented numbers); the empty-completion transient of the free model
+tier mapped to the retryable 409 shape (never filled in); secret
+non-leakage (the API key appears nowhere outside the outbound
+Authorization header); tenant-scoped context; the input bound; and the
+write-guard (no upstream state, only the tenant's own audit event).
 
 The provider is exercised through httpx.MockTransport substituted for the
 client factory (the vuln-plane fetch clients' injection posture) — the
@@ -271,12 +272,11 @@ class TestChatFailsClosed:
             {"choices": []},
             {"choices": [{}]},
             {"choices": [{"message": {"content": None}}]},
-            {"choices": [{"message": {"content": "   "}}]},
             {"choices": [{"message": {"content": 42}}]},
         ],
         ids=[
             "non-json", "empty-object", "no-choices", "empty-choice",
-            "null-content", "blank-content", "non-string-content",
+            "null-content", "non-string-content",
         ],
     )
     def test_malformed_response_fails_closed(
@@ -292,6 +292,71 @@ class TestChatFailsClosed:
         )
         assert r.status_code == 503
         assert r.json()["detail"]["code"] == "llm_unavailable"
+
+
+# ---------------------------------------------------------------------------
+# Empty completion on HTTP 200: retryable, never filled in
+# ---------------------------------------------------------------------------
+
+
+def _empty_completion(content):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "id": "chatcmpl-empty",
+            "model": LLM_ENV["SPEAK_LLM_MODEL"],
+            "choices": [{
+                "index": 0, "finish_reason": "stop",
+                "message": {"role": "assistant", "content": content},
+            }],
+        })
+    return handler
+
+
+class TestEmptyCompletionIsRetryable:
+    """The proven production defect: the free model tier sometimes answers
+    HTTP 200 with an empty completion. It is a retryable conflict in the
+    tes_read_conflict envelope — never a bare 503 'malformed' and never a
+    gap filled with an invented answer."""
+
+    @pytest.mark.parametrize("content", ["", "   "], ids=["empty", "blank"])
+    def test_empty_content_maps_to_retryable_409(
+        self, client, analyst_headers, configured_env, monkeypatch, content
+    ):
+        _mock_provider(monkeypatch, _empty_completion(content))
+        r = client.post(
+            "/api/speak/chat",
+            json={"message": "What is our worst exposure and why?"},
+            headers=analyst_headers,
+        )
+        assert r.status_code == 409, r.text
+        detail = r.json()["detail"]
+        assert detail["code"] == "llm_empty_response"
+        assert detail["retry"] is True
+        # fail-closed: nothing written, nothing invented
+        assert audit_event_count("speak.chat_completed") == 0
+
+    def test_extractor_distinguishes_blank_from_malformed(self):
+        """Direct extractor contract: structural malformation is None (→ 503
+        malformed); a present-but-empty content string is returned for the
+        caller to classify as retryable-empty."""
+        assert speak_llm._extract_content(
+            {"choices": [{"message": {"content": ""}}]}
+        ) == ""
+        assert speak_llm._extract_content(
+            {"choices": [{"message": {"content": "  "}}]}
+        ) == "  "
+        assert speak_llm._extract_content(
+            {"choices": [{"message": {"content": None}}]}
+        ) is None
+        assert speak_llm._extract_content(
+            {"choices": [{"message": {"content": 42}}]}
+        ) is None
+        assert speak_llm._extract_content({"choices": []}) is None
+        assert speak_llm._extract_content({}) is None
+        assert speak_llm._extract_content("not json") is None
+        assert speak_llm._extract_content(
+            {"choices": [{"message": {"content": "answer"}}]}
+        ) == "answer"
 
 
 # ---------------------------------------------------------------------------

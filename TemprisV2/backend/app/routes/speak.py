@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
+import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -23,6 +24,7 @@ from app.exposure.exceptions import ExposureConflictError
 from app.speak import service
 from app.speak.errors import (
     ArtifactIntegrityError,
+    LlmEmptyResponseError,
     LlmUnavailableError,
     PromptInjectionBlockedError,
     ReportNotFoundError,
@@ -83,14 +85,18 @@ _STATUS_BY_ERROR = {
     ScopeValidationError: status.HTTP_422_UNPROCESSABLE_ENTITY,
     ArtifactIntegrityError: status.HTTP_409_CONFLICT,
     LlmUnavailableError: status.HTTP_503_SERVICE_UNAVAILABLE,
+    LlmEmptyResponseError: status.HTTP_409_CONFLICT,
     PromptInjectionBlockedError: status.HTTP_422_UNPROCESSABLE_ENTITY,
 }
 
 
 def _http_error(e: SpeakError) -> HTTPException:
+    detail = {"code": e.code, "message": str(e)}
+    if getattr(e, "retry", False):
+        detail["retry"] = True
     return HTTPException(
         status_code=_STATUS_BY_ERROR.get(type(e), status.HTTP_422_UNPROCESSABLE_ENTITY),
-        detail={"code": e.code, "message": str(e)},
+        detail=detail,
     )
 
 
@@ -147,6 +153,16 @@ def generate_report(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "tes_read_conflict", "message": str(e), "retry": True},
         )
+    except psycopg.errors.SerializationFailure as e:
+        # audit.py raises this instead of re-chaining from a provably stale
+        # head when the tenant's audit chain advanced inside this REPEATABLE
+        # READ boundary. The publication rolls back whole and a fresh
+        # attempt reads a new snapshot — the same retryable 409 shape as
+        # tes_read_conflict, never a bare 500. The audit chain is untouched.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "tes_read_conflict", "message": str(e), "retry": True},
+        )
 
 
 @router.post(
@@ -171,6 +187,16 @@ def regenerate_report(
     except SpeakError as e:
         raise _http_error(e)
     except ExposureConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "tes_read_conflict", "message": str(e), "retry": True},
+        )
+    except psycopg.errors.SerializationFailure as e:
+        # audit.py raises this instead of re-chaining from a provably stale
+        # head when the tenant's audit chain advanced inside this REPEATABLE
+        # READ boundary. The publication rolls back whole and a fresh
+        # attempt reads a new snapshot — the same retryable 409 shape as
+        # tes_read_conflict, never a bare 500. The audit chain is untouched.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "tes_read_conflict", "message": str(e), "retry": True},

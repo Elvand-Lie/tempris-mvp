@@ -23,7 +23,7 @@ from typing import Optional
 import httpx
 
 from app.config import SpeakLlmConfig
-from app.speak.errors import LlmUnavailableError
+from app.speak.errors import LlmEmptyResponseError, LlmUnavailableError
 
 # Bounded, fail-fast budget for one chat turn.
 _LLM_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
@@ -35,6 +35,10 @@ _MSG_UNREACHABLE = (
 _MSG_UPSTREAM = "SPEAK AI surface is unavailable: the LLM provider returned an error"
 _MSG_MALFORMED = (
     "SPEAK AI surface is unavailable: the LLM provider response was malformed"
+)
+_MSG_EMPTY = (
+    "SPEAK AI surface is unavailable: the LLM provider returned an empty "
+    "completion (retryable)"
 )
 
 
@@ -76,8 +80,11 @@ def build_chat_messages(question: str, context_payload: dict) -> list[dict]:
 
 
 def _extract_content(data) -> Optional[str]:
-    """Strictly parse the OpenAI-compatible completion body. Anything but a
-    non-empty string answer is malformed (fail closed, never guess)."""
+    """Strictly parse the OpenAI-compatible completion body. Returns None
+    for a STRUCTURALLY malformed body; a present-but-empty content string
+    is returned as-is for the caller to classify — an empty answer is a
+    retryable provider transient, not a malformed body (fail closed either
+    way, never guess)."""
     if not isinstance(data, dict):
         return None
     choices = data.get("choices")
@@ -90,7 +97,7 @@ def _extract_content(data) -> Optional[str]:
     if not isinstance(message, dict):
         return None
     content = message.get("content")
-    if not isinstance(content, str) or not content.strip():
+    if not isinstance(content, str):
         return None
     return content
 
@@ -124,4 +131,9 @@ def chat_completion(
     content = _extract_content(data)
     if content is None:
         raise LlmUnavailableError(_MSG_MALFORMED)
+    if not content.strip():
+        # HTTP 200 with an empty answer — the known free-model-tier
+        # transient. Retryable, and still fail-closed: the empty turn is
+        # surfaced, never filled with an invented answer.
+        raise LlmEmptyResponseError(_MSG_EMPTY)
     return content
