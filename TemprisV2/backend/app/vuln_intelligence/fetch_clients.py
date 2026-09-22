@@ -737,6 +737,15 @@ class KevFetchClient:
                         # snapshot belongs to the ABANDONED catalog and must
                         # be discarded (fresh snapshot at batch 0).
                         artifact_restarted = True
+                    else:
+                        # Identical catalog: honor the cursor's native
+                        # position — resume at the stored entry offset and
+                        # carry the seen_ids accumulated across prior
+                        # rounds (PRD Ch.1 §1.4 #2). Without this resume the
+                        # artifact can never exhaust: every round re-reads
+                        # batch 0 until the engine's round cap fires.
+                        offset = int(cursor_dict.get("entry_offset", 0))
+                        previous_seen_ids = list(cursor_dict.get("seen_ids", []))
 
                 batch_records = vulnerabilities[offset : offset + batch_size]
                 new_seen_ids = [v.get("cveID") for v in batch_records if v.get("cveID")]
