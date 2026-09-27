@@ -24,8 +24,84 @@ import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
+from app.collector_registry import collector_registry
 from app.db import get_db_connection
-from tests.conftest import TENANT_A
+
+
+class FakeStrikeSocket:
+    """Stands in for the collector's WSS: captured STRIKE_JOB frames resolve
+    their in-flight future with the next scripted result (or the default
+    completed result), exactly like the real collector daemon would."""
+
+    def __init__(self, completed_result=None):
+        self.sent_frames = []
+        self.script = []
+        self._default = completed_result or {
+            "job_id": None,  # filled from the frame
+            "status": "completed",
+            "exit_code": 0,
+            "stdout": "HTTP/1.1 200 OK\n",
+            "stderr": "",
+            "stdout_bytes": 15,
+            "stderr_bytes": 0,
+            "started_at": "2026-09-24T00:00:00Z",
+            "completed_at": "2026-09-24T00:00:01Z",
+            "error_message": None,
+        }
+
+    async def send_text(self, payload: str) -> None:
+        import json as _json
+
+        frame = _json.loads(payload)
+        self.sent_frames.append(frame)
+        if frame.get("type") != "STRIKE_JOB":
+            return
+        result = dict(self.script.pop(0)) if self.script else dict(self._default)
+        result["job_id"] = frame["job_id"]
+        collector_registry.handle_strike_job_result(self.collector_id, result)
+
+    # test scripting helpers
+    collector_id = None
+
+
+def make_fake_collector(tenant_id: str, *, name="fake-collector") -> dict:
+    """DB row (enrolled, active) + live registry session with a fake socket.
+    Returns {'id', 'socket', 'session'}."""
+    collector_id = uuid.uuid4()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO collectors (id, tenant_id, name, description,
+                    enrollment_status, operator_status, public_key)
+                VALUES (%s, %s, %s, 'strike test collector', 'enrolled',
+                    'active', 'dGVzdC1rZXk=')
+                ON CONFLICT (id) DO NOTHING;
+                """,
+                (str(collector_id), str(tenant_id), name),
+            )
+        conn.commit()
+
+    socket = FakeStrikeSocket()
+    socket.collector_id = collector_id
+    session = collector_registry.register_session(
+        collector_id=collector_id,
+        tenant_id=uuid.UUID(str(tenant_id)),
+        websocket=socket,
+        operator_status="active",
+    )
+    session.capabilities = {
+        "curl": {"available": True, "version": "8.5.0", "status": "ready"}
+    }
+    return {"id": collector_id, "socket": socket, "session": session}
+
+
+def remove_fake_collector(handle: dict) -> None:
+    collector_registry.unregister_session(handle["id"], reason="test teardown")
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM collectors WHERE id = %s;", (str(handle["id"]),))
+        conn.commit()
 
 
 def make_strike_app() -> FastAPI:
@@ -45,7 +121,8 @@ def clean_strike_tables() -> None:
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "TRUNCATE strike_evidence_links, strike_artifacts, "
+                "TRUNCATE strike_run_output_chunks, strike_runs, strike_testing_scopes, "
+                "strike_evidence_links, strike_artifacts, "
                 "strike_operations, strike_relays, strike_workspaces, "
                 "strike_targets, strike_engagements, strike_abilities;"
             )
@@ -79,7 +156,6 @@ def iso(dt: datetime) -> str:
 
 def engagement_payload(
     *,
-    requested_by_note: str = "roe v1",
     valid_from: datetime | None = None,
     valid_until: datetime | None = None,
     ttl: timedelta = timedelta(days=30),
@@ -87,6 +163,8 @@ def engagement_payload(
     asset_id: uuid.UUID | None = None,
 ) -> dict:
     now = datetime.now(timezone.utc)
+    start = valid_from or (now - timedelta(hours=1))
+    end = valid_until or (now + ttl)
     return {
         "title": "Validation engagement for CVE-2026-70001",
         "purpose": "Controlled validation of the confirmed exposure",
@@ -96,102 +174,11 @@ def engagement_payload(
             "credential_rules": "no credentialed execution",
             "cleanup": "workspace destroyed after completion",
             "stop_conditions": ["any out-of-scope error"],
-            "note": requested_by_note,
+            # the ROE's declared window must equal the engagement window below
+            "time_window": {"valid_from": iso(start), "valid_until": iso(end)},
         },
-        "valid_from": iso(valid_from or (now - timedelta(hours=1))),
-        "valid_until": iso(valid_until or (now + ttl)),
+        "valid_from": iso(start),
+        "valid_until": iso(end),
         **({"finding_id": str(finding_id)} if finding_id else {}),
         **({"asset_id": str(asset_id)} if asset_id else {}),
     }
-
-
-def seed_ability(
-    slug: str = "http-probe",
-    engine: str = "http",
-    title: str = "HTTP probe",
-    active: bool = True,
-) -> uuid.UUID:
-    """Insert an allowlisted ability directly (catalog governance is open
-    decision #6 — there is no registration endpoint to drive)."""
-    ability_id = uuid.uuid4()
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO strike_abilities (id, slug, title, engine, version, active)
-                VALUES (%s, %s, %s, %s, '1.0.0', %s);
-                """,
-                (str(ability_id), slug, title, engine, active),
-            )
-        conn.commit()
-    return ability_id
-
-
-def create_engagement(
-    strike_client,
-    analyst_headers,
-    *,
-    finding_id=None,
-    asset_id=None,
-    ttl: timedelta = timedelta(days=30),
-    valid_until: datetime | None = None,
-) -> dict:
-    payload = engagement_payload(
-        finding_id=finding_id, asset_id=asset_id,
-        ttl=ttl, valid_until=valid_until,
-    )
-    r = strike_client.post("/api/strike/engagements", json=payload, headers=analyst_headers)
-    assert r.status_code == 201, r.text
-    return r.json()
-
-
-def take_engagement_active(
-    strike_client,
-    analyst_headers,
-    admin_headers,
-    *,
-    target_value: str = "10.0.0.60",
-    target_ttl: timedelta = timedelta(days=7),
-    asset_id=None,
-    finding_id=None,
-) -> dict:
-    """drive one engagement: create → submit → approve → target → approve →
-    activate. Returns {engagement_id, target_id}."""
-    engagement = create_engagement(
-        strike_client, analyst_headers, asset_id=asset_id, finding_id=finding_id
-    )
-    engagement_id = engagement["id"]
-    r = strike_client.post(
-        f"/api/strike/engagements/{engagement_id}/submit", headers=analyst_headers
-    )
-    assert r.status_code == 201, r.text
-    r = strike_client.post(
-        f"/api/strike/engagements/{engagement_id}/approve",
-        json={}, headers=admin_headers,
-    )
-    assert r.status_code == 200, r.text
-
-    now = datetime.now(timezone.utc)
-    r = strike_client.post(
-        f"/api/strike/engagements/{engagement_id}/targets",
-        json={
-            "target_type": "ip",
-            "target_value": target_value,
-            "normalized_target": target_value,
-            "purpose": "controlled validation",
-            "expires_at": iso(now + target_ttl),
-        },
-        headers=analyst_headers,
-    )
-    assert r.status_code == 201, r.text
-    target_id = r.json()["target"]["id"]
-    r = strike_client.post(
-        f"/api/strike/targets/{target_id}/approve", json={}, headers=admin_headers
-    )
-    assert r.status_code == 200, r.text
-
-    r = strike_client.post(
-        f"/api/strike/engagements/{engagement_id}/activate", headers=analyst_headers
-    )
-    assert r.status_code == 200, r.text
-    return {"engagement_id": engagement_id, "target_id": target_id}

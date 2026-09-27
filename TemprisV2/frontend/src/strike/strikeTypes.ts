@@ -1,110 +1,112 @@
 // frontend/src/strike/strikeTypes.ts
-// STRIKE domain types (PRD-000 v1.11 Ch.4) — domain-local so the shared
-// types.ts stays untouched by this changeset.
+// STRIKE toolbox run types (amended PRD v1.12 Ch.4: choose-tool → run →
+// results). The legacy engagement/workspace types are retired with the
+// superseded model; historical V2 rows stay backend-only.
 
-export type StrikeEngagementState =
-  | 'draft'
-  | 'pending_approval'
-  | 'authorized'
-  | 'active'
-  | 'completed'
-  | 'aborted';
+export interface StrikeCapability {
+  capability: string;
+  title: string;
+  methods: string[];
+  routine_mode: boolean;
+  requires_approval: boolean;
+  runnable: boolean;
+  /** true = the tool only exists on a collector (no VPS plane) */
+  requires_collector: boolean;
+  planes: string[];
+  notes: string;
+}
 
-export interface StrikeEngagement {
+/**
+ * A testing-scope registry entry. Authorization is scope-based, NOT
+ * asset-based: any target covered by an ACTIVE entry is runnable, whether or
+ * not it is a registered Tempris asset. `state` is DERIVED AT READ by the
+ * server (revocation/expiry are never back-written), so it is the only
+ * truth about whether an entry authorizes anything right now.
+ */
+export type StrikeScopeState = 'active' | 'expired' | 'revoked';
+
+export interface StrikeScopeEntry {
   id: string;
   tenant_id: string;
-  title: string;
-  purpose: string;
-  roe: Record<string, unknown>;
-  roe_version: string;
-  valid_from: string;
-  valid_until: string;
-  state: StrikeEngagementState;
-  requested_by: string;
-  requested_role: string;
-  approval_id: string | null;
-  finding_id: string | null;
-  asset_id: string | null;
-  derived_expired: boolean;
+  entry_kind: 'hostname' | 'ip' | 'cidr';
+  /** Canonical, normalized rendering of the exact entry (never a raw string). */
+  value: string;
+  note: string | null;
+  created_by: string;
   created_at: string;
-}
-
-export interface StrikeTarget {
-  id: string;
-  engagement_id: string;
-  target_type: string;
-  target_value: string;
-  normalized_target: string;
-  purpose: string;
-  state: 'pending' | 'approved' | 'revoked';
   expires_at: string;
-  authorization_version: number;
-  derived_expired: boolean;
+  revoked_at: string | null;
+  revoked_by: string | null;
+  revoke_reason: string | null;
+  state: StrikeScopeState;
+}
+
+export interface StrikeRunPolicySnapshot {
+  scope_entry_ids: string[];
+  pinned_ips: string[];
+  /** nmap: the authorized IP/CIDR set; dig: the pinned lookup name */
+  pinned_targets?: string[];
+  record_type?: string;
+  hostname: string | null;
+  collector_id?: string;
+  execution_plane?: string;
+}
+
+export type StrikeRunState =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancel_requested'
+  | 'cancelled'
+  | 'cancel_unconfirmed';
+
+export interface StrikeRun {
+  id: string;
+  tenant_id: string;
+  capability: string;
+  method: string;
+  target_url: string | null;
+  target_host: string;
+  target_port: number;
+  state: StrikeRunState;
+  stop_reason: string | null;
+  policy_snapshot: StrikeRunPolicySnapshot;
   requested_by: string;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  exit_code: number | null;
+  error_code: string | null;
+  inline_result: string | null;
+  inline_truncated: boolean;
+  raw_purge_after: string | null;
+  runner_id: string | null;
+  /** 'server' = the platform sandbox, 'collector' = an enrolled collector. */
+  execution_plane?: string;
 }
 
-export interface StrikeWorkspace {
-  id: string;
-  engagement_id: string;
-  generation: number;
-  state:
-    | 'provisioning'
-    | 'ready'
-    | 'in_use'
-    | 'collecting'
-    | 'destroying'
-    | 'destroyed'
-    | 'destroy_failed'
-    | 'provision_failed';
-  provider: string | null;
-  provider_workspace_ref: string | null;
-  egress_generation: number;
-  last_error: string | null;
-  reserved_at: string;
-  destroyed_at: string | null;
-}
+/** The three output streams the server records. `system` carries lifecycle. */
+export type StrikeChunkStream = 'stdout' | 'stderr' | 'system';
 
-export interface StrikeOperation {
-  id: string;
-  engagement_id: string;
-  workspace_id: string;
-  target_id: string;
-  ability_id: string;
-  ability_slug?: string;
-  target_value?: string;
-  state:
-    | 'dispatched'
-    | 'running'
-    | 'cancelling'
-    | 'completed'
-    | 'failed'
-    | 'cancelled'
-    | 'cancel_unconfirmed';
-  outcome: string | null;
-  engine: string;
-  engine_operation_ref: string | null;
-  output_summary: string | null;
-  dispatched_at: string;
-}
-
-export interface StrikeEvidenceLink {
-  id: string;
-  engagement_id: string;
-  operation_id: string;
-  exposure_id: string;
-  evidence_record_id: string;
-  evidence_kind: 'observed_exploitation' | 'controlled_validation';
-  reviewed_by: string;
-  attestation: string;
-  observed_at: string;
+export interface StrikeRunChunk {
+  seq: number;
+  stream: StrikeChunkStream;
+  content: string;
   created_at: string;
 }
 
-export interface StrikeEngagementDetail extends StrikeEngagement {
-  targets?: StrikeTarget[];
-}
-
-export interface ErrorDetail {
-  code?: string;
-  message?: string;
+/**
+ * One page of a run's output after a cursor. `next_cursor` is the seq of the
+ * last chunk so a poll never re-delivers or skips, and `terminal` says whether
+ * the run has stopped moving — the console stops polling on it.
+ */
+export interface StrikeRunChunkPage {
+  run_id: string;
+  state: StrikeRunState;
+  chunks: StrikeRunChunk[];
+  next_cursor: number;
+  inline_result: string | null;
+  inline_truncated: boolean;
+  terminal: boolean;
 }

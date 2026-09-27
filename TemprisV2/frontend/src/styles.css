@@ -3339,3 +3339,380 @@ h1, h2, h3, h4 {
 @media (max-width: 1100px) {
   .intake-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ===== STANDARD (V1 port) ===== */
+/* Visual system ported from V1's Standard + GRC pages (tabbed module
+   header, stat cards, status chips) — recreated without Tailwind. */
+
+.std-console {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 1200px;
+}
+
+.std-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.std-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--accent-governance);
+  margin-bottom: 4px;
+}
+
+.std-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.std-tagline {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  max-width: 640px;
+}
+
+.std-stats .stat-card::before {
+  background: var(--accent-governance);
+}
+
+/* Tab bar — active underline style from V1 */
+.std-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border-color);
+  width: fit-content;
+}
+
+.std-tab {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 10px 16px 8px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.std-tab:hover {
+  color: var(--text-secondary);
+}
+
+.std-tab:focus-visible {
+  outline: 1px solid var(--border-focus);
+  outline-offset: -1px;
+}
+
+.std-tab-active,
+.std-tab-active:hover {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent-governance);
+}
+
+.std-tabpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.std-panel-caption {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+/* Status chips — semantic tones (V1 GRC pill style) */
+.std-chip {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+
+.std-chip-success { color: var(--color-success); background: var(--color-success-bg); border-color: rgba(59, 179, 126, 0.3); }
+.std-chip-warning { color: var(--color-warning); background: var(--color-warning-bg); border-color: rgba(217, 161, 59, 0.3); }
+.std-chip-danger  { color: var(--color-danger);  background: var(--color-danger-bg);  border-color: rgba(224, 85, 72, 0.3); }
+.std-chip-info    { color: var(--color-info);    background: var(--color-info-bg);    border-color: rgba(94, 162, 236, 0.3); }
+.std-chip-muted   { color: var(--text-muted);    background: var(--bg-hover);         border-color: var(--border-color); }
+
+/* Framework cards — V1 Standard glass-panel stat style */
+.std-framework-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+@media (min-width: 1100px) {
+  .std-framework-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.std-framework-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  box-shadow: var(--shadow);
+  transition: border-color 0.12s ease;
+}
+
+.std-framework-card:hover {
+  border-color: var(--border-strong);
+}
+
+.std-framework-name {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.std-score-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.std-score {
+  font-family: var(--font-mono);
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.std-score-caption {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.std-coverage {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.std-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.std-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--color-primary), var(--accent-governance));
+  transition: width 0.5s ease;
+}
+
+.std-control-list {
+  list-style: none;
+  margin-top: 14px;
+  border-top: 1px solid var(--border-color);
+}
+
+.std-control-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.std-control-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.std-control-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.std-control-code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--accent-governance);
+}
+
+.std-control-title {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.std-control-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.std-incident-detail {
+  border-top: 1px solid var(--border-color);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.std-detail-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.std-detail-list > li {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 800px) {
+  .std-header { flex-direction: column; }
+  .std-control-row { flex-direction: column; }
+  .std-control-side { justify-content: flex-start; }
+  .std-workbench-grid { grid-template-columns: 1fr; }
+}
+
+/* STANDARD workbench additions — SOP Builder per-control workbench,
+ * policy/exception forms, draft panels (std-* in kind, no new language) */
+.std-workbench-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.std-control-workbench {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.std-row-selected td {
+  background: var(--panel-contrast, rgba(127, 127, 127, 0.08));
+}
+
+.std-form-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.std-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.std-draft-panel {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.std-draft-panel iframe,
+.std-draft-panel img {
+  max-width: 100%;
+  min-height: 160px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: #fff;
+}
+
+/* SYNTHESIS console — analyst-facing correlation surface (append-only, syn-*) */
+.syn-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.syn-chip-status {
+  font-size: 0.78em;
+  opacity: 0.85;
+  border-left: 1px solid currentColor;
+  padding-left: 8px;
+}
+.syn-chip-zero .syn-chip-status { opacity: 0.7; }
+.syn-chip-insufficient .syn-chip-status { opacity: 0.7; font-style: italic; }
+.syn-chip-degraded .syn-chip-status { font-weight: 600; }
+
+.syn-table td { vertical-align: top; }
+.syn-consequence { font-size: 0.92em; }
+
+.syn-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 1px 6px 1px 0;
+  padding: 1px 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.82em;
+  background: none;
+  border: 1px solid var(--border-color, #ccc);
+  border-radius: 4px;
+  cursor: pointer;
+  color: inherit;
+}
+.syn-id:hover { border-color: currentColor; }
+.syn-badge {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 5px;
+  font-size: 0.72em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border-radius: 3px;
+  background: rgba(127, 127, 127, 0.15);
+}
+.syn-empty-degraded { color: var(--danger-color, #b00); }
+.syn-how {
+  margin-top: 12px;
+  border-top: 1px solid var(--border-color, #ddd);
+  padding-top: 8px;
+}
+.syn-how-summary { cursor: pointer; }
+.syn-how-definition { font-size: 0.92em; margin: 6px 0; }

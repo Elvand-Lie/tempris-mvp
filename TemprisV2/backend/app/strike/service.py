@@ -181,7 +181,7 @@ def create_engagement(
             """,
             (
                 str(tenant_id), data.title, data.purpose,
-                json.dumps(data.roe), "1",
+                json.dumps(data.roe.model_dump(mode="json")), "1",
                 data.valid_from, data.valid_until,
                 actor_id, actor_role,
                 str(data.finding_id) if data.finding_id else None,

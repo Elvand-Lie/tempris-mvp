@@ -26,7 +26,7 @@ import inspect
 import uuid
 from typing import Callable
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.approvals import (
@@ -41,6 +41,7 @@ from app.approvals import (
     decide_and_apply,
 )
 from app.auth import AuthContext, require_module, require_roles
+from app.collector_registry import collector_registry
 from app.db import get_db_connection
 from app.exposure.exceptions import (
     EntityNotFoundError,
@@ -54,8 +55,11 @@ from app.intake.errors import IntakeEventConflictError
 from app.strike import evidence as strike_evidence
 from app.strike import operations as strike_operations
 from app.strike import relays as strike_relays
+from app.strike import runs as strike_runs
+from app.strike import scopes as strike_scopes
 from app.strike import service as strike_service
 from app.strike import workspaces as strike_workspaces
+from app.strike.server_runner import execute_server_run
 
 # import side effect: registers the strike_engagement / strike_target
 # subject types with the Chapter 5 approval primitive
@@ -94,6 +98,18 @@ from app.strike.models import (
     TargetCreate,
     WorkspaceReserve,
 )
+from app.strike.runs import (
+    CollectorInvalidError,
+    CollectorNotReadyError,
+    DEFAULT_MAX_TIME_SECONDS,
+    RunCreate,
+)
+from app.strike.scopes import (
+    ScopeEntryCreate,
+    ScopeEntryNotFoundError,
+    ScopeEntryRevoke,
+    ScopeEntryStateError,
+)
 
 # registration side effect: the strike_engagement / strike_target subject
 # types become consumable the moment this router module is imported — which
@@ -119,6 +135,24 @@ class ReconcileIn(BaseModel):
 
     confirmed_fenced: bool
     note: str = Field(..., min_length=1, max_length=4000)
+
+
+def _refuse_legacy_mutation() -> None:
+    """The v1.12 toolbox model supersedes the engagement-scoped chain: no
+    NEW legacy engagement/target/workspace/operation/relay state may be
+    created — there is no opt-back. Reads, history, and safety actions on
+    existing rows stay available; historical data is never deleted."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "code": "legacy_strike_model_superseded",
+            "message": (
+                "The engagement-scoped STRIKE model is superseded by the "
+                "toolbox run model (PRD v1.12); existing history is "
+                "retained read-only"
+            ),
+        },
+    )
 
 router = APIRouter(
     prefix="/api/strike",
@@ -154,6 +188,7 @@ _REFUSAL_422 = (
     RelayStateError,
     TargetStateError,
     TargetExpiredError,
+    ScopeEntryStateError,
     WorkspaceStateError,
     EvidencePolicyError,       # Ch.3 policy refusals surface verbatim
 )
@@ -193,6 +228,7 @@ def _map_domain_errors(exc: Exception) -> HTTPException:
     if isinstance(exc, (EngagementNotFoundError, TargetNotFoundError,
                         WorkspaceNotFoundError, OperationNotFoundError,
                         RelayNotFoundError, StrikeNotFoundError,
+                        ScopeEntryNotFoundError,
                         ApprovalNotFoundError, ExposureNotFoundError,
                         EntityNotFoundError, TenantMismatchError)):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -239,7 +275,8 @@ def _map_domain_errors(exc: Exception) -> HTTPException:
 
 def _endpoint(fn: Callable) -> Callable:
     """Wrap a route body: domain errors → mapped HTTP, everything else
-    propagates (500s are never masked)."""
+    propagates (500s are never masked). Sync bodies keep threadpool
+    execution; async bodies use _endpoint_async."""
     sig = inspect.signature(fn)
 
     def wrapper(*args, **kwargs):
@@ -254,6 +291,23 @@ def _endpoint(fn: Callable) -> Callable:
     wrapper.__doc__ = fn.__doc__
     wrapper.__annotations__ = fn.__annotations__
     wrapper.__signature__ = sig  # keep FastAPI's dependency introspection
+    return wrapper
+
+
+def _endpoint_async(fn: Callable) -> Callable:
+    """The same error mapping for async route bodies (the run-dispatch
+    endpoint awaits the collector over WSS)."""
+    import functools
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await fn(*args, **kwargs)
+        except (StrikeDomainError, ApprovalStateError, ApprovalSubjectError,
+                EvidencePolicyError, ExposureConflictError,
+                ExposureNotFoundError, ExposureDomainError,
+                TenantMismatchError) as exc:
+            raise _map_domain_errors(exc) from exc
     return wrapper
 
 
@@ -280,6 +334,7 @@ def create_engagement(
     payload: EngagementCreate,
     auth: AuthContext = Depends(_require_analyst),
 ):
+    _refuse_legacy_mutation()
     with get_db_connection() as conn:
         row = strike_service.create_engagement(
             conn, auth.tenant_id, payload,
@@ -460,6 +515,7 @@ def request_target(
     payload: TargetCreate,
     auth: AuthContext = Depends(_require_analyst),
 ):
+    _refuse_legacy_mutation()
     with get_db_connection() as conn:
         result = strike_service.request_target(
             conn, auth.tenant_id, engagement_id, payload,
@@ -566,6 +622,7 @@ def reserve_workspace(
     payload: WorkspaceReserve,
     auth: AuthContext = Depends(_require_analyst),
 ):
+    _refuse_legacy_mutation()
     with get_db_connection() as conn:
         reservation = strike_workspaces.reserve_workspace(
             conn, auth.tenant_id, engagement_id,
@@ -701,6 +758,7 @@ def dispatch_operation(
     payload: OperationDispatch,
     auth: AuthContext = Depends(_require_analyst),
 ):
+    _refuse_legacy_mutation()
     with get_db_connection() as conn:
         operation = strike_operations.dispatch_operation(
             conn, auth.tenant_id, engagement_id, payload,
@@ -935,6 +993,7 @@ def create_relay(
     engagement_id: uuid.UUID,
     auth: AuthContext = Depends(_require_admin),
 ):
+    _refuse_legacy_mutation()
     with get_db_connection() as conn:
         relay = strike_relays.create_relay(
             conn, auth.tenant_id, engagement_id,
@@ -998,6 +1057,307 @@ def list_relays(
         rows = strike_relays.list_relays(conn, auth.tenant_id, engagement_id)
         conn.commit()
         return [_jsonify(_render(r)) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Tenant testing-scope registry (amended PRD Ch.4 — /strike/scopes)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/scopes",
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a testing-scope entry (Tenant Admin/Superadmin; exact hostname/IP/CIDR, required expiry, audited)",
+)
+@_endpoint
+def create_scope_entry(
+    payload: ScopeEntryCreate,
+    auth: AuthContext = Depends(_require_admin),
+):
+    with get_db_connection() as conn:
+        row = strike_scopes.create_scope_entry(
+            conn, auth.tenant_id, payload,
+            actor_id=auth.actor_id, actor_role=auth.role,
+        )
+        conn.commit()
+        return _jsonify(_render(row))
+
+
+@router.get(
+    "/scopes",
+    status_code=status.HTTP_200_OK,
+    summary="List the tenant's testing-scope registry (permanent history, expiry/revocation derived at read)",
+)
+@_endpoint
+def list_scope_entries(auth: AuthContext = Depends(_require_admin)):
+    with get_db_connection() as conn:
+        rows = strike_scopes.list_scope_entries(conn, auth.tenant_id)
+        conn.commit()
+        return [_jsonify(_render(r)) for r in rows]
+
+
+@router.post(
+    "/scopes/{scope_entry_id}/revoke",
+    status_code=status.HTTP_200_OK,
+    summary="Revoke a testing-scope entry (Tenant Admin/Superadmin; enforcement-immediate, audited)",
+)
+@_endpoint
+def revoke_scope_entry(
+    scope_entry_id: uuid.UUID,
+    payload: ScopeEntryRevoke,
+    auth: AuthContext = Depends(_require_admin),
+):
+    with get_db_connection() as conn:
+        row = strike_scopes.revoke_scope_entry(
+            conn, auth.tenant_id, scope_entry_id, payload.reason,
+            actor_id=auth.actor_id, actor_role=auth.role,
+        )
+        conn.commit()
+        return _jsonify(_render(row))
+
+
+# ---------------------------------------------------------------------------
+# Toolbox runs (amended PRD Ch.4: catalogue → target/config → run →
+# progress → results → history; the curl Phase-1 slice)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/catalogue",
+    status_code=status.HTTP_200_OK,
+    summary="The capability catalogue (only wired, reviewed capabilities appear)",
+)
+@_endpoint
+def get_catalogue(auth: AuthContext = Depends(_require_analyst)):
+    return strike_runs.CATALOGUE
+
+
+@router.post(
+    "/runs",
+    status_code=status.HTTP_201_CREATED,
+    summary=(
+        "Create a run (analyst+; scope-checked, DNS pinned, then executed on "
+        "the selected vantage: the platform server sandbox, or the explicitly "
+        "selected tenant collector over its authenticated WSS)"
+    ),
+)
+@_endpoint_async
+async def create_run(
+    payload: RunCreate,
+    background: BackgroundTasks,
+    auth: AuthContext = Depends(_require_analyst),
+):
+    # catalogue truth first: an unknown capability is refused before any
+    # collector-dependent check
+    from app.strike.runs import CATALOGUE, CapabilityNotFoundError, TOOL_ENVELOPE_SECONDS
+
+    if payload.capability not in {c["capability"] for c in CATALOGUE}:
+        raise CapabilityNotFoundError("Capability is not in the catalogue")
+
+    # ---------------------------------------------------------------------
+    # SERVER VANTAGE: the platform's own hardened sandbox, in-process.
+    #
+    # No collector is selected or contacted on this plane — runs.create_run
+    # already refused a server-vantage run carrying a collector_id and
+    # refused a capability whose tool is not installed here. Scope
+    # validation happened inside create_run, BEFORE this execution path, and
+    # activate_run re-checks the pinned snapshot's liveness at claim time.
+    # ---------------------------------------------------------------------
+    if payload.execution_plane == "server":
+        with get_db_connection() as conn:
+            row = strike_runs.create_run(
+                conn, auth.tenant_id, payload,
+                actor_id=auth.actor_id, actor_role=auth.role,
+            )
+            conn.commit()
+
+        # The payload — not a pre-built spec — is handed to the task: the
+        # script text is piped to the interpreter on stdin and the request
+        # body is recorded only as a byte count, so both must travel in
+        # memory. server_runner merges them with the durable policy_snapshot
+        # and neither value outlives the task.
+        background.add_task(execute_server_run, row["id"], auth.tenant_id, payload)
+
+        # the run is returned durable and queued; the console follows it
+        # through the chunk cursor rather than blocking on execution
+        with get_db_connection() as conn:
+            queued = strike_runs.get_run(conn, auth.tenant_id, row["id"])
+            conn.commit()
+        return _jsonify(_render(queued))
+
+    # ---------------------------------------------------------------------
+    # COLLECTOR VANTAGE (unchanged semantics): dispatch over authenticated
+    # WSS to exactly the collector the user selected.
+    # ---------------------------------------------------------------------
+
+    # DB truth first: the selection must be an enrolled collector of THIS
+    # tenant (an unregistered or cross-tenant id is collector_invalid)
+    with get_db_connection() as conn:
+        strike_runs.validate_run_collector(conn, auth.tenant_id, payload.collector_id)
+        conn.commit()
+
+    # then the fail-closed preflight on the USER-SELECTED collector: offline,
+    # paused, or not-ready capability all refuse the run visibly — never a
+    # redirect to another collector.
+    session = collector_registry.get_session(payload.collector_id)
+    if (
+        session is None
+        or session.tenant_id != auth.tenant_id
+        or not collector_registry.is_connected(payload.collector_id)
+        or session.operator_status != "active"
+    ):
+        raise CollectorNotReadyError(
+            "The selected collector is not connected or not active; the run "
+            "was not dispatched to any other collector"
+        )
+    if not collector_registry.strike_capability_ready(
+        payload.collector_id, payload.capability
+    ):
+        raise CollectorNotReadyError(
+            "The selected collector has not reported this capability as "
+            "available; the run was refused (fail closed)"
+        )
+
+    with get_db_connection() as conn:
+        row = strike_runs.create_run(
+            conn, auth.tenant_id, payload,
+            actor_id=auth.actor_id, actor_role=auth.role,
+        )
+        claimed = strike_runs.activate_run(
+            conn, row, f"collector:{payload.collector_id}"
+        )
+        conn.commit()
+
+    snapshot = row["policy_snapshot"]
+    capability = payload.capability
+    dispatch_url = row["target_url"]
+    if dispatch_url is None and capability in ("curl", "nuclei"):
+        dispatch_url = "http://%s:%s" % (
+            f"[{row['target_host']}]" if ":" in row["target_host"] else row["target_host"],
+            row["target_port"],
+        )
+    result = await collector_registry.dispatch_strike_job(
+        payload.collector_id,
+        auth.tenant_id,
+        row["id"],
+        method=payload.method if capability == "curl" else None,
+        url=dispatch_url,
+        pinned_ips=snapshot.get("pinned_ips") or [],
+        pinned_targets=snapshot.get("pinned_targets") or [],
+        record_type=snapshot.get("record_type"),
+        capability=capability,
+        timeout_seconds=TOOL_ENVELOPE_SECONDS.get(capability, DEFAULT_MAX_TIME_SECONDS),
+    )
+
+    with get_db_connection() as conn:
+        try:
+            res_status = result.get("status")
+            exit_code = result.get("exit_code")
+            if res_status in ("completed", "success") and isinstance(exit_code, int):
+                strike_runs.complete_run(
+                    conn, claimed,
+                    exit_code=exit_code,
+                    output=result.get("stdout", ""),
+                    error_code=None,
+                )
+            else:
+                detail = (
+                    result.get("stderr")
+                    or result.get("error_message")
+                    or "the collector reported no detail"
+                )
+                strike_runs.complete_run(
+                    conn, claimed,
+                    exit_code=exit_code if isinstance(exit_code, int) else -1,
+                    output=detail[:2000],
+                    error_code=result.get("error_code", "collector_run_failed"),
+                )
+        except strike_runs.RunStateError:
+            # the run left 'running' while executing (analyst cancellation).
+            # The collector process has verifiably returned — a confirmed stop.
+            conn.rollback()
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT state FROM strike_runs WHERE id = %s;",
+                    (str(row["id"]),),
+                )
+                current = cur.fetchone()
+            if current is not None and current["state"] == "cancel_requested":
+                strike_runs.confirm_cancel(conn, claimed, confirmed=True)
+        conn.commit()
+
+    with get_db_connection() as conn:
+        final = strike_runs.get_run(conn, auth.tenant_id, row["id"])
+        conn.commit()
+        return _jsonify(_render(final))
+
+
+@router.get(
+    "/runs",
+    status_code=status.HTTP_200_OK,
+    summary="Run history (permanent run metadata, newest first)",
+)
+@_endpoint
+def list_runs(auth: AuthContext = Depends(_require_analyst)):
+    with get_db_connection() as conn:
+        rows = strike_runs.list_runs(conn, auth.tenant_id)
+        conn.commit()
+        return [_jsonify(_render(r)) for r in rows]
+
+
+@router.get(
+    "/runs/{run_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Run progress and bounded inline result (64 KiB bound; truncation flagged)",
+)
+@_endpoint
+def get_run(
+    run_id: uuid.UUID,
+    auth: AuthContext = Depends(_require_analyst),
+):
+    with get_db_connection() as conn:
+        row = strike_runs.get_run(conn, auth.tenant_id, run_id)
+        conn.commit()
+        return _jsonify(_render(row))
+
+
+@router.get(
+    "/runs/{run_id}/chunks",
+    status_code=status.HTTP_200_OK,
+    summary=(
+        "Run output after a cursor (ordered, bounded chunks; the terminal "
+        "inline result rides along so one poll serves a live and a finished run)"
+    ),
+)
+@_endpoint
+def read_run_chunks(
+    run_id: uuid.UUID,
+    after: int = Query(default=0, ge=0),
+    limit: int = Query(default=200, ge=1, le=1000),
+    auth: AuthContext = Depends(_require_analyst),
+):
+    with get_db_connection() as conn:
+        payload = strike_runs.read_output_chunks(
+            conn, auth.tenant_id, run_id, after=after, limit=limit
+        )
+        conn.commit()
+        return _jsonify(payload)
+
+
+@router.post(
+    "/runs/{run_id}/cancel",
+    status_code=status.HTTP_200_OK,
+    summary="Cancel a pending run (before dispatch; running runs are not fake-cancellable)",
+)
+@_endpoint
+def cancel_run(
+    run_id: uuid.UUID,
+    auth: AuthContext = Depends(_require_analyst),
+):
+    with get_db_connection() as conn:
+        row = strike_runs.cancel_run(conn, auth.tenant_id, run_id)
+        conn.commit()
+        return _jsonify(_render(row))
 
 
 # ---------------------------------------------------------------------------

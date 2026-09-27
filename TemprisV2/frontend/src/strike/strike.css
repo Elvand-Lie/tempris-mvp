@@ -1,0 +1,730 @@
+/* STRIKE console — module-local presentation styles.
+   Port of the V1 glass-panel language (mono eyebrows, status chips,
+   glass cards) onto the V2 design tokens. Shared styles.css is untouched. */
+
+.stk {
+  --stk-accent: var(--accent-operations, #38bdf8);
+  --stk-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: var(--text-primary);
+}
+
+/* ── Header band ─────────────────────────────────────────────── */
+
+.stk-header {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  padding: 22px 24px 20px;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(56, 189, 248, 0.08), rgba(56, 189, 248, 0) 42%),
+    var(--bg-surface);
+}
+
+.stk-header::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--stk-accent), rgba(56, 189, 248, 0));
+}
+
+.stk-kicker {
+  margin: 0 0 6px;
+  font-family: var(--stk-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--stk-accent);
+}
+
+.stk-title {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.stk-hint {
+  margin: 0;
+  max-width: 62ch;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.stk-header-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-inset);
+  font-family: var(--stk-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.stk-chip strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.stk-chip-accent {
+  border-color: rgba(56, 189, 248, 0.35);
+  color: var(--stk-accent);
+}
+
+.stk-chip-ok strong {
+  color: #4ade80;
+}
+
+.stk-chip-warn strong {
+  color: #fbbf24;
+}
+
+/* ── Banners ─────────────────────────────────────────────────── */
+
+.stk-banner {
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--stk-accent);
+  border-radius: 8px;
+  background: var(--bg-inset);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.stk-banner-error {
+  border-color: rgba(248, 113, 113, 0.4);
+  border-left-color: #f87171;
+  background: rgba(248, 113, 113, 0.07);
+  color: #fca5a5;
+}
+
+.stk-banner code,
+.stk-banner .stk-code {
+  font-family: var(--stk-mono);
+  color: var(--text-primary);
+}
+
+/* ── Panels ──────────────────────────────────────────────────── */
+
+.stk-panel {
+  position: relative;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-surface);
+  padding: 18px 20px 20px;
+}
+
+.stk-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  border-radius: 14px 14px 0 0;
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.55), rgba(56, 189, 248, 0));
+  pointer-events: none;
+}
+
+.stk-eyebrow {
+  margin: 0 0 4px;
+  font-family: var(--stk-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.stk-panel > h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.stk-empty {
+  margin: 0;
+  padding: 22px 16px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-inset);
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.stk-empty strong {
+  display: block;
+  margin-bottom: 4px;
+  font-family: var(--stk-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* ── Tool catalogue cards ────────────────────────────────────── */
+
+.stk-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.stk-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 15px;
+  text-align: left;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--bg-surface-elevated), var(--bg-surface));
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+
+.stk-card:hover:not(:disabled) {
+  border-color: rgba(56, 189, 248, 0.45);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.18);
+}
+
+.stk-card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.stk-card-active {
+  border-color: var(--stk-accent);
+  box-shadow: 0 0 0 1px var(--stk-accent);
+}
+
+.stk-card:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.stk-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.stk-card-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.stk-card-notes {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.stk-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.stk-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-inset);
+  font-family: var(--stk-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ── Status badges (shared by cards, table, detail) ──────────── */
+
+.stk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  font-family: var(--stk-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.stk-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.stk-badge-ready {
+  border-color: rgba(74, 222, 128, 0.35);
+  background: rgba(74, 222, 128, 0.08);
+  color: #4ade80;
+}
+.stk-badge-ready::before {
+  background: #4ade80;
+}
+
+.stk-badge-unavailable {
+  border-color: rgba(248, 113, 113, 0.35);
+  background: rgba(248, 113, 113, 0.08);
+  color: #f87171;
+}
+.stk-badge-unavailable::before {
+  background: #f87171;
+}
+
+.stk-badge-waiting {
+  border-color: rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.08);
+  color: #fbbf24;
+}
+.stk-badge-waiting::before {
+  background: #fbbf24;
+}
+
+.stk-badge-idle {
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.06);
+  color: #9aa7bb;
+}
+.stk-badge-idle::before {
+  background: #9aa7bb;
+}
+
+/* Run-state chips */
+.stk-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-inset);
+  font-family: var(--stk-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.stk-state::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #9aa7bb;
+}
+
+.stk-state-ok {
+  border-color: rgba(74, 222, 128, 0.35);
+  background: rgba(74, 222, 128, 0.08);
+  color: #4ade80;
+}
+.stk-state-ok::before {
+  background: #4ade80;
+}
+
+.stk-state-alarm {
+  border-color: rgba(248, 113, 113, 0.4);
+  background: rgba(248, 113, 113, 0.09);
+  color: #f87171;
+}
+.stk-state-alarm::before {
+  background: #f87171;
+}
+
+.stk-state-live {
+  border-color: rgba(56, 189, 248, 0.4);
+  background: rgba(56, 189, 248, 0.09);
+  color: #38bdf8;
+}
+.stk-state-live::before {
+  background: #38bdf8;
+  animation: stk-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes stk-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ── Two-column body: catalogue + history (left) / composer (right) ── */
+
+.stk-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  align-items: start;
+}
+
+.stk-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.stk-composer {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+@media (max-width: 1100px) {
+  .stk-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .stk-composer {
+    position: static;
+  }
+}
+
+/* ── Run composer form ───────────────────────────────────────── */
+
+.stk-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.stk-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.stk-field > span,
+.stk-field-label {
+  font-family: var(--stk-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.stk-field select,
+.stk-field input[type='text'],
+.stk-field input[type='datetime-local'] {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.stk-field select:focus-visible,
+.stk-field input[type='text']:focus-visible,
+.stk-field input[type='datetime-local']:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+  border-color: var(--border-focus);
+}
+
+.stk-field-note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.stk-helpers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────── */
+
+.stk-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface-elevated);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+  white-space: nowrap;
+}
+
+.stk-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--stk-accent);
+}
+
+.stk-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.stk-btn:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.stk-btn-primary {
+  border-color: var(--stk-accent);
+  background: rgba(56, 189, 248, 0.14);
+  color: #7dd3fc;
+}
+
+.stk-btn-primary:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.22);
+}
+
+.stk-btn-ghost {
+  padding: 4px 10px;
+  font-size: 11.5px;
+  background: transparent;
+}
+
+/* ── Run history table ───────────────────────────────────────── */
+
+.stk-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+
+.stk-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.stk-table th {
+  padding: 8px 12px;
+  text-align: left;
+  font-family: var(--stk-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--bg-inset);
+  border-bottom: 1px solid var(--border-color);
+  white-space: nowrap;
+}
+
+.stk-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  vertical-align: middle;
+}
+
+.stk-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.stk-table tbody tr {
+  cursor: pointer;
+  transition: background 100ms ease;
+}
+
+.stk-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+.stk-row-selected,
+.stk-table tbody tr.stk-row-selected:hover {
+  background: var(--bg-active);
+}
+
+.stk-target {
+  font-family: var(--stk-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.stk-cell-meta {
+  font-family: var(--stk-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.stk-row-actions {
+  display: flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* Inline reason input inside a table row (scope revocation). */
+.stk-row-actions input[type='text'] {
+  min-width: 140px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+/* ── Run detail ──────────────────────────────────────────────── */
+
+.stk-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.stk-fact {
+  padding: 9px 11px;
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+  background: var(--bg-inset);
+}
+
+.stk-fact dt {
+  margin: 0 0 3px;
+  font-family: var(--stk-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.stk-fact dd {
+  margin: 0;
+  font-family: var(--stk-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.stk-detail-sub {
+  margin: 14px 0 8px;
+  font-family: var(--stk-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.stk-output {
+  margin: 0;
+  max-height: 420px;
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  font-family: var(--stk-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: #a5f3fc;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---------------------------------------------------------------------------
+   Live output terminal (server + collector vantages). The chunks endpoint
+   returns ordered stdout/stderr/system chunks; each renders on its own line
+   with a stream gutter so a stderr line is never mistaken for stdout.
+   --------------------------------------------------------------------------- */
+.stk-terminal {
+  display: block;
+}
+
+.stk-chunk {
+  display: block;
+}
+
+.stk-chunk-gutter {
+  display: inline-block;
+  width: 3ch;
+  margin-right: 8px;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.stk-chunk-stderr {
+  color: #fca5a5;
+}
+
+.stk-chunk-system {
+  color: #fcd34d;
+  font-style: italic;
+}
+
+.stk-script {
+  width: 100%;
+  min-height: 160px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--stk-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}

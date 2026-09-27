@@ -1,16 +1,15 @@
 // frontend/src/strike/strikeApi.ts
-// STRIKE API client (PRD-000 v1.11 Ch.4). Domain-local: the shared api.ts is
-// untouched by this changeset; only its public token helpers are reused.
+// STRIKE toolbox-run API client (amended PRD v1.12 Ch.4: catalogue →
+// target/config → run → progress → results → history). Domain-local; the
+// shared api.ts is untouched; only its public token helpers are reused.
 // Refusals surface the backend's stable { code, message } detail so the
 // console can name exactly why a command failed closed.
 import { AUTH_UNAUTHORIZED_EVENT, getStoredToken } from '../api';
 import type {
-  StrikeEngagement,
-  StrikeEngagementDetail,
-  StrikeEvidenceLink,
-  StrikeOperation,
-  StrikeTarget,
-  StrikeWorkspace,
+  StrikeCapability,
+  StrikeRun,
+  StrikeRunChunkPage,
+  StrikeScopeEntry,
 } from './strikeTypes';
 
 const STRIKE_API_BASE = new URL('api/strike', document.baseURI).pathname;
@@ -74,68 +73,77 @@ function post<T>(path: string, body?: unknown): Promise<T> {
 }
 
 export const strikeApi = {
-  listEngagements: () => get<StrikeEngagement[]>('/engagements'),
-  getEngagement: (id: string) => get<StrikeEngagementDetail>(`/engagements/${id}`),
-  createEngagement: (payload: {
-    title: string;
-    purpose: string;
-    roe: Record<string, unknown>;
-    valid_from: string;
-    valid_until: string;
-    finding_id?: string | null;
-    asset_id?: string | null;
-  }) => post<StrikeEngagement>('/engagements', payload),
-  submitEngagement: (id: string) =>
-    post<{ engagement: StrikeEngagement; approval_id: string }>(`/engagements/${id}/submit`, {}),
-  approveEngagement: (id: string) =>
-    post<{ engagement: StrikeEngagement }>(`/engagements/${id}/approve`, {}),
-  abortEngagement: (id: string, reason: string) =>
-    post<StrikeEngagement>(`/engagements/${id}/abort`, { reason }),
-  activateEngagement: (id: string) => post<StrikeEngagement>(`/engagements/${id}/activate`, {}),
-  completeEngagement: (id: string) => post<StrikeEngagement>(`/engagements/${id}/complete`, {}),
+  /** Only wired, reviewed capabilities appear here — runnable is truth. */
+  catalogue: () => get<StrikeCapability[]>('/catalogue'),
 
-  listTargets: (engagementId: string) => get<StrikeTarget[]>(`/engagements/${engagementId}/targets`),
-  requestTarget: (
-    engagementId: string,
-    payload: {
-      target_type: string;
-      target_value: string;
-      normalized_target: string;
-      purpose: string;
-      expires_at: string;
-    },
-  ) => post<{ target: StrikeTarget }>(`/engagements/${engagementId}/targets`, payload),
-  approveTarget: (targetId: string) =>
-    post<{ target: StrikeTarget }>(`/targets/${targetId}/approve`, {}),
-  revokeTarget: (targetId: string, reason: string) =>
-    post<StrikeTarget>(`/targets/${targetId}/revoke`, { reason }),
+  /**
+   * Create a run: scope-checked against the tenant's ACTIVE testing-scope
+   * registry, DNS resolved and PINNED at creation, durable before dispatch.
+   * One target per run; GET/HEAD only on the curl capability.
+   *
+   * `execution_plane` picks the vantage: 'collector' (the default, and the
+   * only one that may carry `collector_id`) or 'server' (the platform's own
+   * sandbox, which must NOT carry a collector). The backend refuses either
+   * mismatch rather than guessing.
+   */
+  createRun: (payload: {
+    capability: string;
+    method: string;
+    target: string;
+    record_type?: string;
+    execution_plane?: 'server' | 'collector';
+    collector_id?: string;
+    port?: number;
+    language?: string;
+    script?: string;
+    headers?: string[];
+    body?: string;
+    extra_args?: string;
+  }) => post<StrikeRun>('/runs', payload),
 
-  listWorkspaces: (engagementId: string) =>
-    get<StrikeWorkspace[]>(`/engagements/${engagementId}/workspaces`),
-  reserveWorkspace: (engagementId: string) =>
-    post<StrikeWorkspace>(`/engagements/${engagementId}/workspaces`, {}),
-  destroyWorkspace: (workspaceId: string) =>
-    post<StrikeWorkspace>(`/workspaces/${workspaceId}/destroy`, {}),
+  /** Run history (permanent run metadata, newest first). */
+  listRuns: () => get<StrikeRun[]>('/runs'),
 
-  listOperations: (engagementId: string) =>
-    get<StrikeOperation[]>(`/engagements/${engagementId}/operations`),
-  completeOperation: (
-    operationId: string,
-    payload: { outcome: string; summary?: string },
-  ) => post<StrikeOperation>(`/operations/${operationId}/complete`, payload),
-  cancelOperation: (operationId: string) =>
-    post<StrikeOperation>(`/operations/${operationId}/cancel`, {}),
+  /** Run progress + bounded inline result (64 KiB; truncation flagged). */
+  getRun: (id: string) => get<StrikeRun>(`/runs/${id}`),
 
-  listEvidence: (engagementId: string) =>
-    get<StrikeEvidenceLink[]>(`/engagements/${engagementId}/evidence`),
-  promoteEvidence: (payload: {
-    operation_id: string;
-    exposure_id: string;
-    basis: 'validated' | 'observed';
-    attestation: string;
-  }) =>
-    post<{ evidence_record_id: string; evidence_kind: string; outcome: string }>(
-      '/evidence',
-      payload,
-    ),
+  /**
+   * The run's output after a cursor — this is what the terminal polls. Only
+   * chunks with `seq > after` are returned, in order, so a poll never
+   * re-delivers or skips; `terminal` says when to stop polling.
+   */
+  readChunks: (id: string, after = 0) =>
+    get<StrikeRunChunkPage>(`/runs/${id}/chunks?after=${after}`),
+
+  /** Cancel a queued run (trivially confirmed) or request a running stop. */
+  cancelRun: (id: string) => post<StrikeRun>(`/runs/${id}/cancel`, {}),
+
+  // -------------------------------------------------------------------------
+  // Testing-scope registry (Tenant Admin / Superadmin). Authorization is
+  // scope-based, NOT asset-based: a target covered by an active entry runs
+  // whether or not it is a registered asset. A create is audited as
+  // strike.scope.created, a revoke as strike.scope.revoked.
+  // -------------------------------------------------------------------------
+
+  /**
+   * The tenant's scope registry: permanent administration history, newest
+   * first. Expired and revoked rows stay visible with their derived state.
+   */
+  listScopes: () => get<StrikeScopeEntry[]>('/scopes'),
+
+  /**
+   * Authorize an exact hostname, IP, or CIDR. A hostname authorizes exactly
+   * the IPs it resolves to at run-creation time; a CIDR authorizes the whole
+   * range but never a wildcard name. `expires_at` is required and must be in
+   * the future — the registry deliberately has no permanent entries.
+   */
+  createScope: (payload: {
+    entry: string;
+    expires_at: string;
+    note?: string;
+  }) => post<StrikeScopeEntry>('/scopes', payload),
+
+  /** Revoke an entry. Enforcement is immediate; the row stays as history. */
+  revokeScope: (id: string, reason: string) =>
+    post<StrikeScopeEntry>(`/scopes/${id}/revoke`, { reason }),
 };
