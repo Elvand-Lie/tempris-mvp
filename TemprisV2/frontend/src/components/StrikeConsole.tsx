@@ -4,7 +4,7 @@
 // engagement/workspace chain is superseded (the backend refuses new legacy
 // state with 410); this console only drives the run model.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api } from '../api';
+import { api, SESSION_STORAGE_KEY } from '../api';
 import { StrikeApiError, strikeApi } from '../strike/strikeApi';
 import type { StrikeCapability, StrikeRun, StrikeRunChunk } from '../strike/strikeTypes';
 import type { Collector } from '../types';
@@ -153,7 +153,7 @@ function describeError(error: unknown): string {
 
 export function currentStrikeRole(): string | null {
   try {
-    const raw = window.sessionStorage.getItem('tempris.token');
+    const raw = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
     if (!raw) return null;
     const payload = JSON.parse(atob(raw.split('.')[1] || ''));
     return typeof payload.role === 'string' ? payload.role : null;
