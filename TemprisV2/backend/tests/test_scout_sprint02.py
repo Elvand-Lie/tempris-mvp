@@ -1,13 +1,22 @@
 import copy
 import json
+import tempfile
 import threading
 import uuid
+from pathlib import Path
 
 import pytest
 
 from app.collector_registry import collector_registry
 from app.db import get_db_connection
-from app.scout import ToolProbe, _job_row, _normalize_nuclei_observation, _qualifying_nuclei
+from app.scout import (
+    ToolProbe,
+    _job_row,
+    _normalize_nuclei_observation,
+    _qualifying_nuclei,
+    _sanitize_nuclei_stdout,
+    parse_nuclei_jsonl_with_stats,
+)
 from tests.conftest import TENANT_A, TENANT_B
 from tests.test_scout_sprint01 import create_authorized_asset, successful_process
 
@@ -51,6 +60,12 @@ def seed_canonical(cve_id=CVE_ID, state="PUBLISHED"):
 
 def launch_vulnerability_job(client, headers, monkeypatch, payload=None, asset_id=None):
     successful_process(monkeypatch, nuclei_payload=payload or nuclei_payload())
+    # Server-plane Nuclei refuses without a pinned templates dir (fail closed);
+    # point SCOUT_NUCLEI_TEMPLATES_DIR at a valid directory for these runs.
+    templates_dir = tempfile.mkdtemp(prefix="scout-nuclei-templates-")
+    Path(templates_dir, "http").mkdir()
+    Path(templates_dir, "http", "cve-test.yaml").write_text("id: cve-test\n")
+    monkeypatch.setattr("app.config.SCOUT_NUCLEI_TEMPLATES_DIR", templates_dir)
     if asset_id is None:
         asset_id, _ = create_authorized_asset()
     response = client.post(
@@ -346,3 +361,129 @@ def test_second_job_detection_reuses_finding_and_replays_exposure(
     assert rows[0]["status"] == "confirmed"
     assert rows[0]["confirmed_by"] == f"scout:{first_job_id}"
     assert exposure_counts(asset_id) == {"findings": 1, "exposures": 1}
+
+
+EXCERPT_TOTAL_CAP = 262144
+EXCERPT_TOTAL_MARKER = "\n…[excerpt truncated at 256 KiB]"
+
+
+def tool_run_row(job_id, engine):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM scout_tool_runs WHERE job_id = %s AND engine = %s",
+                (job_id, engine),
+            )
+            row = cur.fetchone()
+    assert row, f"missing {engine} tool run for job {job_id}"
+    return dict(row)
+
+
+def test_sanitize_nuclei_stdout_redacts_secrets_paths_and_caps_lines():
+    text = "\n".join([
+        "authorization: Bearer super-secret-token",
+        'X-API-Key: "abc123"',
+        "req to C:\\Users\\svc\\nuclei\\requests\\dump.txt",
+        "wrote /home/ubuntu/evidence.txt and /var/log/nuclei.log",
+        "\\\\fileserver\\share\\payload.bin",
+        "z" * 3000,
+    ])
+    sanitized = _sanitize_nuclei_stdout(text)
+
+    assert "super-secret-token" not in sanitized and "authorization: [REDACTED]" in sanitized
+    assert "abc123" not in sanitized
+    assert "[REDACTED]" in sanitized
+    assert r"C:\Users" not in sanitized and "[REDACTED_PATH]" in sanitized
+    assert "/home/ubuntu" not in sanitized and "/var/log" not in sanitized
+    assert "fileserver" not in sanitized
+    lines = sanitized.splitlines()
+    assert lines[-1] == "z" * 2048 + "…[line truncated]"
+    assert "[REDACTED_PATH]" in sanitized
+
+
+def test_sanitize_nuclei_stdout_caps_total_at_256_kib():
+    sanitized = _sanitize_nuclei_stdout("\n".join(["a" * 5000] * 200))
+    assert sanitized.endswith(EXCERPT_TOTAL_MARKER)
+    assert len(sanitized) <= EXCERPT_TOTAL_CAP + len(EXCERPT_TOTAL_MARKER)
+
+
+def test_parse_stats_counts_mixed_payload():
+    payload = "\n".join([
+        json.dumps({"template-id": "cve-x", "info": {"name": "n"}}),
+        "not json at all {",
+        "[1, 2, 3]",
+        "",
+        "   ",
+        json.dumps({"template-id": "ok-one", "matcher-name": "m", "matched-at": "u"}),
+    ]).encode()
+    observations, stats = parse_nuclei_jsonl_with_stats(payload)
+    assert stats == {"total_lines": 4, "parsed_lines": 2, "skipped_lines": 2}
+    assert [obs[1]["event"]["template-id"] for obs in observations] == ["cve-x", "ok-one"]
+
+
+def test_nuclei_excerpt_persisted_bounded_and_list_jobs_omits_it(
+    client, auth_headers_tenant_a_admin, monkeypatch
+):
+    # 140 x ~2 KB JSON string lines: valid JSON, non-dict, so parsing is cheap
+    # and the sanitized excerpt still exceeds the 256 KiB total cap.
+    payload = "\n".join(json.dumps("x" * 2000) for _ in range(140)).encode()
+    job_id, _ = launch_vulnerability_job(client, auth_headers_tenant_a_admin, monkeypatch, payload=payload)
+    job = client.get(f"/api/scout/jobs/{job_id}", headers=auth_headers_tenant_a_admin).json()
+    listing = next(item for item in client.get("/api/scout/jobs", headers=auth_headers_tenant_a_admin).json()
+                   if item["id"] == job_id)
+
+    run = tool_run_row(job_id, "nuclei")
+    excerpt = run["sanitized_output_excerpt"]
+    assert excerpt is not None
+    assert len(excerpt) <= EXCERPT_TOTAL_CAP + len(EXCERPT_TOTAL_MARKER)
+    assert excerpt.endswith(EXCERPT_TOTAL_MARKER)
+    assert run["parse_stats"] == {"total_lines": 140, "parsed_lines": 0, "skipped_lines": 140}
+
+    health = {entry["engine"]: entry for entry in job["source_health"]}
+    assert health["nuclei"]["sanitized_output_excerpt"] == excerpt
+    assert health["nuclei"]["parse_stats"] == run["parse_stats"]
+    assert health["nuclei"]["observation_count"] == 0
+
+    list_health = {entry["engine"]: entry for entry in listing["source_health"]}
+    assert list_health["nuclei"]["sanitized_output_excerpt"] is None
+    assert list_health["nuclei"]["parse_stats"] == run["parse_stats"]
+    assert list_health["nuclei"]["observation_count"] == 0
+
+
+def test_nmap_tool_run_keeps_null_excerpt_and_stats(client, auth_headers_tenant_a_admin, monkeypatch):
+    successful_process(monkeypatch)
+    asset_id, _ = create_authorized_asset()
+    response = client.post(
+        "/api/scout/jobs",
+        json={"asset_id": str(asset_id), "profile": "SERVICE_DISCOVERY"},
+        headers=auth_headers_tenant_a_admin,
+    )
+    assert response.status_code == 201
+    job_id = response.json()["id"]
+
+    run = tool_run_row(job_id, "nmap")
+    assert run["sanitized_output_excerpt"] is None
+    assert run["parse_stats"] is None
+    job = client.get(f"/api/scout/jobs/{job_id}", headers=auth_headers_tenant_a_admin).json()
+    nmap_health = next(entry for entry in job["source_health"] if entry["engine"] == "nmap")
+    assert nmap_health["sanitized_output_excerpt"] is None
+    assert nmap_health["parse_stats"] is None
+
+
+def test_zero_observation_nuclei_run_still_stores_excerpt_and_stats(
+    client, auth_headers_tenant_a_admin, monkeypatch
+):
+    payload = b"garbage-not-json\n{broken\n"
+    job_id, _ = launch_vulnerability_job(client, auth_headers_tenant_a_admin, monkeypatch, payload=payload)
+    job = client.get(f"/api/scout/jobs/{job_id}", headers=auth_headers_tenant_a_admin).json()
+    observations = client.get(
+        f"/api/scout/jobs/{job_id}/observations", headers=auth_headers_tenant_a_admin
+    ).json()
+
+    assert job["status"] == "succeeded"
+    # The profile's nmap prerequisite still yields service observations; the
+    # Nuclei stream itself produced none.
+    assert all(row["scanner"] != "nuclei" for row in observations)
+    run = tool_run_row(job_id, "nuclei")
+    assert run["sanitized_output_excerpt"] == "garbage-not-json\n{broken"
+    assert run["parse_stats"] == {"total_lines": 2, "parsed_lines": 0, "skipped_lines": 2}

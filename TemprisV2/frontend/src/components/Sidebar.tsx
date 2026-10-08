@@ -166,7 +166,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       title: 'Administration',
       groupClass: 'sidebar-group-admin',
       items: [
-        { tab: 'org', icon: 'org', label: 'Organization', show: currentRole === 'superadmin' },
+        { tab: 'org', icon: 'org', label: 'Organization', show: currentRole === 'superadmin' || currentRole === 'admin' },
       ],
     },
   ];

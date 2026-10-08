@@ -1,12 +1,12 @@
 // frontend/src/tests/ch8-ch9.test.tsx
 // Focused render tests for the Ch.8 EDIP workbench and the Ch.9 STANDARD
 // console (module-owned API clients, mocked at the HTTP boundary).
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EdipWorkbench } from '../edip/EdipWorkbench';
 import { StandardConsole } from '../standard/StandardConsole';
 import { EdipQueueItem } from '../edip/edipApi';
-import { StandardFramework, StandardIncident, StandardObligation } from '../standard/standardApi';
+import { StandardFramework, StandardObligation } from '../standard/standardApi';
 
 vi.mock('../edip/edipApi', () => ({
   edipApi: {
@@ -29,6 +29,7 @@ vi.mock('../standard/standardApi', () => ({
     getFrameworks: vi.fn(),
     createAssessment: vi.fn(),
     signoffAssessment: vi.fn(),
+    archiveAssessment: vi.fn(),
     createIncident: vi.fn(),
     getIncident: vi.fn(),
     listIncidents: vi.fn(),
@@ -40,6 +41,21 @@ vi.mock('../standard/standardApi', () => ({
     submitObligation: vi.fn(),
     closeObligation: vi.fn(),
     listRules: vi.fn(),
+    getPolicies: vi.fn(),
+    createPolicy: vi.fn(),
+    activatePolicy: vi.fn(),
+    archivePolicy: vi.fn(),
+    listExceptions: vi.fn(),
+    createException: vi.fn(),
+    decideException: vi.fn(),
+    listSubmissions: vi.fn(),
+    listEvidence: vi.fn(),
+    attachEvidence: vi.fn(),
+    previewEvidence: vi.fn(),
+    downloadEvidence: vi.fn(),
+    getGapAnalysis: vi.fn(),
+    listAdvisories: vi.fn(),
+    generateReportDraft: vi.fn(),
   },
 }));
 
@@ -65,69 +81,6 @@ const queueItem: EdipQueueItem = {
   },
 };
 
-const framework: StandardFramework = {
-  framework_code: 'mas_trm_2024',
-  name: 'MAS TRM 2024',
-  description: null,
-  controls: [
-    {
-      control_id: 'c1111111-1111-1111-1111-111111111111',
-      control_code: 'MAS-TRM-12.1.5',
-      title: '1-Hour Incident Notification',
-      status: 'not_assessed',
-      assessment_id: null,
-      assessment_state: null,
-    },
-  ],
-  compliance: {
-    compliance_among_assessed: null,
-    assessed: 0,
-    total: 7,
-    compliant: 0,
-    partial: 0,
-    non_compliant: 0,
-    not_assessed: 7,
-    rendering: 'not assessed · 0/7 assessed',
-  },
-};
-
-const incident: StandardIncident = {
-  id: 'i1111111-1111-1111-1111-111111111111',
-  source: 'soc',
-  external_event_id: 'evt-1',
-  title: 'Suspected breach',
-  state: 'acknowledged',
-  event_time: '2026-09-20T10:00:00Z',
-  current_revision: 1,
-  evaluations: [
-    {
-      id: 'v1111111-1111-1111-1111-111111111111',
-      rule_key: 'mas_trm_12_1_5_incident_notification',
-      rule_version: 1,
-      state: 'evaluated',
-      result: 'obligation_ready',
-      error_detail: null,
-      obligation_id: 'o1111111-1111-1111-1111-111111111111',
-      incident_revision_no: 1,
-      is_current: true,
-    },
-  ],
-  obligations: [],
-};
-
-const obligation: StandardObligation = {
-  id: 'o1111111-1111-1111-1111-111111111111',
-  obligation_key: 'i111:mas',
-  kind: 'regulator_notification',
-  title: 'MAS TRM 12.1.5 notification (1 hour)',
-  state: 'open',
-  due_at: '2026-09-20T11:00:00Z',
-  trigger_at: '2026-09-20T10:00:00Z',
-  overdue: true,
-  breached_at: '2026-09-20T11:00:01Z',
-  completed_late: false,
-  revision: 1,
-};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -156,42 +109,201 @@ describe('EdipWorkbench', () => {
   });
 });
 
+
 describe('StandardConsole', () => {
-  it('renders compliance ALWAYS with its assessment coverage', async () => {
+  const control = {
+    control_id: 'c1111111-1111-1111-1111-111111111111',
+    control_code: 'MAS-TRM-12.1.5',
+    title: '1-Hour Incident Notification',
+    description: 'Notify MAS within 1 hour of discovering a relevant incident.',
+    status: 'not_assessed' as const,
+    assessment_id: null,
+    assessment_state: null,
+  };
+
+  const framework: StandardFramework = {
+    framework_code: 'mas_trm_2024',
+    name: 'MAS TRM 2024',
+    description: 'MAS TRM guidelines',
+    controls: [control],
+    compliance: {
+      compliance_among_assessed: null,
+      assessed: 0,
+      total: 1,
+      compliant: 0,
+      partial: 0,
+      non_compliant: 0,
+      not_assessed: 1,
+      rendering: 'not assessed · 0/1 assessed',
+    },
+  };
+
+  const obligation: StandardObligation = {
+    id: 'o1111111-1111-1111-1111-111111111111',
+    obligation_key: 'i111:mas',
+    kind: 'regulator_notification',
+    title: 'MAS TRM 12.1.5 notification (1 hour)',
+    incident_id: 'i1111111-1111-1111-1111-111111111111',
+    source_rule_id: null,
+    source_rule_version: null,
+    draft_notice: { note: 'File within the statutory window.', channel_hint: 'MAS official channel' },
+    state: 'open',
+    due_at: '2026-09-20T11:00:00Z',
+    trigger_at: '2026-09-20T10:00:00Z',
+    overdue: true,
+    breached_at: '2026-09-20T11:00:01Z',
+    completed_late: false,
+    revision: 1,
+  };
+
+  const adminToken = 'eyJhbGciOiJub25lIn0.eyJyb2xlIjoiYWRtaW4ifQ.sig';
+
+  const mockBase = () => {
+    window.sessionStorage.setItem('tempris_bearer_token', adminToken);
     (standardApi.getFrameworks as ReturnType<typeof vi.fn>).mockResolvedValue({
       frameworks: [framework],
     });
-    (standardApi.listIncidents as ReturnType<typeof vi.fn>).mockResolvedValue({
-      total: 0,
-      items: [],
-    });
-    (standardApi.listObligations as ReturnType<typeof vi.fn>).mockResolvedValue({
-      total: 0,
-      items: [],
-    });
+    (standardApi.listEvidence as ReturnType<typeof vi.fn>).mockResolvedValue({ evidence: [] });
+    (standardApi.listObligations as ReturnType<typeof vi.fn>).mockResolvedValue({ total: 0, items: [] });
+    (standardApi.listExceptions as ReturnType<typeof vi.fn>).mockResolvedValue({ exceptions: [] });
+  };
+
+  it('overview: renders the assessed strip and the work queue with a needs-assessment row', async () => {
+    mockBase();
     render(<StandardConsole />);
-    await waitFor(() => expect(screen.getByText('MAS TRM 2024')).toBeTruthy());
-    // frozen decision 5: never a bare percentage — coverage must render
-    expect(screen.getByText(/0\/7 assessed/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/0 \/ 1 controls assessed/)).toBeInTheDocument());
+    expect(screen.getByText('Needs assessment')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Controls' }));
+    await waitFor(() => expect(screen.getByText('MAS-TRM-12.1.5')).toBeInTheDocument());
+    expect(screen.getAllByText('Not assessed').length).toBeGreaterThan(0);
   });
 
-  it('renders incidents with evaluation state and obligation deadline state', async () => {
-    (standardApi.getFrameworks as ReturnType<typeof vi.fn>).mockResolvedValue({
-      frameworks: [],
-    });
-    (standardApi.listIncidents as ReturnType<typeof vi.fn>).mockResolvedValue({
-      total: 1,
-      items: [incident],
-    });
-    (standardApi.listObligations as ReturnType<typeof vi.fn>).mockResolvedValue({
-      total: 1,
-      items: [obligation],
+  it('controls drawer: records an assessment with status and notes', async () => {
+    mockBase();
+    (standardApi.createAssessment as ReturnType<typeof vi.fn>).mockResolvedValue({
+      assessment: { id: 'a2', state: 'draft' },
     });
     render(<StandardConsole />);
-    await waitFor(() => expect(screen.getByText('Suspected breach')).toBeTruthy());
-    await waitFor(() => expect(screen.getByText('MAS TRM 12.1.5 notification (1 hour)')).toBeTruthy());
-    // the deadline state is explicit: overdue + breach recorded
-    expect(screen.getByText(/OVERDUE/)).toBeTruthy();
-    expect(screen.getByText(/breach recorded/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Controls' }));
+    await waitFor(() => expect(screen.getByText('MAS-TRM-12.1.5')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('MAS-TRM-12.1.5'));
+    await waitFor(() => expect(screen.getByLabelText('Status')).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'non_compliant' } });
+    fireEvent.change(screen.getByLabelText('Notes (rationale)'), { target: { value: 'Control gap found in audit' } });
+    fireEvent.click(screen.getByText('Record assessment'));
+    await waitFor(() =>
+      expect(standardApi.createAssessment).toHaveBeenCalledWith(
+        'c1111111-1111-1111-1111-111111111111',
+        'non_compliant',
+        'Control gap found in audit',
+      ),
+    );
+    expect(screen.getAllByText('Not available: the backend does not expose this yet.').length).toBeGreaterThan(0);
+  });
+
+  it('controls drawer: dual sign-off conflict renders a human-readable message, never raw JSON', async () => {
+    mockBase();
+    (standardApi.getFrameworks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      frameworks: [{
+        ...framework,
+        controls: [{ ...control, status: 'partial', assessment_id: 'a1111111-1111-1111-1111-111111111111', assessment_state: 'draft' }],
+      }],
+    });
+    (standardApi.signoffAssessment as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('standard_conflict: {"error":"standard_conflict","reason":"dual sign-off requires two different actors"}'),
+    );
+    render(<StandardConsole />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Controls' }));
+    await waitFor(() => expect(screen.getByText('MAS-TRM-12.1.5')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('MAS-TRM-12.1.5'));
+    await waitFor(() => expect(screen.getByText('Sign off as end user')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Sign off as end user'));
+    await waitFor(() =>
+      expect(screen.getByText(/Dual sign-off conflict — dual sign-off requires two different actors/)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/standard_conflict: \{/)).not.toBeInTheDocument();
+  });
+
+  it('obligations: renders the overdue deadline state and records a submission proof (channel + mandatory proof)', async () => {
+    mockBase();
+    (standardApi.listObligations as ReturnType<typeof vi.fn>).mockResolvedValue({ total: 1, items: [obligation] });
+    (standardApi.listSubmissions as ReturnType<typeof vi.fn>).mockResolvedValue({ submissions: [] });
+    (standardApi.submitObligation as ReturnType<typeof vi.fn>).mockResolvedValue({ obligation: { state: 'fulfilled' }, completed_late: false });
+    render(<StandardConsole />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Obligations' }));
+    await waitFor(() => expect(screen.getByText('MAS TRM 12.1.5 notification (1 hour)')).toBeInTheDocument());
+    expect(screen.getByText('Overdue')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('MAS TRM 12.1.5 notification (1 hour)'));
+    await waitFor(() => expect(screen.getByLabelText('Channel (how it was submitted)')).toBeInTheDocument());
+    const save = screen.getByText('Record submission and proof');
+    expect(save).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Channel (how it was submitted)'), { target: { value: 'MAS portal' } });
+    fireEvent.change(screen.getByLabelText('Proof (mandatory)'), { target: { value: 'receipt-123' } });
+    fireEvent.click(screen.getByText('Record submission and proof'));
+    await waitFor(() =>
+      expect(standardApi.submitObligation).toHaveBeenCalledWith(obligation.id, 'MAS portal', 'receipt-123', ''),
+    );
+  });
+
+  it('policies: creates a draft and activates it', async () => {
+    mockBase();
+    (standardApi.getPolicies as ReturnType<typeof vi.fn>).mockResolvedValue({
+      policies: [{
+        id: 'p1',
+        policy_group_id: 'g1',
+        version: 1,
+        title: 'Access Control Policy',
+        body: 'Purpose. …',
+        state: 'draft',
+        supersedes_id: null,
+        superseded_at: null,
+        archived_at: null,
+        created_by: 'admin-a',
+        created_at: '2026-09-20T00:00:00Z',
+      }],
+    });
+    (standardApi.activatePolicy as ReturnType<typeof vi.fn>).mockResolvedValue({ policy: { id: 'p1', state: 'active' } });
+    (standardApi.createPolicy as ReturnType<typeof vi.fn>).mockResolvedValue({ policy: { id: 'p2' } });
+    render(<StandardConsole />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Policies' }));
+    await waitFor(() => expect(screen.getByText('Access Control Policy')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Access Control Policy'));
+    await waitFor(() => expect(screen.getByText('Activate version')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Activate version'));
+    await waitFor(() => expect(standardApi.activatePolicy).toHaveBeenCalledWith('p1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByText('Create policy'));
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Data Retention Policy' } });
+    fireEvent.change(screen.getByLabelText('Policy content'), { target: { value: 'Retention rules…' } });
+    fireEvent.click(screen.getByText('Save as draft'));
+    await waitFor(() =>
+      expect(standardApi.createPolicy).toHaveBeenCalledWith('Data Retention Policy', 'Retention rules…', undefined),
+    );
+  });
+
+  it('exceptions: requests with mandatory expiry and approves as admin', async () => {
+    mockBase();
+    (standardApi.listExceptions as ReturnType<typeof vi.fn>).mockResolvedValue({
+      exceptions: [{
+        id: 'x1',
+        control_id: 'c1111111-1111-1111-1111-111111111111',
+        title: 'Legacy patch delay',
+        rationale: 'Vendor fix scheduled',
+        state: 'requested',
+        expires_at: '2026-12-01T00:00:00Z',
+        requested_by: 'analyst-a',
+        requested_at: '2026-09-20T00:00:00Z',
+        approved_by: null,
+        approved_at: null,
+      }],
+    });
+    (standardApi.decideException as ReturnType<typeof vi.fn>).mockResolvedValue({ exception: { id: 'x1', state: 'approved' } });
+    render(<StandardConsole />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Exceptions' }));
+    await waitFor(() => expect(screen.getByText('Legacy patch delay')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Legacy patch delay'));
+    await waitFor(() => expect(screen.getByText('Approve exception')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Approve exception'));
+    await waitFor(() => expect(standardApi.decideException).toHaveBeenCalledWith('x1', 'approved'));
   });
 });

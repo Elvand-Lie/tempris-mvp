@@ -193,18 +193,38 @@ class TestSummaryTiles:
         by_source = {f["source"]: f for f in coverage["feeds"]}
         assert by_source["epss"]["status"] == "unknown"
 
-        # an unhealthy feed renders STALE, loudly
+        # A successful old fetch is still stale, even if the stored flag is true.
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE sync_state SET is_healthy = FALSE "
-                    "WHERE source = 'kev';"
+                    "UPDATE sync_state SET is_healthy = TRUE, sync_enabled = TRUE, "
+                    "last_successful_at = now() - interval '2 days' "
+                    "WHERE source = 'epss';"
                 )
             conn.commit()
         coverage = client.get("/api/ciso/summary", headers=analyst_headers).json()[
             "coverage_quality"
         ]
         by_source = {f["source"]: f for f in coverage["feeds"]}
+        assert by_source["epss"]["status"] == "stale"
+
+        # Disabled automatic sync must not make a recent snapshot look healthy.
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE sync_state SET is_healthy = TRUE, sync_enabled = FALSE, "
+                    "last_successful_at = now() WHERE source = 'nvd';"
+                )
+                cur.execute(
+                    "UPDATE sync_state SET is_healthy = FALSE, sync_enabled = TRUE, "
+                    "last_successful_at = now() WHERE source = 'kev';"
+                )
+            conn.commit()
+        coverage = client.get("/api/ciso/summary", headers=analyst_headers).json()[
+            "coverage_quality"
+        ]
+        by_source = {f["source"]: f for f in coverage["feeds"]}
+        assert by_source["nvd"]["status"] == "stale"
         assert by_source["kev"]["status"] == "stale"
         assert by_source["kev"]["is_healthy"] is False
 

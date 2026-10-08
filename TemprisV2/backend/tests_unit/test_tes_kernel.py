@@ -233,6 +233,42 @@ def test_missing_intrinsic_is_unscoreable():
     assert er.kev_state is KevTernaryState.NOT_LISTED
 
 
+def test_unscoreable_with_established_er_rung_renders_axis_truthfully():
+    """UNSCOREABLE decomposition defect fix: an established ER rung (analyst-
+    reviewed observed exploitation → ER 10) is no longer erased when the
+    intrinsic is missing — the row renders known/10 with the winning rung's
+    provenance, while the result stays UNSCOREABLE with no contributions."""
+    er = ExploitRealityInput(
+        exact_exposure_fresh=ExactExposureEvidence(
+            ExactExposureEvidenceState.FRESH_QUALIFYING,
+            kind=EvidenceKind.OBSERVED_EXPLOITATION, observed_at=NOW,
+            source="red-team", provenance_class=ProvenanceClass.ANALYST_ENTERED,
+        )
+    )
+    r = compute_tes(TesInputs(
+        intrinsic=None,
+        exploit_reality=er,
+        criticality=crit(CriticalityLabel.CRITICAL),
+        reachability=reach(ReachabilityVantage.EXTERNAL),
+        business_impact=bi(D("7")),
+    ))
+    assert r.state is TesState.UNSCOREABLE
+    assert r.value is None
+    assert r.known_axes == ()
+    assert r.known_weight == D("0")
+    assert all(x.contribution is None for x in r.decomposition)
+    er_row = row(r, AxisId.EXPLOIT_REALITY)
+    assert er_row.state == "known"
+    assert er_row.raw_value == D("10")
+    assert er_row.selected_rung == "exact_exposure_evidence"
+    assert er_row.provenance_class is ProvenanceClass.ANALYST_ENTERED
+    assert er_row.freshness is FreshnessState.FRESH
+    assert er_row.observed_at == NOW
+    assert er_row.source == "red-team"
+    assert "UNSCOREABLE" in (er_row.reason or "")
+    assert er_row.effective_weight is None
+
+
 def test_stale_intrinsic_is_unscoreable():
     r = compute_tes(TesInputs(
         intrinsic=intr(D("9.0"), freshness=FreshnessState.STALE),

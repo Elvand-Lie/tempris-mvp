@@ -9,6 +9,7 @@ import {
   SssTaxonomyClass,
 } from '../types';
 import {
+  connectorRegistrationLabel,
   INTAKE_SOURCES,
   INTAKE_SOURCE_LABELS,
   shortId,
@@ -34,6 +35,9 @@ export const IntakeWorkbench: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<IntakeRecord | null>(null);
+  // bumped when a connector destination is registered/updated, so the submit
+  // selector offers the new destination without a page reload
+  const [connectorVersion, setConnectorVersion] = useState(0);
   const detailRef = useRef<HTMLDivElement>(null);
 
   const loadQueue = useCallback(async () => {
@@ -106,11 +110,16 @@ export const IntakeWorkbench: React.FC = () => {
 
       <div className="spectrum-columns">
         <IntakeSubmitPanel
+          connectorVersion={connectorVersion}
           onCreated={() => {
             void loadQueue();
           }}
         />
-        <ConnectorPanel onRegistrationsChanged={loadQueue} />
+        <ConnectorPanel
+          onRegistrationsChanged={() => {
+            setConnectorVersion((version) => version + 1);
+          }}
+        />
       </div>
     </section>
   );
@@ -122,8 +131,9 @@ export const IntakeWorkbench: React.FC = () => {
 // ---------------------------------------------------------------------------
 
 const IntakeSubmitPanel: React.FC<{
+  connectorVersion: number;
   onCreated: (result: IntakeCreateResult) => void;
-}> = ({ onCreated }) => {
+}> = ({ connectorVersion, onCreated }) => {
   const [source, setSource] = useState<IntakeSource>('MANUAL');
   const [title, setTitle] = useState('');
   const [severity, setSeverity] = useState<FindingSeverity>('medium');
@@ -131,7 +141,12 @@ const IntakeSubmitPanel: React.FC<{
   const [canonicalCve, setCanonicalCve] = useState('');
   const [assetId, setAssetId] = useState('');
   const [payloadText, setPayloadText] = useState('');
+  // The destination is CHOSEN from the tenant's active registrations — never
+  // typed: the state holds a full registration UUID and the control is a
+  // selector labelled by name + adapter (INTAKE-CONNECTOR-02).
   const [registrationId, setRegistrationId] = useState('');
+  const [registrations, setRegistrations] = useState<IntakeConnectorRegistration[]>([]);
+  const [registrationsError, setRegistrationsError] = useState<string | null>(null);
   const [sourceEventId, setSourceEventId] = useState('');
   const [useTaxonomy, setUseTaxonomy] = useState(false);
   const [taxonomyClass, setTaxonomyClass] = useState<SssTaxonomyClass | ''>('');
@@ -140,6 +155,46 @@ const IntakeSubmitPanel: React.FC<{
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const availableRegistrations = registrations.filter((registration) => registration.status === 'active');
+
+  useEffect(() => {
+    let active = true;
+    setRegistrationsError(null);
+    void (async () => {
+      try {
+        const loaded = await api.intake.listConnectors();
+        if (active) setRegistrations(loaded);
+      } catch (cause: any) {
+        if (active) {
+          // A refresh failure must not leave PRIOR registrations selectable:
+          // a stale option could be submitted against a destination that no
+          // longer exists (reviewer note). Clear, then surface the failure.
+          setRegistrations([]);
+          setRegistrationsError(cause.message || 'Connector registrations could not be loaded.');
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [connectorVersion]);
+
+  // a registration that is no longer active (or no longer loaded) can never be
+  // submitted against
+  useEffect(() => {
+    const activeIds = registrations
+      .filter((registration) => registration.status === 'active')
+      .map((registration) => registration.id);
+    setRegistrationId((current) => (current && !activeIds.includes(current) ? '' : current));
+  }, [registrations]);
+
+  // Eligibility is MEMBERSHIP in the active list, not merely "something is
+  // selected" — a selection that is not currently active is not submittable.
+  const selectedRegistrationIsActive = availableRegistrations.some(
+    (registration) => registration.id === registrationId
+  );
+  const registrationMissing = source === 'CONNECTOR' && !selectedRegistrationIsActive;
 
   const payloadError = (() => {
     if (!payloadText.trim()) return 'The source payload is mandatory — a JSON object.';
@@ -158,7 +213,7 @@ const IntakeSubmitPanel: React.FC<{
   const subtypeOptions = taxonomyClass ? taxonomySubtypeOptions(taxonomyClass) : null;
 
   const submit = async () => {
-    if (payloadError || !title.trim()) return;
+    if (payloadError || !title.trim() || registrationMissing) return;
     setSubmitting(true);
     setError(null);
     setNotice(null);
@@ -287,15 +342,32 @@ const IntakeSubmitPanel: React.FC<{
           {source === 'CONNECTOR' && (
             <>
               <div className="form-group">
-                <label htmlFor="intake-create-registration">Connector registration (required for CONNECTOR)</label>
-                <input
+                <label htmlFor="intake-create-registration">Connector destination (required for CONNECTOR)</label>
+                <select
                   id="intake-create-registration"
-                  type="text"
                   className="form-control"
                   value={registrationId}
                   onChange={(event) => setRegistrationId(event.target.value)}
-                  placeholder="Registration UUID (see connector panel)"
-                />
+                  disabled={!availableRegistrations.length}
+                >
+                  <option value="">
+                    {registrationsError
+                      ? 'Registrations could not be loaded'
+                      : availableRegistrations.length
+                        ? 'Select a registered destination…'
+                        : 'No active connector registrations'}
+                  </option>
+                  {availableRegistrations.map((registration) => (
+                    <option key={registration.id} value={registration.id}>
+                      {connectorRegistrationLabel(registration)}
+                    </option>
+                  ))}
+                </select>
+                <small className="intake-muted">
+                  Chosen from this tenant&apos;s active registrations (register one in the connector panel below); the
+                  full registration id is submitted — it is never typed.
+                </small>
+                {registrationsError && <small role="alert" className="intake-muted">{registrationsError}</small>}
               </div>
               <div className="form-group">
                 <label htmlFor="intake-create-event">Source event id (optional, replay identity)</label>
@@ -405,7 +477,7 @@ const IntakeSubmitPanel: React.FC<{
             </>
           )}
           <div className="form-group spectrum-form-actions">
-            <button type="submit" className="btn btn-primary" disabled={submitting || !title.trim() || Boolean(payloadError)}>
+            <button type="submit" className="btn btn-primary" disabled={submitting || !title.trim() || Boolean(payloadError) || registrationMissing}>
               {submitting ? 'Submitting…' : 'Submit intake record'}
             </button>
           </div>
@@ -500,8 +572,8 @@ const ConnectorPanel: React.FC<{ onRegistrationsChanged: () => void }> = ({ onRe
     <div className="spectrum-section intake-connectors" aria-labelledby="intake-connectors-title">
       <h3 id="intake-connectors-title">Connector registrations</h3>
       <p className="spectrum-muted">
-        Connectors are transport, never authority: a registered adapter writes intake records through its destination
-        routing — never findings.
+        Connectors are transport, never authority: a registered destination gates which payloads may enter intake as
+        records — never findings.
       </p>
 
       {loading && <div role="status" className="spectrum-state">Loading registrations…</div>}
@@ -611,6 +683,9 @@ const ConnectorPanel: React.FC<{ onRegistrationsChanged: () => void }> = ({ onRe
             </button>
           </div>
         </div>
+        <small className="intake-muted">
+          No adapter executes yet — registrations are admission records; routing is stored as a note.
+        </small>
       </form>
       {notice && <div role="status" className="spectrum-notice">{notice}</div>}
       {formError && (

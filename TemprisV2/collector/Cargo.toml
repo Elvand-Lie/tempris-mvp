@@ -33,6 +33,7 @@ egui = "0.30"
 sha2 = "0.10"
 semver = { version = "1.0", features = ["serde"] }
 regex = "1.10"
+get_if_addrs = "0.5.3"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]

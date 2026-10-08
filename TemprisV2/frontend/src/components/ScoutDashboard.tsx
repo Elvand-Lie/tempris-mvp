@@ -22,6 +22,12 @@ export function boundedEvidence(value: unknown): string {
   return `${new TextDecoder().decode(bytes.slice(0, EVIDENCE_LIMIT))}\n… evidence truncated at 32 KiB`;
 }
 
+export function boundedText(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  if (bytes.length <= EVIDENCE_LIMIT) return value;
+  return `${new TextDecoder().decode(bytes.slice(0, EVIDENCE_LIMIT))}\n… excerpt truncated at 32 KiB`;
+}
+
 function authorizationReason(asset: Asset | undefined, authorization: ScanAuthorization | null | undefined): string | null {
   if (!asset) return 'Select an existing active Asset.';
   if (!authorization) return 'Manual exact-target authorization is required in Assets Console.';
@@ -61,21 +67,34 @@ export const ScoutDashboard: React.FC<Props> = ({ assets, authorizations, onOpen
   );
   const excludedCount = assets.filter((asset) => asset.status !== 'active').length;
   const selectedAsset = eligibleAssets.find((asset) => asset.id === selectedAssetId);
+  const selectedCollector = selectedAsset?.network_scope === 'internal'
+    ? readiness?.collectors?.find((collector) => collector.id === selectedAsset.collector_id)
+    : undefined;
   const selectedAuthorization = selectedAsset ? authorizations[selectedAsset.id] : null;
   const authBlocker = authorizationReason(selectedAsset, selectedAuthorization);
 
   let routeBlocker: string | null = null;
   if (selectedAsset) {
-    if (selectedAsset.network_scope === 'internet') {
-      const centralBlockers = readiness?.profiles[profile]?.blockers || [];
-      if (centralBlockers.length > 0) {
-        routeBlocker = `Required scanner unavailable: ${centralBlockers.join(', ')}.`;
+    if (!readiness) {
+      // Fail closed: without live readiness neither route can be verified, so an
+      // unloaded overview must never read as "ready for server validation".
+      routeBlocker = 'Live scanner readiness is unavailable, so the selected route cannot be verified. Refresh live data before launching.';
+    } else if (selectedAsset.network_scope === 'internet') {
+      // `profiles` is derived server-side from the fixed engine requirements, so a
+      // key can be absent from the payload even though the type declares both.
+      // An absent entry is NOT an empty blocker list: fail closed rather than let
+      // a gap in the payload read as "ready for server validation".
+      const centralProfile: ScoutReadiness['profiles'][ScoutProfile] | undefined = readiness.profiles[profile];
+      if (!centralProfile) {
+        routeBlocker = `Central VPS reports no readiness for the selected profile '${profile}'. Refresh live data before launching.`;
+      } else if (centralProfile.blockers.length > 0) {
+        routeBlocker = `Central VPS is missing a required scanner: ${centralProfile.blockers.join(', ')}.`;
       }
     } else if (selectedAsset.network_scope === 'internal') {
       if (!selectedAsset.collector_id) {
         routeBlocker = 'Internal asset requires assigned collector in Assets Console.';
       } else {
-        const col = readiness?.collectors?.find((c) => c.id === selectedAsset.collector_id);
+        const col = selectedCollector;
         if (!col || !col.connected) {
           const colName = col?.name || selectedAsset.collector_id;
           routeBlocker = `Assigned Collector '${colName}' is offline.`;
@@ -97,6 +116,11 @@ export const ScoutDashboard: React.FC<Props> = ({ assets, authorizations, onOpen
   }
 
   const launchBlocker = authBlocker || routeBlocker;
+  const selectedRoute = !selectedAsset
+    ? 'No Asset selected'
+    : selectedAsset.network_scope === 'internal'
+      ? `Selected Collector: ${selectedCollector?.name || selectedAsset.collector_id || 'unassigned'}`
+      : 'Central VPS';
 
   useEffect(() => {
     if (!eligibleAssets.some((asset) => asset.id === selectedAssetId)) {
@@ -165,19 +189,25 @@ export const ScoutDashboard: React.FC<Props> = ({ assets, authorizations, onOpen
         <button className="btn btn-secondary" type="button" onClick={loadOverview} disabled={loading}>Refresh live data</button>
       </div>
 
-      {/* Partial readiness banner (H.2, H.3) */}
+      {/* Partial readiness banner (H.2, H.3) — scoped to the selected Asset's own route */}
       {(() => {
-        const hasPartialCollector = readiness?.collectors?.some((c) => {
-          const nucleiReady = c.capabilities?.nuclei?.available || c.capabilities?.nuclei?.status === 'ready' || c.capabilities?.nuclei?.status === 'installed';
-          const nmapReady = c.capabilities?.nmap?.available || c.capabilities?.nmap?.status === 'ready';
-          return nucleiReady && !nmapReady;
-        });
         const nucleiEngine = readiness?.engines?.find((e) => e.engine === 'nuclei');
         const nmapEngine = readiness?.engines?.find((e) => e.engine === 'nmap');
-        const hasPartialCentral = (nucleiEngine?.state === 'available' || nucleiEngine?.state === 'ready') &&
+        const hasPartialCentral = selectedAsset?.network_scope === 'internet' &&
+                                  (nucleiEngine?.state === 'available' || nucleiEngine?.state === 'ready') &&
                                   (nmapEngine?.state === 'unavailable' || nmapEngine?.state === 'missing');
+        // Mirrors the launch gate: a Collector that is offline or not active is
+        // blocked for a different reason, so it must not advertise an Nmap install.
+        const hasPartialCollector = selectedAsset?.network_scope === 'internal' &&
+          Boolean(selectedCollector?.connected) &&
+          selectedCollector?.operator_status === 'active' &&
+          Boolean(selectedCollector?.capabilities?.nuclei?.available) &&
+          !selectedCollector?.capabilities?.nmap?.available;
 
-        if (hasPartialCollector || hasPartialCentral) {
+        if (hasPartialCentral || hasPartialCollector) {
+          const partialScope = hasPartialCentral
+            ? 'Central VPS'
+            : `Selected Collector: ${selectedCollector?.name || selectedAsset?.collector_id || 'unassigned'}`;
           return (
             <div
               className="scout-alert"
@@ -207,7 +237,10 @@ export const ScoutDashboard: React.FC<Props> = ({ assets, authorizations, onOpen
                 </span>
               </div>
               <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#e2e8f0' }}>
-                Managed Nuclei vulnerability scanning is ready. However, port discovery requires Nmap, which is not detected. Nmap must be installed manually from official{' '}
+                {partialScope}: Nuclei is ready, but port discovery requires Nmap, which is not detected.{' '}
+                {hasPartialCentral
+                  ? 'Nmap must be installed manually on the Central VPS host from official '
+                  : 'Nmap must be installed manually on that Collector host from official '}
                 <a
                   href="https://nmap.org"
                   target="_blank"
@@ -216,7 +249,7 @@ export const ScoutDashboard: React.FC<Props> = ({ assets, authorizations, onOpen
                 >
                   nmap.org
                 </a>{' '}
-                (version 7.90+ with Npcap).
+                (version 7.90 or newer{hasPartialCentral ? '' : ' with Npcap'}).
               </p>
             </div>
           );
@@ -226,7 +259,9 @@ export const ScoutDashboard: React.FC<Props> = ({ assets, authorizations, onOpen
 
       {error && <div className="scout-alert" role="alert">{error} <button type="button" onClick={loadOverview}>Retry</button></div>}
 
-      <div className="scout-grid scout-readiness" aria-label="Scanner readiness">
+      <h2>Central VPS scanner readiness</h2>
+      <p>Used for public Assets. Collector scans use the assigned Collector's tools below.</p>
+      <div className="scout-grid scout-readiness" aria-label="Central VPS scanner readiness">
         {(readiness?.engines || []).map((engine) => (
           <article className="scout-card" key={engine.engine}>
             <span className={`scout-state ${engine.state}`}>{engine.state}</span>
@@ -235,6 +270,35 @@ export const ScoutDashboard: React.FC<Props> = ({ assets, authorizations, onOpen
             {engine.engine === 'nuclei' && <p>Templates {engine.templates_version || 'version unreported'}</p>}
           </article>
         ))}
+        {loading && !readiness && <div className="scout-card">Checking live scanner readiness…</div>}
+        {!loading && !readiness && <div className="scout-card">Central VPS readiness unavailable.</div>}
+      </div>
+
+      <section aria-label="Selected Collector scanner readiness">
+        <h2>Selected Collector scanner readiness</h2>
+        {selectedAsset?.network_scope === 'internal' ? (
+          <>
+            <p>{selectedRoute}{selectedCollector?.connected ? ' · connected' : ' · offline or unassigned'}</p>
+            {selectedCollector && (
+              <div className="scout-grid scout-readiness">
+                {(['nmap', 'nuclei'] as const).map((engine) => {
+                  const capability = selectedCollector.capabilities?.[engine];
+                  return <article className="scout-card" key={engine}>
+                    <span className={`scout-state ${capability?.available ? 'available' : 'unavailable'}`}>
+                      {capability?.available ? 'available' : 'unavailable'}
+                    </span>
+                    <h2>Collector {engine === 'nmap' ? 'Nmap' : 'Nuclei'}</h2>
+                    <p>Engine {capability?.version || 'version unreported'}</p>
+                    {engine === 'nuclei' && <p>Templates {capability?.templates_version || 'version unreported'}</p>}
+                  </article>;
+                })}
+              </div>
+            )}
+          </>
+        ) : <p>Select an internal Asset to inspect its assigned Collector.</p>}
+      </section>
+
+      <div className="scout-grid" aria-label="Collector fleet status">
         {readiness?.collectors_summary && (
           <article className="scout-card">
             <span className={`scout-state ${readiness.collectors_summary.connected > 0 ? 'available' : 'unavailable'}`}>
@@ -256,7 +320,6 @@ export const ScoutDashboard: React.FC<Props> = ({ assets, authorizations, onOpen
             <p>{readiness.collector.message}</p>
           </article>
         )}
-        {loading && !readiness && <div className="scout-card">Checking live scanner readiness…</div>}
       </div>
 
       <section className="scout-launch" aria-labelledby="launch-title">
@@ -290,7 +353,7 @@ export const ScoutDashboard: React.FC<Props> = ({ assets, authorizations, onOpen
           </button>
         </div>
         <div className="scout-gate" role="status">
-          <strong>{launchBlocker ? 'Launch blocked' : 'Ready for server validation'}</strong>
+          <strong>{launchBlocker ? 'Launch blocked' : 'Ready for server validation'} · {selectedRoute}</strong>
           <span>{launchBlocker || `Authorization approved until ${stamp(selectedAuthorization?.expires_at || null)}.`}</span>
           {authBlocker && <button type="button" onClick={onOpenAssets}>Open Assets Console</button>}
           {excludedCount > 0 && <small>{excludedCount} inactive Asset{excludedCount === 1 ? '' : 's'} excluded.</small>}
@@ -334,6 +397,18 @@ export const ScoutDashboard: React.FC<Props> = ({ assets, authorizations, onOpen
               {selectedJob.source_health.map((health) => <div key={`${health.ordinal}-${health.engine}`}>
                 <strong>{health.ordinal}. {health.engine}</strong> <span className={`scout-state ${health.state}`}>{health.state}</span>
                 <small>Engine {health.engine_version || 'unreported'} · Templates {health.templates_version || 'unreported'} · Exit {health.exit_code ?? '—'} · {health.stdout_bytes}B out / {health.stderr_bytes}B err · {stamp(health.started_at)} → {stamp(health.completed_at)}</small>
+                {health.detail && <small className="scout-error">{health.detail}</small>}
+                {health.engine === 'nuclei' && health.parse_stats && (
+                  <small data-testid="nuclei-parse-stats">
+                    Parsed {health.parse_stats.parsed_lines}/{health.parse_stats.total_lines} lines · {health.parse_stats.skipped_lines} skipped · {health.observation_count ?? 0} persisted observations
+                  </small>
+                )}
+                {health.engine === 'nuclei' && health.sanitized_output_excerpt && (
+                  <details data-testid="nuclei-output-excerpt">
+                    <summary>Inspect sanitized output</summary>
+                    <pre>{boundedText(health.sanitized_output_excerpt)}</pre>
+                  </details>
+                )}
               </div>)}
             </div>
             {!observations.length && <p className="scout-empty">This job has no persisted observations.</p>}
@@ -345,7 +420,9 @@ export const ScoutDashboard: React.FC<Props> = ({ assets, authorizations, onOpen
                 <Evidence row={row} />
               </article>;
             })}</div>}
-            {vulnerabilities.length > 0 && <div><h3>Vulnerabilities</h3>{vulnerabilities.map((row) => {
+            {selectedJob.profile === 'VULNERABILITY_ASSESSMENT' && <div><h3>Vulnerabilities</h3>
+              {vulnerabilities.length === 0 && <p className="scout-empty" data-testid="vulnerabilities-empty">0 persisted vulnerability observations</p>}
+              {vulnerabilities.map((row) => {
               const event = row.evidence.event || {};
               return <article className="scout-observation" key={row.id}>
                 <strong>{event['template-id'] || 'Template unreported'} · {event.info?.severity || 'severity unreported'}</strong>

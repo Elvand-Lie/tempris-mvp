@@ -342,25 +342,27 @@ class TestWorkflow:
 
 
 class TestHandoffs:
-    def test_strike_request_creates_a_draft(self, client, analyst_headers, confirmed_exposure):
+    def test_strike_request_is_superseded_and_fails_closed(
+        self, client, analyst_headers, confirmed_exposure
+    ):
+        # Corrected PRD v1.12: the engagement-scoped chain is superseded. The
+        # corrected Ch.7 STRIKE handoff is an optional CLIENT-side pre-fill of
+        # the toolbox run composer — no engagement draft, no history event.
         eid = confirmed_exposure["exposure_id"]
         r = client.post(
             f"/api/spectrum/exposures/{eid}/strike-request",
             json={"note": "validate RCE on staging twin"},
             headers=analyst_headers,
         )
-        assert r.status_code == 201, r.text
-        draft = r.json()["strike_request"]
-        assert draft["state"] == "draft"
-        assert draft["exposure_id"] == eid
-        assert draft["requested_by"] == "analyst-a"
+        assert r.status_code == 410, r.text
+        assert r.json()["detail"]["code"] == "legacy_strike_model_superseded"
 
         history = client.get(
             f"/api/spectrum/exposures/{eid}/history", headers=analyst_headers
         ).json()["history"]
-        assert history[-1]["event"] == "strike_requested"
+        assert all(entry["event"] != "strike_requested" for entry in history)
 
-    def test_edip_handoff_is_manual_and_one_open_per_exposure(
+    def test_edip_handoff_is_manual_and_creates_one_decision(
         self, client, analyst_headers, confirmed_exposure
     ):
         eid = confirmed_exposure["exposure_id"]
@@ -371,15 +373,29 @@ class TestHandoffs:
         )
         assert r.status_code == 201, r.text
         body = r.json()
-        assert body["edip_handoff"]["state"] == "NEEDS_DECISION"
+        assert body["edip_handoff"]["state"] == "CONSUMED"
+        assert body["edip_handoff"]["edip_decision_id"] == body["decision"]["id"]
+        assert body["decision"]["state"] == "needs_decision"
+        assert body["decision"]["handoff_id"] == body["edip_handoff"]["id"]
         assert body["workflow"]["analysis_state"] == "action_required"
         assert body["workflow"]["edip_handoff_at"] is not None
 
-        # a standing handoff blocks a second — recorded and retryable, never silent
+        # a standing decision blocks a second handoff — the whole boundary
+        # rolls back, so no second handoff row is stranded
         r = client.post(
             f"/api/spectrum/exposures/{eid}/edip-handoff", json={}, headers=analyst_headers,
         )
         assert r.status_code == 409
+        assert r.json()["detail"]["code"] == "edip_conflict"
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT count(*) FROM spectrum_edip_handoffs "
+                    "WHERE tenant_id = %s AND exposure_id = %s;",
+                    (str(TENANT_A), str(eid)),
+                )
+                assert cur.fetchone()["count"] == 1
 
         # the marker shows in the queue
         row = next(
@@ -388,6 +404,93 @@ class TestHandoffs:
         )
         assert row["analysis_state"] == "action_required"
         assert row["edip_handoff_at"] is not None
+
+    def test_handoff_decision_is_visible_in_the_edip_queue(
+        self, client, analyst_headers, confirmed_exposure
+    ):
+        eid = confirmed_exposure["exposure_id"]
+        r = client.post(
+            f"/api/spectrum/exposures/{eid}/edip-handoff",
+            json={"note": "queue visibility"},
+            headers=analyst_headers,
+        )
+        assert r.status_code == 201, r.text
+        decision_id = r.json()["decision"]["id"]
+
+        queue = client.get("/api/edip/queue", headers=analyst_headers).json()
+        items = [i for i in queue["items"] if i["exposure_id"] == eid]
+        assert len(items) == 1
+        assert items[0]["decision_id"] == decision_id
+        assert items[0]["state"] == "needs_decision"
+
+        # the duplicate request may not create a second decision
+        r = client.post(
+            f"/api/spectrum/exposures/{eid}/edip-handoff", json={}, headers=analyst_headers,
+        )
+        assert r.status_code == 409
+        queue = client.get("/api/edip/queue", headers=analyst_headers).json()
+        assert len([i for i in queue["items"] if i["exposure_id"] == eid]) == 1
+
+    def test_handoff_failure_rolls_back_handoff_and_decision(
+        self, client, analyst_headers, admin_headers, confirmed_exposure
+    ):
+        eid = confirmed_exposure["exposure_id"]
+        # a standing decision (created directly, no handoff) makes the
+        # decision leg of the handoff refuse — the whole transaction must
+        # roll back: no handoff row, no workflow state change, no new decision
+        r = client.post(
+            "/api/edip/decisions",
+            json={"exposure_id": str(eid), "decision_type": "remediate"},
+            headers=admin_headers,
+        )
+        assert r.status_code == 201, r.text
+        standing_id = r.json()["decision"]["id"]
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT analysis_state FROM spectrum_exposure_workflow "
+                    "WHERE tenant_id = %s AND exposure_id = %s;",
+                    (str(TENANT_A), str(eid)),
+                )
+                row = cur.fetchone()
+        before_state = row["analysis_state"] if row else None
+
+        r = client.post(
+            f"/api/spectrum/exposures/{eid}/edip-handoff",
+            json={"note": "should roll back"},
+            headers=analyst_headers,
+        )
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["code"] == "edip_conflict"
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT count(*) FROM spectrum_edip_handoffs "
+                    "WHERE tenant_id = %s AND exposure_id = %s;",
+                    (str(TENANT_A), str(eid)),
+                )
+                assert cur.fetchone()["count"] == 0
+                cur.execute(
+                    "SELECT count(*) FROM edip_decisions "
+                    "WHERE tenant_id = %s AND exposure_id = %s;",
+                    (str(TENANT_A), str(eid)),
+                )
+                assert cur.fetchone()["count"] == 1
+                cur.execute(
+                    "SELECT analysis_state FROM spectrum_exposure_workflow "
+                    "WHERE tenant_id = %s AND exposure_id = %s;",
+                    (str(TENANT_A), str(eid)),
+                )
+                row = cur.fetchone()
+                after_state = row["analysis_state"] if row else None
+        assert before_state == after_state
+        assert after_state != "action_required"
+
+        # the standing decision is untouched
+        r = client.get(f"/api/edip/decisions/{standing_id}", headers=admin_headers)
+        assert r.status_code == 200
 
     def test_detail_renders_decomposition_workflow_and_bi(
         self, client, analyst_headers, confirmed_exposure

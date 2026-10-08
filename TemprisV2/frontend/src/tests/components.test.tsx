@@ -127,7 +127,7 @@ describe('Tempris V2 Frontend Components', () => {
     expect(screen.queryByText('Organization')).not.toBeInTheDocument();
   });
 
-  it('denies the platform dashboard to tenant users without calling platform APIs', async () => {
+  it('routes a tenant identity on the platform dashboard to its tenant workspace without calling platform APIs', async () => {
     window.history.replaceState({}, '', '/platform-dashboard');
     sessionStorage.setItem(SESSION_STORAGE_KEY, createMockToken('superadmin', 'tenant-owner@example.com'));
     vi.mocked(api.getTenantMetadata).mockResolvedValue({
@@ -137,10 +137,62 @@ describe('Tempris V2 Frontend Components', () => {
       effective_modules: ['ASSETS'],
       is_platform_admin: false,
     });
+    vi.mocked(api.getStats).mockResolvedValue({
+      total_assets: 0,
+      reachable_by_scout: 0,
+      authorized_to_scan: 0,
+      pending_authorization: 0,
+      no_scanner_available: 0,
+    });
+    vi.mocked(api.getAssets).mockResolvedValue([]);
+    vi.mocked(api.getCollectors).mockResolvedValue([]);
 
     render(<App />);
 
-    expect(await screen.findByRole('heading', { name: 'Platform access denied' })).toBeInTheDocument();
+    // The tenant workspace is reached directly: no denial screen, and the
+    // platform route is left behind.
+    expect(await screen.findByText(/Tempris V2 — Security Operations/i)).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/');
+    expect(screen.queryByText('Platform access denied')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Tempris Platform Administration' })).not.toBeInTheDocument();
+    expect(api.getPlatformTenants).not.toHaveBeenCalled();
+    expect(api.getCatalogue).not.toHaveBeenCalled();
+  });
+
+  it('routes a tenant login on the platform login route to the tenant workspace without calling platform APIs', async () => {
+    window.history.replaceState({}, '', '/platform-login');
+    const mockToken = createMockToken('superadmin', 'tenant-owner@example.com');
+    vi.mocked(api.login).mockImplementation(async () => {
+      sessionStorage.setItem(SESSION_STORAGE_KEY, mockToken);
+      return {
+        token: mockToken,
+        token_type: 'bearer',
+        expires_in: 3600,
+        tenant_id: '11111111-1111-1111-1111-111111111111',
+        role: 'superadmin',
+      };
+    });
+    vi.mocked(api.getStats).mockResolvedValue({
+      total_assets: 0,
+      reachable_by_scout: 0,
+      authorized_to_scan: 0,
+      pending_authorization: 0,
+      no_scanner_available: 0,
+    });
+    vi.mocked(api.getAssets).mockResolvedValue([]);
+    vi.mocked(api.getCollectors).mockResolvedValue([]);
+
+    render(<App />);
+
+    expect(screen.getByRole('heading', { name: 'Platform Administrator Sign In' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'tenant-owner@example.com' } });
+    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'tenant-password' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Sign In$/i }));
+
+    expect(await screen.findByText(/Tempris V2 — Security Operations/i)).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/');
+    expect(screen.queryByText('Platform access denied')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Tempris Platform Administration' })).not.toBeInTheDocument();
     expect(api.getPlatformTenants).not.toHaveBeenCalled();
     expect(api.getCatalogue).not.toHaveBeenCalled();
   });

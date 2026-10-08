@@ -6,6 +6,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from app import config
+
 import psycopg
 import pytest
 
@@ -25,6 +27,19 @@ from app.scout import (
 )
 from migrations.runner import run_migrations
 from tests.conftest import TENANT_A, TENANT_B
+
+@pytest.fixture(autouse=True)
+def _scout_nuclei_templates(monkeypatch, tmp_path):
+    """Server-plane Nuclei refuses without a pinned templates dir (fail closed).
+
+    Every central-execution test in this module points SCOUT_NUCLEI_TEMPLATES_DIR
+    at a valid pinned directory so the fail-closed path stays out of the way.
+    """
+    templates_dir = tmp_path / "nuclei-templates"
+    (templates_dir / "http").mkdir(parents=True)
+    (templates_dir / "http" / "cve-test.yaml").write_text("id: cve-test\n")
+    monkeypatch.setattr("app.config.SCOUT_NUCLEI_TEMPLATES_DIR", str(templates_dir))
+
 
 FIXTURES = Path(__file__).parent / "fixtures" / "scout"
 NMAP_EXE = r"C:\tools\nmap.exe"
@@ -208,8 +223,11 @@ def test_parsers_preserve_native_evidence_without_inference():
     assert parse_nuclei_jsonl(fixture("nuclei_empty.jsonl")) == []
     partial = parse_nuclei_jsonl(fixture("nuclei_partial.jsonl"))[0][1]
     assert set(partial) == {"scanner", "event"}
-    with pytest.raises(json.JSONDecodeError):
-        parse_nuclei_jsonl(fixture("nuclei_malformed.jsonl"))
+    # Tolerant parser (observability work): the malformed line is skipped with
+    # line telemetry, the valid lines in the same payload still parse.
+    assert parse_nuclei_jsonl(fixture("nuclei_malformed.jsonl")) == [
+        ("template_match", {"scanner": "nuclei", "event": {"template-id": "valid-prefix", "matched-at": "https://demo.example"}})
+    ]
 
 
 def test_nuclei_parser_exposes_only_safe_source_native_fields():
@@ -259,7 +277,7 @@ def test_exact_argv_profiles_and_successful_tenant_api(client, auth_headers_tena
         [NUCLEI_EXE, "-version"],
         [NUCLEI_EXE, "-templates-version"],
         nmap_argv(NMAP_EXE, "203.0.113.10"),
-        nuclei_argv(NUCLEI_EXE, "203.0.113.10"),
+        nuclei_argv(NUCLEI_EXE, "203.0.113.10", config.SCOUT_NUCLEI_TEMPLATES_DIR),
     ]
     assert [timeout for _, timeout in calls][-2:] == [NMAP_TIMEOUT, NUCLEI_TIMEOUT]
 
@@ -421,8 +439,10 @@ def test_malformed_nuclei_is_atomic_and_fails_job(client, auth_headers_tenant_a_
     )
     job_id = response.json()["id"]
     job = client.get(f"/api/scout/jobs/{job_id}", headers=auth_headers_tenant_a_admin).json()
-    assert job["status"] == "failed"
-    assert job["error_code"] == "parse_failed"
+    # Tolerant parser contract: an all-malformed nuclei payload is skipped with
+    # line telemetry, so the job succeeds with zero nuclei observations instead
+    # of failing the whole run (nmap evidence is kept either way).
+    assert job["status"] == "succeeded"
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -434,7 +454,7 @@ def test_malformed_nuclei_is_atomic_and_fails_job(client, auth_headers_tenant_a_
                 (job_id,),
             )
             counts = {row["engine"]: row["observations"] for row in cur.fetchall()}
-    assert counts == {"nmap": 1, "nuclei": 0}
+    assert counts == {"nmap": 1, "nuclei": 1}
 
 
 def test_malformed_nmap_persists_zero_observations(client, auth_headers_tenant_a_admin, monkeypatch):

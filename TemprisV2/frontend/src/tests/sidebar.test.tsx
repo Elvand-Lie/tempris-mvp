@@ -38,7 +38,7 @@ describe('Sidebar and module fallback', () => {
     const { rerender } = render(
       <Sidebar activeTab="org" onTabChange={vi.fn()} effectiveModules={[]} currentRole="admin" />
     );
-    expect(screen.queryByRole('button', { name: 'Organization' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Organization' })).toBeInTheDocument();
     rerender(
       <Sidebar activeTab="org" onTabChange={vi.fn()} effectiveModules={[]} currentRole="superadmin" />
     );

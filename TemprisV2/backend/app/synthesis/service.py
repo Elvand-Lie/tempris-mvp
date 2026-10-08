@@ -67,10 +67,13 @@ def _envelope(
     *,
     as_of: datetime,
     truncated: bool = False,
+    source_counts: Optional[dict[str, int]] = None,
 ) -> dict:
     """The answer envelope: the question, its DETERMINISTIC definition, the
     joined rows (each carrying source identities), the availability block,
-    and the read instant."""
+    and the read instant. ``source_counts`` is an additive diagnostic: the
+    BASE populations the correlation filters over, so an empty answer can be
+    distinguished from an unevaluable one. It never affects the rows."""
     missing = sorted(
         name for name, state in availability.items()
         if state["status"] == "unavailable"
@@ -85,6 +88,7 @@ def _envelope(
         "degraded": bool(missing),
         "row_count": len(rows),
         "truncated": truncated,
+        "source_counts": {k: int(v) for k, v in (source_counts or {}).items()},
         "rows": rows,
     }
 
@@ -196,6 +200,9 @@ def unremediated_serious(
     return _envelope(
         "unremediated_serious_exposures",
         definition, rows, _availability(), as_of=as_of, truncated=truncated,
+        source_counts={
+            "confirmed_exposures_active_assets": len(candidates),
+        },
     )
 
 
@@ -338,6 +345,10 @@ def accepted_risks_vs_obligations(
     return _envelope(
         "accepted_risks_vs_obligations",
         definition, rows, _availability(), as_of=as_of, truncated=truncated,
+        source_counts={
+            "accepted_risk_decisions": len(decisions),
+            "standard_obligations": len(obligations),
+        },
     )
 
 
@@ -397,6 +408,23 @@ def remediation_recurrence(
         )
         pairs = cur.fetchall()
 
+        cur.execute(
+            """
+            SELECT
+              (SELECT COUNT(*) FROM asset_exposures e
+               JOIN assets a
+                 ON a.tenant_id = e.tenant_id AND a.id = e.asset_id
+                AND a.status = 'active'
+               WHERE e.tenant_id = %s AND e.status = 'confirmed')
+                AS confirmed_episodes_active_assets,
+              (SELECT COUNT(*) FROM asset_exposures p
+               WHERE p.tenant_id = %s AND p.status = 'resolved')
+                AS resolved_episodes;
+            """,
+            (str(tenant_id), str(tenant_id)),
+        )
+        base_counts = cur.fetchone()
+
     rows: list[dict] = []
     truncated = False
     seen_current: set[str] = set()
@@ -433,6 +461,12 @@ def remediation_recurrence(
     return _envelope(
         "remediation_recurrence",
         definition, rows, _availability(), as_of=as_of, truncated=truncated,
+        source_counts={
+            "confirmed_episodes_active_assets": base_counts[
+                "confirmed_episodes_active_assets"
+            ],
+            "resolved_episodes": base_counts["resolved_episodes"],
+        },
     )
 
 
@@ -532,6 +566,7 @@ def coverage_gaps(
     return _envelope(
         "evidence_strength_vs_coverage_gaps",
         definition, rows, _availability(), as_of=as_of, truncated=truncated,
+        source_counts={"confirmed_exposures": len(candidates)},
     )
 
 
@@ -574,6 +609,19 @@ def weakness_recurrence(
             (str(tenant_id), max(2, min_assets)),
         )
         classes = cur.fetchall()
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS confirmed_episodes_active_assets
+            FROM asset_exposures e
+            JOIN assets a
+              ON a.tenant_id = e.tenant_id AND a.id = e.asset_id
+             AND a.status = 'active'
+            WHERE e.tenant_id = %s AND e.status = 'confirmed';
+            """,
+            (str(tenant_id),),
+        )
+        base_count = cur.fetchone()
 
     rows: list[dict] = []
     truncated = False
@@ -651,4 +699,9 @@ def weakness_recurrence(
     return _envelope(
         "weakness_class_recurrence",
         definition, rows, _availability(), as_of=as_of, truncated=truncated,
+        source_counts={
+            "confirmed_episodes_active_assets": base_count[
+                "confirmed_episodes_active_assets"
+            ],
+        },
     )

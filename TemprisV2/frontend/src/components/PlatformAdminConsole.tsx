@@ -4,6 +4,15 @@ import { PlatformTenant, PendingUser, EntitlementData, CatalogueData } from '../
 
 type SubTab = 'tenants' | 'pending';
 
+// ORG-01: activation and membership enablement are one atomic change for a
+// Platform Administrator. The queue shows which invitation the activation
+// will promote, so 'Active' after activation means real, in-force access.
+const invitationLabel = (membershipStatus: PendingUser['organization_membership_status']) => {
+  if (membershipStatus === 'active') return 'In force';
+  if (membershipStatus === 'disabled') return 'Withdrawn';
+  return 'Pending invitation';
+};
+
 export const PlatformAdminConsole: React.FC = () => {
   const [subTab, setSubTab] = useState<SubTab>('tenants');
 
@@ -517,6 +526,7 @@ export const PlatformAdminConsole: React.FC = () => {
                     <th>User</th>
                     <th>Organization</th>
                     <th>Role</th>
+                    <th>Invitation</th>
                     <th>Created</th>
                     <th>Action</th>
                   </tr>
@@ -532,6 +542,11 @@ export const PlatformAdminConsole: React.FC = () => {
                       </td>
                       <td data-label="Organization">{u.organization_name || 'Not assigned'}</td>
                       <td data-label="Role"><span className={`role-badge role-${u.organization_role || 'unknown'}`}>{u.organization_role || 'Unknown'}</span></td>
+                      <td data-label="Invitation">
+                        <span className={`badge ${u.organization_membership_status === 'active' ? 'badge-success' : 'badge-warning'}`}>
+                          {invitationLabel(u.organization_membership_status)}
+                        </span>
+                      </td>
                       <td data-label="Created"><span className="control-secondary">{new Date(u.created_at).toLocaleDateString()}</span></td>
                       <td data-label="Action">
                         <button

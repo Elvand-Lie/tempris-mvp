@@ -69,6 +69,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 import psycopg
@@ -101,6 +102,12 @@ class SssNotFoundError(ExposureDomainError):
 
 class SssConflictError(ExposureDomainError):
     """A concurrency attempt lost (stale revision, superseded current)."""
+
+
+class SssNotExploitShapedError(ExposureDomainError):
+    """The VRT derivation path was requested for a finding whose latest
+    classification is not exploit-shaped (only BLFLAW findings take the
+    VRT path; other classes take the rubric/manual paths)."""
 
 
 class SssRubricError(ExposureDomainError, ValueError):
@@ -274,6 +281,68 @@ def _strict_sss10(value) -> Decimal:
 # ---------------------------------------------------------------------------
 # Pure VRT mapping (§3.6.6 #1) — machine-checkable against the locked table
 # ---------------------------------------------------------------------------
+
+PINNED_VRT_RELEASE = "bugcrowd-vrt-1.19.1"  # approved seed row: migration 046 (official Bugcrowd VRT v1.19.1, vendored below)
+
+# Vendored official Bugcrowd VRT taxonomy, release v1.19.1 (fetched once from
+# github.com/bugcrowd/vulnerability-rating-taxonomy at tag v1.19.1). This file
+# is the release content in code — version-matched to PINNED_VRT_RELEASE —
+# because migration 019's 'vrt_release' kind admits no stored content. Loaded
+# with stdlib json only; never fetched at runtime.
+_VRT_DATA_PATH = Path(__file__).resolve().parent / "data" / "vrt_bugcrowd_v1_19_1.json"
+
+_VRT_LEAF_PRIORITY_CACHE: Optional[dict[str, str]] = None
+
+
+def _vrt_leaf_priorities() -> dict[str, str]:
+    """Dotted VRT leaf id → policy priority ('P1'–'P5', or 'varies') for the
+    pinned vendored release. A leaf is a node without children; its JSON
+    priority is an int 1–5, None, or the literal 'varies' — None and
+    'varies' both mean the policy 'varies' resolution."""
+    global _VRT_LEAF_PRIORITY_CACHE
+    if _VRT_LEAF_PRIORITY_CACHE is None:
+        with open(_VRT_DATA_PATH, encoding="utf-8") as fh:
+            doc = json.load(fh)
+
+        def _walk(nodes, path):
+            for node in nodes:
+                dotted = ".".join((*path, node["id"]))
+                children = node.get("children") or []
+                if children:
+                    yield from _walk(children, (*path, node["id"]))
+                else:
+                    priority = node.get("priority")
+                    if priority in (None, "varies"):
+                        resolved = "varies"
+                    elif isinstance(priority, int) and 1 <= priority <= 5:
+                        resolved = f"P{priority}"
+                    else:
+                        raise SssClassificationError(
+                            f"vendored VRT release data is malformed at leaf "
+                            f"{dotted!r}: unsupported priority {priority!r}"
+                        )
+                    yield dotted, resolved
+
+        _VRT_LEAF_PRIORITY_CACHE = dict(_walk(doc["content"], ()))
+    return _VRT_LEAF_PRIORITY_CACHE
+
+
+def resolve_vrt_leaf_priority(vrt_id: str) -> str:
+    """Server-side authority: the pinned release's taxonomy decides the
+    priority for a VRT leaf id. A caller-supplied priority claim is never
+    authority — unknown or malformed leaf ids fail closed here."""
+    key = vrt_id.strip() if isinstance(vrt_id, str) else ""
+    if not key:
+        raise SssClassificationError("VRT id is required for the vrt path")
+    table = _vrt_leaf_priorities()
+    if key not in table:
+        raise SssClassificationError(
+            f"unknown VRT leaf id {vrt_id!r} for the pinned release "
+            f"{PINNED_VRT_RELEASE} — the taxonomy decides the priority, "
+            "never the caller"
+        )
+    return table[key]
+
 
 VRT_PRIORITY_TO_SSS: dict[str, Decimal] = {
     "P1": Decimal("10"),
@@ -887,6 +956,90 @@ def derive_sss_vrt(
         actor_id=actor_id, actor_role=actor_role,
         validation_state=validation_state,
         captured_revision=captured_revision,
+    )
+
+
+def derive_sss_vrt_for_finding(
+    conn: psycopg.Connection,
+    tenant_id: uuid.UUID,
+    finding_id: uuid.UUID,
+    *,
+    vrt_id: str,
+    vrt_priority: Optional[str] = None,
+    varies_facts: Optional[dict] = None,
+    evidence: dict,
+    actor_id: str,
+    actor_role: str,
+    validation_state: str = "single_source",
+    varies_resolver: Optional[Callable[[dict], Decimal]] = None,
+) -> dict:
+    """Production path-1 entry: derive SSS for a finding from its OWN stored
+    classification (intake classifies; this scores — intake is never touched).
+
+    The finding's LATEST classification row supplies the taxonomy; only an
+    exploit-shaped BLFLAW spine (subclass absent, subtype present) takes the
+    VRT path. ``vrt_id`` is the caller's exact VRT leaf id from the source
+    report/platform; the priority is resolved SERVER-SIDE from the pinned
+    vendored release taxonomy (``vrt_priority`` is only an optional claim —
+    a claim disagreeing with the resolved priority fails closed). The
+    release is pinned server-side to PINNED_VRT_RELEASE (approved seed row:
+    migration 046) — the client can never choose a version."""
+    resolved_priority = resolve_vrt_leaf_priority(vrt_id)
+    if vrt_priority is not None and vrt_priority.strip() != resolved_priority:
+        raise SssClassificationError(
+            f"supplied VRT priority claim {vrt_priority!r} disagrees with "
+            f"the pinned release's resolved priority {resolved_priority!r} "
+            f"for leaf {vrt_id!r} — the taxonomy decides, fail-closed"
+        )
+    with conn.cursor(row_factory=dict_row) as cur:
+        captured_revision = _read_finding_revision(cur, tenant_id, finding_id)
+        cur.execute(
+            """
+            SELECT taxonomy_class, taxonomy_subclass, taxonomy_subtype
+            FROM non_cve_classifications
+            WHERE tenant_id = %s AND finding_id = %s
+            ORDER BY created_at DESC
+            LIMIT 1;
+            """,
+            (str(tenant_id), str(finding_id)),
+        )
+        classification = cur.fetchone()
+    if classification is None:
+        raise SssNotFoundError(
+            f"Finding {finding_id} has no classification — classify it "
+            "(intake or an explicit classification) before deriving SSS"
+        )
+    taxonomy_class = classification["taxonomy_class"]
+    if taxonomy_class != "BLFLAW":
+        raise SssNotExploitShapedError(
+            f"only exploit-shaped BLFLAW findings take the VRT derivation "
+            f"path; this finding's latest classification is {taxonomy_class!r}"
+        )
+    if classification["taxonomy_subclass"] is not None:
+        raise SssClassificationError(
+            f"BLFLAW carries no subclass vocabulary — classification subclass "
+            f"{classification['taxonomy_subclass']!r} is off-spine"
+        )
+    if classification["taxonomy_subtype"] is None:
+        raise SssClassificationError(
+            "BLFLAW classification is missing its subtype — the spine has "
+            "no defaults"
+        )
+    return derive_sss_vrt(
+        conn, tenant_id, finding_id,
+        vrt_id=vrt_id.strip(),
+        vrt_priority=resolved_priority,
+        varies_facts=varies_facts,
+        pinned_release=PINNED_VRT_RELEASE,
+        taxonomy_class=taxonomy_class,
+        taxonomy_subclass=classification["taxonomy_subclass"],
+        taxonomy_subtype=classification["taxonomy_subtype"],
+        inputs=None,
+        evidence=evidence,
+        actor_id=actor_id,
+        actor_role=actor_role,
+        validation_state=validation_state,
+        varies_resolver=varies_resolver,
     )
 
 

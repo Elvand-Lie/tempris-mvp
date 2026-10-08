@@ -102,12 +102,25 @@ class IntakeRecordEvent(BaseModel):
 
 
 class IntakeClassify(BaseModel):
-    """Classification decision on the closed SSS spine (§3.6.5)."""
+    """Classification decision on the closed SSS spine (§3.6.5).
+
+    The rationale is MANDATORY (nonblank): every classification/reclassification
+    is an append-only decision, and a decision with no stated reason cannot be
+    audited later (§6:1141/1149). ``note`` stays as the free-form trail note.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     taxonomy: SssTaxonomyIn
+    rationale: str = Field(..., min_length=1)
     note: Optional[str] = None
+
+    @field_validator("rationale")
+    @classmethod
+    def _rationale_must_have_content(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("rationale must not be blank")
+        return v
 
 
 class IntakeStartReview(BaseModel):

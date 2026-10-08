@@ -1330,15 +1330,28 @@ def _build_er_row(
         er_observed = max(stamps) if stamps else None
 
     if not scored:
-        state = "unknown"
-        reason = (
-            unknown_reason
-            or "ER not scored: result is UNSCOREABLE (no authoritative intrinsic)"
-        )
-        if stale_higher:
-            reason = (reason + "; " if reason else "") + "; ".join(
-                name for name, _ in stale_higher
+        if er_value is not None:
+            # UNSCOREABLE decomposition: an established rung is real evidence
+            # — render it truthfully (raw_value/state/provenance/freshness)
+            # without implying a scored TES: the UNSCOREABLE path never calls
+            # _finalize_rows, so the contribution stays None.
+            state = "known"
+            reason = (
+                "overall result is UNSCOREABLE (no authoritative intrinsic); "
+                "axis rendered for decomposition only"
             )
+            if stale_higher:
+                reason += "; " + "; ".join(name for name, _ in stale_higher)
+        else:
+            state = "unknown"
+            reason = (
+                unknown_reason
+                or "ER not scored: result is UNSCOREABLE (no authoritative intrinsic)"
+            )
+            if stale_higher:
+                reason = (reason + "; " if reason else "") + "; ".join(
+                    name for name, _ in stale_higher
+                )
     elif er_value is None:
         state = "unknown"
         reason = unknown_reason or "no fresh evidence establishes any Exploit Reality rung"
@@ -1356,14 +1369,14 @@ def _build_er_row(
 
     return ExploitRealityDecompositionRow(
         axis=AxisId.EXPLOIT_REALITY,
-        raw_value=(er_value if scored else None),
+        raw_value=er_value,
         base_weight=WEIGHT_EXPLOIT_REALITY,
         effective_weight=None, contribution=None,
         state=state,
         provenance_class=er_provenance,
-        freshness=(FreshnessState.FRESH if (scored and er_value is not None)
+        freshness=(FreshnessState.FRESH if er_value is not None
                    else FreshnessState.UNKNOWN),
-        observed_at=(er_observed if (scored and er_value is not None) else None),
+        observed_at=(er_observed if er_value is not None else None),
         source=("; ".join(sources) if sources else None),
         reason=reason,
         selected_rung=rung,

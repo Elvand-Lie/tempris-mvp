@@ -73,6 +73,10 @@ export interface ScoutSourceHealth extends ScoutEngineReadiness {
   stderr_bytes: number;
   started_at: string | null;
   completed_at: string | null;
+  detail?: string | null;
+  sanitized_output_excerpt?: string | null;
+  parse_stats?: { total_lines: number; parsed_lines: number; skipped_lines: number } | null;
+  observation_count?: number | null;
 }
 
 export interface ScoutJob {
@@ -145,6 +149,10 @@ export interface CollectorCapabilities {
   nmap?: EngineCapability | null;
   nuclei?: EngineCapability | null;
   nuclei_templates?: EngineCapability | null;
+  // Phase-1 STRIKE toolbox readiness (additive; older reports omit them)
+  curl?: EngineCapability | null;
+  ffuf?: EngineCapability | null;
+  dig?: EngineCapability | null;
   collector_version?: string | null;
   manifest_sequence?: number | null;
   channel?: string | null;
@@ -172,8 +180,23 @@ export interface Collector {
   revoked_at?: string | null;
   server_url?: string | null;
   capabilities?: CollectorCapabilities | null;
+  last_toolchain_check?: ToolchainCheckRecord | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ToolchainCheckRecord {
+  check_id: string;
+  status: 'dispatched' | 'completed' | 'failed' | 'timed_out' | 'superseded';
+  requested_at: string;
+  finished_at?: string | null;
+  result?: {
+    received_at?: string;
+    update_status?: string | null;
+    last_checked_at?: string | null;
+    error?: string;
+    [key: string]: unknown;
+  } | null;
 }
 
 export interface CollectorCreatePayload {
@@ -338,7 +361,12 @@ export interface CollectorStats {
   paused_or_quarantined: number;
 }
 
-export type MembershipStatus = 'active' | 'disabled';
+// ORG-01 membership lifecycle. 'pending' means the invitation exists but the
+// account has never been activated, so the membership grants nothing: the
+// tenant Superadmin activates the account within their own tenant (Platform
+// retains provisioning/bootstrap; PRD Ch.5 as amended 2026-09-24). 'active'
+// is in force; 'disabled' is intentionally withdrawn.
+export type MembershipStatus = 'pending' | 'active' | 'disabled';
 export type UserStatus = 'active' | 'pending' | 'disabled';
 
 export interface OrgMember {
@@ -359,6 +387,10 @@ export interface MemberCreatePayload {
 export interface MemberUpdatePayload {
   role?: UserRole;
   status?: MembershipStatus;
+}
+
+export interface MemberActivatePayload {
+  initial_password: string;
 }
 
 export interface PlatformTenant {
@@ -409,6 +441,8 @@ export interface PendingUser {
   created_at: string;
   organization_name: string | null;
   organization_role: string | null;
+  /** ORG-01: the outstanding invitation this activation will promote. */
+  organization_membership_status?: MembershipStatus | null;
 }
 
 export interface CatalogueData {
@@ -442,8 +476,9 @@ export interface DecimalWire {
 export interface SpectrumQueueTes {
   state: TesState;
   value: DecimalWire | null;
-  /** Two-decimal presentation rounding from the kernel; null when UNSCOREABLE. */
-  display_value: string | null;
+  /** Two-decimal presentation rounding from the kernel; null when UNSCOREABLE.
+   *  Wire shape is the lossless DecimalWire envelope. */
+  display_value: DecimalWire | string | null;
   formula_version: string;
 }
 
@@ -576,7 +611,7 @@ export interface TesCurrentPayload {
   formula_version: string;
   state: TesState;
   value: DecimalWire | null;
-  display_value: string | null;
+  display_value: DecimalWire | string | null;
   /** Coverage rendering like "4/5". */
   known_axes: string;
   known_weight: DecimalWire | null;
@@ -655,20 +690,9 @@ export interface ScoringInputsSnapshot {
 }
 
 // --- Ch.7 action payloads / results (backend efc3d79) ------------------------
-
-/** STRIKE engagement draft pre-bound to the exposure (Ch.4 owns the rest). */
-export interface SpectrumStrikeDraft {
-  id: string;
-  state: string;
-  requested_by: string;
-  note: string | null;
-  created_at: string;
-}
-
-export interface SpectrumStrikeRequestResult {
-  exposure_id: string;
-  strike_request: SpectrumStrikeDraft;
-}
+// The STRIKE engagement draft types are retired with the superseded
+// engagement-scoped model (PRD v1.12); the corrected Ch.7 STRIKE handoff is a
+// client-side optional pre-fill of the toolbox run composer.
 
 /** EDIP decision handoff recorded in Needs-Decision state. */
 export interface SpectrumEdipHandoff {
@@ -698,6 +722,34 @@ export type SpotlightTileStatus = 'ok' | 'unavailable' | 'insufficient_history';
 export interface SpotlightUnavailable {
   status: 'unavailable';
   reason: string;
+}
+
+export interface SpotlightRemediationTile {
+  status: 'ok';
+  total_current_decisions: number;
+  states: Record<string, number>;
+  overdue_open: number;
+  review_expired: number;
+}
+
+export interface SpotlightRiskRegisterTile {
+  status: 'ok';
+  register_count: number;
+  register: Record<string, unknown>[];
+  truncated: boolean;
+}
+
+export interface SpotlightRegulatoryTile {
+  status: 'ok';
+  total_obligations: number;
+  obligations_open: number;
+  obligations_in_progress: number;
+  obligations_fulfilled: number;
+  obligations_closed: number;
+  overdue: number;
+  breached_recorded: number;
+  completed_late: number;
+  overdue_obligations: Record<string, unknown>[];
 }
 
 export interface SpotlightSevereTile {
@@ -738,6 +790,7 @@ export interface SpotlightFeedFact {
   source: string;
   status: 'healthy' | 'stale' | 'unknown';
   is_healthy: boolean;
+  sync_enabled?: boolean;
   last_successful_at: string | null;
   consecutive_failures: number;
   last_good_snapshot_id: string | null;
@@ -778,9 +831,9 @@ export interface SpotlightSummary {
   severe_exposures: SpotlightSevereTile;
   workflow_posture: SpotlightWorkflowTile;
   coverage_quality: SpotlightCoverageTile;
-  remediation_posture: SpotlightUnavailable;
-  accepted_risk_register: SpotlightUnavailable;
-  regulatory_pressure: SpotlightUnavailable;
+  remediation_posture: SpotlightUnavailable | SpotlightRemediationTile;
+  accepted_risk_register: SpotlightUnavailable | SpotlightRiskRegisterTile;
+  regulatory_pressure: SpotlightUnavailable | SpotlightRegulatoryTile;
   trend: SpotlightTrend;
 }
 
@@ -837,6 +890,16 @@ export interface SpeakReportListResponse {
   items: SpeakReport[];
 }
 
+/** SPEAK AI chat reply: labeled interpretation with server-built citations. */
+export interface SpeakChatResult {
+  answer: string;
+  model: string;
+  authority: 'interpretation_only';
+  disclaimer: string;
+  as_of: string | null;
+  citations: Record<string, Array<Record<string, unknown>>>;
+}
+
 /** One correlated answer row: source links ride along (Ch.12). */
 export interface SynthesisAnswer {
   question: string;
@@ -848,6 +911,10 @@ export interface SynthesisAnswer {
   degraded: boolean;
   row_count: number;
   truncated: boolean;
+  /** Base populations the correlation filters over — additive diagnostics
+   * that let the console distinguish "0 matches" from "insufficient source
+   * data". May be absent from older answers. */
+  source_counts?: Record<string, number>;
   rows: Record<string, unknown>[];
 }
 

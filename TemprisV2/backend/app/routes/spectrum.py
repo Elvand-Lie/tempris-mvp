@@ -26,6 +26,11 @@ from app.db import get_db_connection
 from app.exposure.exceptions import ExposureConflictError, ExposureNotFoundError
 from app.exposure.tes_read_model import _jsonify
 from app.spectrum import service
+from app.edip.errors import (
+    EdipConflictError,
+    EdipExposureNotFoundError,
+    EdipWorkflowError,
+)
 from app.spectrum.errors import SpectrumExposureNotFoundError, SpectrumWorkflowError
 
 router = APIRouter(
@@ -272,27 +277,29 @@ def add_note(
 
 @router.post(
     "/exposures/{exposure_id}/strike-request",
-    status_code=status.HTTP_201_CREATED,
-    summary="Request a STRIKE engagement (created as a draft pre-bound to the exposure)",
+    status_code=status.HTTP_410_GONE,
+    summary="Superseded: the engagement-scoped STRIKE model is retired (PRD v1.12)",
 )
 def request_strike(
     exposure_id: uuid.UUID,
     payload: Optional[RequestNoteIn] = None,
     auth: AuthContext = Depends(_require_analyst),
 ):
-    """STRIKE unavailability can never be silent: the request is durably
-    queued as a draft; Chapter 4 owns everything after."""
-    try:
-        with get_db_connection() as conn:
-            draft = service.request_strike(
-                conn, auth.tenant_id, exposure_id,
-                actor_id=auth.actor_id, actor_role=auth.role,
-                note=payload.note if payload else None,
-            )
-            conn.commit()
-            return _jsonify({"exposure_id": exposure_id, "strike_request": draft})
-    except SpectrumExposureNotFoundError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exposure not found")
+    """The v1.12 toolbox model supersedes the engagement-scoped chain: no NEW
+    legacy engagement state may be created. The corrected Ch.7 handoff is an
+    OPTIONAL pre-filled run request in the STRIKE toolbox console; historical
+    rows are retained read-only."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "code": "legacy_strike_model_superseded",
+            "message": (
+                "The engagement-scoped STRIKE model is superseded by the "
+                "toolbox run model (PRD v1.12); existing history is "
+                "retained read-only"
+            ),
+        },
+    )
 
 
 @router.post(
@@ -306,12 +313,16 @@ def request_edip_handoff(
     auth: AuthContext = Depends(_require_analyst),
 ):
     """The explicit action-required transition: analysis_state becomes
-    'action_required' and the EDIP decision is recorded in Needs-Decision
-    state — retryable, upstream truth intact. Manual at v1; auto-handoff
-    policy is reserved (§3.6.6 #9). One open handoff per exposure (409 on a
-    second while the first stands)."""
+    'action_required' and the EDIP decision is created in Needs-Decision
+    state and consumes the handoff ATOMICALLY — retryable, upstream truth
+    intact. Manual at v1; auto-handoff policy is reserved (§3.6.6 #9). One
+    decision per exposure (409 on a second while one stands). The REPEATABLE
+    READ boundary is established first so the sealed score snapshot is one
+    coherent source view (PATCH-13)."""
     try:
         with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
             result = service.request_edip_handoff(
                 conn, auth.tenant_id, exposure_id,
                 actor_id=auth.actor_id, actor_role=auth.role,
@@ -321,10 +332,23 @@ def request_edip_handoff(
             return _jsonify({
                 "exposure_id": exposure_id,
                 "edip_handoff": result["handoff"],
+                "decision": result["decision"],
                 "workflow": result["workflow"],
             })
     except SpectrumExposureNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exposure not found")
+    except EdipExposureNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exposure not found")
+    except EdipConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "edip_conflict", "message": str(e)},
+        )
+    except EdipWorkflowError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": e.code, "message": str(e)},
+        )
     except SpectrumWorkflowError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

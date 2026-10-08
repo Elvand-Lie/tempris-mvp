@@ -193,16 +193,6 @@ def scored_exposure(client, admin_headers):
     return {"exposure_id": r.json()["id"], "finding_id": finding_id, "asset_id": asset_id}
 
 
-def _spectrum_handoff(client, headers, exposure_id):
-    r = client.post(
-        f"/api/spectrum/exposures/{exposure_id}/edip-handoff",
-        json={"note": "action required"},
-        headers=headers,
-    )
-    assert r.status_code == 201, r.text
-    return r.json()["edip_handoff"]["id"]
-
-
 def _create_decision(client, headers, exposure_id, **overrides):
     body = {
         "exposure_id": str(exposure_id),
@@ -266,21 +256,27 @@ class TestAccessControl:
 
 
 class TestHandoffAndCreation:
-    def test_create_from_handoff_seals_snapshot_and_consumes_it(
+    def test_handoff_seals_snapshot_creates_and_consumes(
         self, client, admin_headers, scored_exposure
     ):
-        handoff_id = _spectrum_handoff(client, admin_headers, scored_exposure["exposure_id"])
-        r = _create_decision(
-            client, admin_headers, scored_exposure["exposure_id"],
-            handoff_id=str(handoff_id),
+        # The corrected atomic handoff (PATCH-09): the SPECTRUM handoff itself
+        # creates the Needs-Decision decision, seals the score snapshot it
+        # consumes, and consumes the handoff — one transaction.
+        eid = scored_exposure["exposure_id"]
+        r = client.post(
+            f"/api/spectrum/exposures/{eid}/edip-handoff",
+            json={"note": "action required"},
+            headers=admin_headers,
         )
         assert r.status_code == 201, r.text
-        decision = r.json()["decision"]
+        body = r.json()
+        handoff_id = body["edip_handoff"]["id"]
+        decision = body["decision"]
+        assert body["edip_handoff"]["state"] == "CONSUMED"
         assert decision["state"] == "needs_decision"
         assert decision["revision"] == 1
-        assert decision["decision_type"] in (
-            "remediate", "mitigate", "accept-risk", "defer"
-        )
+        assert decision["decision_type"] == "remediate"
+        assert decision["handoff_id"] == handoff_id
         # the sealed snapshot (§3.3.6 writer; PATCH-13): one coherent payload
         snapshot = decision["consumed_snapshot"]
         assert snapshot["state"] in {"FINAL", "PROVISIONAL", "UNSCOREABLE"}
@@ -304,6 +300,10 @@ class TestHandoffAndCreation:
             TENANT_A, "edip.decision_created", str(decision["id"])
         )
 
+        # a direct create on the same exposure is the standing-decision refusal
+        r = _create_decision(client, admin_headers, eid)
+        assert r.status_code == 409
+
     def test_second_decision_on_one_exposure_refused(
         self, client, admin_headers, scored_exposure
     ):
@@ -313,20 +313,42 @@ class TestHandoffAndCreation:
         assert r.status_code == 409
         assert r.json()["detail"]["code"] == "edip_conflict"
 
-    def test_handoff_retry_correlates_never_forks(
+    def test_handoff_retry_never_forks(
         self, client, admin_headers, scored_exposure
     ):
         exposure_id = scored_exposure["exposure_id"]
-        handoff_id = _spectrum_handoff(client, admin_headers, exposure_id)
-        r = _create_decision(client, admin_headers, exposure_id, handoff_id=str(handoff_id))
-        assert r.status_code == 201
+        r = client.post(
+            f"/api/spectrum/exposures/{exposure_id}/edip-handoff",
+            json={"note": "first"},
+            headers=admin_headers,
+        )
+        assert r.status_code == 201, r.text
         first_id = r.json()["decision"]["id"]
 
-        # the analyst retries the handoff on the still-confirmed exposure and
-        # EDIP create correlates to the STANDING decision — never a fork
-        second_handoff = _spectrum_handoff(client, admin_headers, exposure_id)
-        r = _create_decision(client, admin_headers, exposure_id, handoff_id=str(second_handoff))
+        # the analyst retries the handoff on the still-confirmed exposure:
+        # the standing-decision guard refuses 409 and the rolled-back
+        # transaction never forks a second decision or handoff row
+        r = client.post(
+            f"/api/spectrum/exposures/{exposure_id}/edip-handoff",
+            json={"note": "retry"},
+            headers=admin_headers,
+        )
         assert r.status_code == 409
+        assert r.json()["detail"]["code"] == "edip_conflict"
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT count(*) FROM spectrum_edip_handoffs "
+                    "WHERE tenant_id = %s AND exposure_id = %s;",
+                    (str(TENANT_A), str(exposure_id)),
+                )
+                assert cur.fetchone()["count"] == 1
+                cur.execute(
+                    "SELECT count(*) FROM edip_decisions "
+                    "WHERE tenant_id = %s AND exposure_id = %s;",
+                    (str(TENANT_A), str(exposure_id)),
+                )
+                assert cur.fetchone()["count"] == 1
         r = client.get(f"/api/edip/decisions/{first_id}", headers=admin_headers)
         assert r.status_code == 200
 

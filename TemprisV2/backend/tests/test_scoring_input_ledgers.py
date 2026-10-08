@@ -1980,7 +1980,7 @@ class TestNucleiOccurrenceTime:
 
         from app.scout import nuclei_argv
 
-        argv = nuclei_argv("nuclei", "127.0.0.1")
+        argv = nuclei_argv("nuclei", "127.0.0.1", "/pinned/templates")
         assert "-jsonl-include-timestamp" not in argv, (
             "unsupported flag would fail a real scan's argument parsing"
         )

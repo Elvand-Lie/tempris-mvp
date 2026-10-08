@@ -86,3 +86,12 @@ class IntakeConnectorRegistrationError(ExposureDomainError):
     disabled registration. Stable code: 'connector_registration'."""
 
     code = "connector_registration"
+
+
+class IntakeClassificationRationaleError(ExposureDomainError):
+    """A classification/reclassification was attempted without a nonblank
+    rationale. Fail-closed: no projection update and no history event — the
+    append-only record would otherwise carry a decision with no stated reason
+    (§6:1141/1149). Stable code: 'classification_rationale_required'."""
+
+    code = "classification_rationale_required"

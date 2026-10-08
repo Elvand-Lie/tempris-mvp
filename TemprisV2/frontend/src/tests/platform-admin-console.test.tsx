@@ -71,8 +71,8 @@ const mockEntitlement: EntitlementData = {
 };
 
 const mockPendingUsers: PendingUser[] = [
-  { id: 'pu1', email: 'pending@example.com', full_name: null, status: 'pending', created_at: '2026-08-20T00:00:00Z', organization_name: 'Acme Corp', organization_role: 'analyst' },
-  { id: 'pu2', email: 'new@example.com', full_name: 'New User', status: 'pending', created_at: '2026-08-22T00:00:00Z', organization_name: 'Orphan Tenant', organization_role: 'superadmin' },
+  { id: 'pu1', email: 'pending@example.com', full_name: null, status: 'pending', created_at: '2026-08-20T00:00:00Z', organization_name: 'Acme Corp', organization_role: 'analyst', organization_membership_status: 'pending' },
+  { id: 'pu2', email: 'new@example.com', full_name: 'New User', status: 'pending', created_at: '2026-08-22T00:00:00Z', organization_name: 'Orphan Tenant', organization_role: 'superadmin', organization_membership_status: 'pending' },
 ];
 
 describe('PlatformAdminConsole', () => {
@@ -421,5 +421,21 @@ describe('PlatformAdminConsole', () => {
 
     expect(screen.getByText('analyst')).toBeInTheDocument();
     expect(screen.getByText('superadmin')).toBeInTheDocument();
+  });
+
+  it('shows the outstanding invitation the activation will promote', async () => {
+    render(<PlatformAdminConsole />);
+    await screen.findByText('Acme Corp');
+
+    fireEvent.click(screen.getByRole('button', { name: /Pending User Activation/i }));
+    await screen.findByText('pending@example.com');
+
+    const headers = screen.getAllByRole('columnheader');
+    expect(headers.map((h) => h.textContent)).toContain('Invitation');
+
+    // ORG-01: a never-activated account carries a pending invitation, not
+    // in-force access, so both rows must say so before activation.
+    expect(screen.getAllByText('Pending invitation').length).toBe(2);
+    expect(screen.queryByText('In force')).not.toBeInTheDocument();
   });
 });

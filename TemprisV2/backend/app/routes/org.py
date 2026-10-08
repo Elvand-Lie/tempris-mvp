@@ -7,17 +7,42 @@ from pydantic import BaseModel, Field
 
 from app.audit import record_audit_event
 from app.auth import AuthContext, PLATFORM_TENANT_ID, get_auth_context, require_roles
+from app.auth_crypto import generate_scrypt_hash
 from app.db import get_db_connection
 from app.services.entitlements import resolve_effective_modules
+from app.services.membership_lifecycle import (
+    PENDING_MEMBERSHIP_DETAIL,
+    membership_status_for_account,
+)
 
 
 router = APIRouter(prefix="/api/org", tags=["Organization"])
 LAST_SUPERADMIN_DETAIL = "Cannot remove or demote the last active superadmin of an organization"
+# ORG-01: a membership may only be enabled for an already-active account.
+# Activation itself (pending account + initial password) is the dedicated
+# POST /users/{user_id}/activate endpoint below — a tenant Superadmin action
+# within their own tenant; Platform Administrators retain the bootstrap and
+# cross-tenant path (PRD Ch.5, as amended 2026-09-24).
+UNACTIVATED_ACCOUNT_DETAIL = (
+    "User account is not active. A Superadmin must activate the account before "
+    "its membership can be enabled"
+)
+TENANT_ADMIN_FORBIDDEN_DETAIL = (
+    "Tenant Admins cannot create or modify Superadmin memberships"
+)
+
+
+def _require_tenant_session(auth: AuthContext) -> None:
+    if auth.tenant_id == PLATFORM_TENANT_ID:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Platform sessions cannot manage tenant organization members.",
+        )
 
 
 def require_superadmin(auth: AuthContext = Depends(require_roles(["superadmin"]))) -> AuthContext:
     """
-    Shared dependency for tenant Organization member management.
+    Dependency for full tenant Organization member management.
 
     Requires the superadmin role AND a tenant workspace session. A session in
     the dedicated Platform Control login-context tenant is never a tenant
@@ -27,11 +52,19 @@ def require_superadmin(auth: AuthContext = Depends(require_roles(["superadmin"])
     stays on get_auth_context because it is the authenticated-session metadata
     endpoint (including the Platform Control login context).
     """
-    if auth.tenant_id == PLATFORM_TENANT_ID:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Platform sessions cannot manage tenant organization members.",
-        )
+    _require_tenant_session(auth)
+    return auth
+
+
+def require_org_manager(auth: AuthContext = Depends(require_roles(["admin", "superadmin"]))) -> AuthContext:
+    """
+    Dependency for limited Organization management (Tenant Admin).
+
+    A Tenant Admin may view members and manage ordinary (analyst/admin)
+    memberships, but never Superadmin memberships; role-level limits are
+    enforced per endpoint. Platform sessions are rejected as above.
+    """
+    _require_tenant_session(auth)
     return auth
 
 
@@ -83,7 +116,7 @@ def get_tenant(auth: AuthContext = Depends(get_auth_context)):
 
 
 @router.get("/members")
-def list_members(auth: AuthContext = Depends(require_superadmin)):
+def list_members(auth: AuthContext = Depends(require_org_manager)):
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -101,12 +134,19 @@ def list_members(auth: AuthContext = Depends(require_superadmin)):
 
 
 @router.post("/members", status_code=status.HTTP_201_CREATED)
-def add_member(payload: MemberCreate, auth: AuthContext = Depends(require_superadmin)):
+def add_member(payload: MemberCreate, auth: AuthContext = Depends(require_org_manager)):
+    # ORG-01: a Tenant Admin may invite ordinary users (analyst/admin) only;
+    # creating a Superadmin membership is a tenant Superadmin authority.
+    if auth.role != "superadmin" and payload.role == "superadmin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=TENANT_ADMIN_FORBIDDEN_DETAIL)
     email = _email(payload.email)
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT id FROM users WHERE LOWER(email) = %s FOR UPDATE;", (email,))
+                cur.execute(
+                    "SELECT id, status FROM users WHERE LOWER(email) = %s FOR UPDATE;",
+                    (email,),
+                )
                 user = cur.fetchone()
                 if user:
                     user_id = user["id"]
@@ -119,6 +159,15 @@ def add_member(payload: MemberCreate, auth: AuthContext = Depends(require_supera
                             status_code=409,
                             detail="User already has an active organization membership",
                         )
+                    cur.execute(
+                        "SELECT 1 FROM tenant_memberships WHERE user_id = %s AND status = 'pending' LIMIT 1;",
+                        (str(user_id),),
+                    )
+                    if cur.fetchone():
+                        raise HTTPException(
+                            status_code=409, detail=PENDING_MEMBERSHIP_DETAIL
+                        )
+                    new_membership_status = membership_status_for_account(user["status"])
                 else:
                     cur.execute(
                         """
@@ -129,16 +178,21 @@ def add_member(payload: MemberCreate, auth: AuthContext = Depends(require_supera
                         (email,),
                     )
                     user_id = cur.fetchone()["id"]
+                    # ORG-01: a never-activated account gets a PENDING
+                    # membership — the invitation exists, but it is not an
+                    # active/usable membership until a Platform Administrator
+                    # activates the account.
+                    new_membership_status = "pending"
 
                 cur.execute(
                     """
                     INSERT INTO tenant_memberships (id, tenant_id, user_id, role, status)
-                    VALUES (gen_random_uuid(), %s, %s, %s, 'active')
+                    VALUES (gen_random_uuid(), %s, %s, %s, %s)
                     ON CONFLICT (tenant_id, user_id) DO UPDATE
-                    SET role = EXCLUDED.role, status = 'active', updated_at = now()
+                    SET role = EXCLUDED.role, status = EXCLUDED.status, updated_at = now()
                     RETURNING role, status, created_at;
                     """,
-                    (str(auth.tenant_id), str(user_id), payload.role),
+                    (str(auth.tenant_id), str(user_id), payload.role, new_membership_status),
                 )
                 membership = cur.fetchone()
                 record_audit_event(
@@ -152,6 +206,8 @@ def add_member(payload: MemberCreate, auth: AuthContext = Depends(require_supera
                 conn.commit()
                 return {"id": user_id, "email": email, **membership}
     except psycopg.errors.UniqueViolation as exc:
+        if exc.diag.constraint_name == "uq_memberships_user_pending":
+            raise HTTPException(status_code=409, detail=PENDING_MEMBERSHIP_DETAIL) from exc
         raise HTTPException(
             status_code=409,
             detail="User already has an active organization membership",
@@ -162,7 +218,7 @@ def add_member(payload: MemberCreate, auth: AuthContext = Depends(require_supera
 def update_member(
     user_id: uuid.UUID,
     payload: MemberUpdate,
-    auth: AuthContext = Depends(require_superadmin),
+    auth: AuthContext = Depends(require_org_manager),
 ):
     if payload.role is None and payload.status is None:
         raise HTTPException(status_code=422, detail="At least one of role or status is required")
@@ -171,7 +227,7 @@ def update_member(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT m.role, m.status, u.email
+                SELECT m.role, m.status, u.email, u.status AS user_status
                 FROM tenant_memberships m
                 JOIN users u ON u.id = m.user_id
                 WHERE m.tenant_id = %s AND m.user_id = %s
@@ -183,8 +239,24 @@ def update_member(
             if not current:
                 raise HTTPException(status_code=404, detail="Organization member not found")
 
+            # ORG-01: a Tenant Admin never modifies a Superadmin membership and
+            # never promotes anyone into the Superadmin role — Superadmin
+            # retains the highest tenant authority.
+            if auth.role != "superadmin":
+                if current["role"] == "superadmin" or payload.role == "superadmin":
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=TENANT_ADMIN_FORBIDDEN_DETAIL,
+                    )
+
             next_role = payload.role or current["role"]
             next_status = payload.status or current["status"]
+            # ORG-01: enabling a membership is not the same as activating an
+            # account. A membership may only be enabled for an active account;
+            # a never-activated account first goes through POST
+            # /users/{user_id}/activate (tenant Superadmin, own tenant).
+            if next_status == "active" and current["user_status"] != "active":
+                raise HTTPException(status_code=409, detail=UNACTIVATED_ACCOUNT_DETAIL)
             if (
                 current["role"] == "superadmin"
                 and current["status"] == "active"
@@ -264,3 +336,98 @@ def remove_member(
             )
             conn.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+class UserActivation(BaseModel):
+    initial_password: str = Field(min_length=1, max_length=1024)
+
+
+# ORG-02 (PRD Ch.5, as amended 2026-09-24): Platform provisioning bootstraps
+# the first Superadmin; from then on a tenant Superadmin activates pending
+# accounts within their own tenant. The platform activation endpoint
+# (/api/platform/users/{id}/activate) remains for bootstrap repair and
+# platform-level administration.
+@router.post("/users/{user_id}/activate", status_code=status.HTTP_200_OK)
+def activate_user(
+    user_id: uuid.UUID,
+    payload: UserActivation,
+    auth: AuthContext = Depends(require_superadmin),
+):
+    password_hash = generate_scrypt_hash(payload.initial_password)
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # Tenant isolation: the account must hold the invitation (pending
+            # membership) in the caller's own tenant.
+            cur.execute(
+                """
+                SELECT m.role, u.email, u.status AS user_status
+                FROM tenant_memberships m
+                JOIN users u ON u.id = m.user_id
+                WHERE m.tenant_id = %s AND m.user_id = %s AND m.status = 'pending'
+                FOR UPDATE OF u;
+                """,
+                (str(auth.tenant_id), str(user_id)),
+            )
+            invitation = cur.fetchone()
+            if not invitation:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Pending organization member not found in this tenant",
+                )
+            if invitation["user_status"] != "pending":
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "User account is not pending and cannot be activated here; "
+                        "disabled accounts must be restored by a Platform Administrator"
+                    ),
+                )
+
+            # Activation and membership promotion are one atomic change: the
+            # pending invitation becomes the account's in-force membership.
+            cur.execute(
+                """
+                UPDATE users
+                SET password_hash = %s, status = 'active', updated_at = now()
+                WHERE id = %s AND status = 'pending'
+                RETURNING id, email, full_name, status;
+                """,
+                (password_hash, str(user_id)),
+            )
+            user = cur.fetchone()
+            if not user:
+                raise HTTPException(status_code=404, detail="Pending user not found")
+            try:
+                cur.execute(
+                    """
+                    UPDATE tenant_memberships
+                    SET status = 'active', updated_at = now()
+                    WHERE tenant_id = %s AND user_id = %s AND status = 'pending'
+                    RETURNING role, status AS membership_status;
+                    """,
+                    (str(auth.tenant_id), str(user_id)),
+                )
+            except psycopg.errors.UniqueViolation as exc:
+                if exc.diag.constraint_name == "uq_memberships_user_active":
+                    raise HTTPException(
+                        status_code=409,
+                        detail="User already has an active organization membership",
+                    ) from exc
+                raise
+            membership = cur.fetchone()
+            record_audit_event(
+                conn,
+                auth.tenant_id,
+                auth.actor_id,
+                auth.role,
+                "org.user_activated",
+                details={"user_id": str(user_id), "email": user["email"], "role": membership["role"]},
+            )
+            conn.commit()
+            return {
+                **user,
+                "membership": {
+                    "role": membership["role"],
+                    "status": membership["membership_status"],
+                },
+            }

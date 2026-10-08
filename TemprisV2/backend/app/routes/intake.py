@@ -32,6 +32,7 @@ from app.intake.errors import (
     IntakeAnchorRequiredError,
     IntakeAnchorlessClassError,
     IntakeAnchorSupersededError,
+    IntakeClassificationRationaleError,
     IntakeConnectorRegistrationError,
     IntakeDuplicateExposureError,
     IntakeEventConflictError,
@@ -89,7 +90,9 @@ def register_connector(
 ):
     """Ch.6 owns destination routing and payload semantics; connector
     credentials/principals are Ch.5-managed secrets (Q19 split) — there is no
-    credential field to set. Re-registering a name updates the routing."""
+    credential field to set.
+
+    v1: registrations are admission records; no adapter executes yet."""
     with get_db_connection() as conn:
         registration = service.register_connector(
             conn,
@@ -226,7 +229,8 @@ def classify_intake_record(
     auth: AuthContext = Depends(require_intake_auth),
 ):
     """The taxonomy is CLOSED at intake (§3.6.5): values outside the six-class
-    spine (with per-class subclass/subtype presence rules) are rejected 422."""
+    spine (with per-class subclass/subtype presence rules) are rejected 422.
+    The rationale is mandatory and the decision is append-only history."""
     try:
         with get_db_connection() as conn:
             record = service.classify_intake_record(
@@ -234,7 +238,8 @@ def classify_intake_record(
                 payload.taxonomy.taxonomy_class,
                 payload.taxonomy.taxonomy_subclass,
                 payload.taxonomy.taxonomy_subtype,
-                actor_id=auth.actor_id, actor_role=auth.role, note=payload.note,
+                actor_id=auth.actor_id, actor_role=auth.role,
+                rationale=payload.rationale, note=payload.note,
             )
             conn.commit()
             return record
@@ -242,6 +247,11 @@ def classify_intake_record(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Intake record not found")
     except SssClassificationError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except IntakeClassificationRationaleError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": e.code, "message": str(e)},
+        )
     except IntakeStateError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

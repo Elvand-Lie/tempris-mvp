@@ -224,8 +224,19 @@ impl CollectorClient {
     }
 
     /// Runs the shared toolchain provisioning and external prerequisite check routine.
-    pub async fn run_toolchain_provisioning_and_check(&self) {
+    /// Returns the attempt outcome so the caller can distinguish "check ran and
+    /// succeeded (possibly a no-op)" from "check failed".
+    pub async fn run_toolchain_provisioning_and_check(
+        &self,
+    ) -> crate::protocol::UpdateCheckOutcome {
         self.log("INFO", "Executing shared toolchain provisioning and prerequisite check...").await;
+        let attempted_at = chrono::Utc::now().to_rfc3339();
+
+        let mut outcome = crate::protocol::UpdateCheckOutcome {
+            attempted_at,
+            succeeded: true,
+            error: None,
+        };
 
         if let Some(ref storage) = self.storage {
             let mgr = crate::toolchain::manager::ToolchainManager::new(storage.clone());
@@ -254,11 +265,14 @@ impl CollectorClient {
                 Err(e) => {
                     self.log("WARN", &format!("Toolchain check/update notice: {}", e))
                         .await;
+                    outcome.succeeded = false;
+                    outcome.error = Some(e.to_string());
                 }
             }
         }
 
         let _ = crate::toolchain::discovery::discover_external_nmap().await;
+        outcome
     }
 
     pub async fn run_loop(self: Arc<Self>) {
@@ -353,7 +367,10 @@ impl CollectorClient {
 
                             _ = heartbeat_interval.tick(), if authenticated => {
                                 let now_rfc3339 = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
-                                let hb_frame = ClientFrame::HEARTBEAT { timestamp: now_rfc3339 };
+                                let hb_frame = ClientFrame::HEARTBEAT {
+                                    timestamp: now_rfc3339,
+                                    network_state: crate::network_state::observe().ok(),
+                                };
                                 if let Ok(json_str) = serde_json::to_string(&hb_frame) {
                                     if tx_outbound.send(Message::Text(json_str.into())).await.is_err() {
                                         break 'session;
@@ -391,6 +408,16 @@ impl CollectorClient {
                                                 authenticated = true;
                                                 // Invariant: Reset backoff ladder ONLY upon AUTH_SUCCESS
                                                 ladder.reset();
+
+                                                // Report network location immediately after authentication (§2.12);
+                                                // the heartbeat interval covers later DHCP moves.
+                                                let hb_frame = ClientFrame::HEARTBEAT {
+                                                    timestamp: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+                                                    network_state: crate::network_state::observe().ok(),
+                                                };
+                                                if let Ok(json_hb) = serde_json::to_string(&hb_frame) {
+                                                    let _ = tx_outbound.send(Message::Text(json_hb.into())).await;
+                                                }
 
                                                 let status_lower = status.to_lowercase();
                                                 if status_lower == "paused" {
@@ -847,6 +874,132 @@ impl CollectorClient {
                                                 probe_tasks.retain(|t| !t.is_finished());
                                                 probe_tasks.push(handle);
                                             }
+                                            Ok(ServerFrame::STRIKE_JOB {
+                                                job_id,
+                                                capability,
+                                                method,
+                                                url,
+                                                pinned_ips,
+                                                pinned_targets,
+                                                record_type,
+                                                timeout_seconds,
+                                                expires_at,
+                                            }) => {
+                                                // M1: pre-auth frames fail closed
+                                                if !authenticated {
+                                                    self.log("WARN", &format!("Ignored pre-auth STRIKE_JOB {} before AUTH_SUCCESS", job_id)).await;
+                                                    continue 'session;
+                                                }
+
+                                                let is_inactive = {
+                                                    let st = self.state.read().await;
+                                                    matches!(st.status, ConnectionStatus::Paused | ConnectionStatus::Quarantined | ConnectionStatus::Revoked)
+                                                };
+                                                if is_inactive {
+                                                    self.log("WARN", &format!("STRIKE_JOB {} rejected: collector is inactive", job_id)).await;
+                                                    let now = Utc::now().to_rfc3339();
+                                                    let rej_frame = ClientFrame::STRIKE_JOB_RESULT {
+                                                        job_id,
+                                                        status: "rejected".to_string(),
+                                                        exit_code: None,
+                                                        stdout: "".to_string(),
+                                                        stderr: "".to_string(),
+                                                        stdout_bytes: 0,
+                                                        stderr_bytes: 0,
+                                                        started_at: now.clone(),
+                                                        completed_at: now,
+                                                        error_message: Some("Collector operator status is not active".to_string()),
+                                                    };
+                                                    if let Ok(json_res) = serde_json::to_string(&rej_frame) {
+                                                        let _ = tx_outbound.send(Message::Text(json_res.into())).await;
+                                                    }
+                                                    continue 'session;
+                                                }
+
+                                                let is_valid_expiry = match DateTime::parse_from_rfc3339(&expires_at) {
+                                                    Ok(exp_dt) => Utc::now() <= exp_dt.with_timezone(&Utc),
+                                                    Err(_) => false,
+                                                };
+                                                if !is_valid_expiry {
+                                                    self.log("WARN", &format!("STRIKE_JOB {} rejected: invalid or expired expires_at '{}'", job_id, expires_at)).await;
+                                                    let now = Utc::now().to_rfc3339();
+                                                    let rej_frame = ClientFrame::STRIKE_JOB_RESULT {
+                                                        job_id,
+                                                        status: "rejected".to_string(),
+                                                        exit_code: None,
+                                                        stdout: "".to_string(),
+                                                        stderr: "".to_string(),
+                                                        stdout_bytes: 0,
+                                                        stderr_bytes: 0,
+                                                        started_at: now.clone(),
+                                                        completed_at: now,
+                                                        error_message: Some(format!("Job rejected: invalid or expired expires_at timestamp '{}'", expires_at)),
+                                                    };
+                                                    if let Ok(json_res) = serde_json::to_string(&rej_frame) {
+                                                        let _ = tx_outbound.send(Message::Text(json_res.into())).await;
+                                                    }
+                                                    continue 'session;
+                                                }
+
+                                                // Execution-time readiness recheck: the capability
+                                                // must ACTUALLY run locally now, not merely have
+                                                // been ready at the last probe. Fail closed on
+                                                // UNKNOWN — an unreported capability never runs.
+                                                let ready_now = match capability.as_str() {
+                                                    "curl" => crate::strike_runner::probe_binary_version("curl", &["--version"]).await.available,
+                                                    "nmap" => crate::strike_runner::probe_binary_version("nmap", &["--version"]).await.available,
+                                                    "ffuf" => crate::strike_runner::probe_binary_version("ffuf", &["-V"]).await.available,
+                                                    "dig" => crate::strike_runner::probe_binary_version("dig", &["-v"]).await.available,
+                                                    "nuclei" => crate::strike_runner::resolve_managed_nuclei().is_some(),
+                                                    _ => false,
+                                                };
+                                                if !ready_now {
+                                                    self.log("WARN", &format!("STRIKE_JOB {} rejected: {} is not executable at execution time", job_id, capability)).await;
+                                                    let now = Utc::now().to_rfc3339();
+                                                    let rej_frame = ClientFrame::STRIKE_JOB_RESULT {
+                                                        job_id,
+                                                        status: "rejected".to_string(),
+                                                        exit_code: None,
+                                                        stdout: "".to_string(),
+                                                        stderr: "".to_string(),
+                                                        stdout_bytes: 0,
+                                                        stderr_bytes: 0,
+                                                        started_at: now.clone(),
+                                                        completed_at: now,
+                                                        error_message: Some(format!("Capability '{}' is not executable on this collector (execution-time recheck failed)", capability)),
+                                                    };
+                                                    if let Ok(json_res) = serde_json::to_string(&rej_frame) {
+                                                        let _ = tx_outbound.send(Message::Text(json_res.into())).await;
+                                                    }
+                                                    continue 'session;
+                                                }
+
+                                                let client_clone = Arc::clone(&self);
+                                                let tx_clone = tx_outbound.clone();
+                                                let cap_label = capability.clone();
+                                                let handle = tokio::spawn(async move {
+                                                    client_clone.log("INFO", &format!("Executing STRIKE_JOB {} ({})", job_id, cap_label)).await;
+                                                    let run = crate::strike_runner::run_strike_tool(&cap_label, &method, &url, &pinned_ips, &pinned_targets, record_type.as_deref(), timeout_seconds).await;
+                                                    client_clone.log("INFO", &format!("Completed STRIKE_JOB {} with status '{}' (exit: {:?})", job_id, run.status, run.exit_code)).await;
+                                                    let res_frame = ClientFrame::STRIKE_JOB_RESULT {
+                                                        job_id,
+                                                        status: run.status,
+                                                        exit_code: run.exit_code,
+                                                        stdout: run.stdout,
+                                                        stderr: run.stderr,
+                                                        stdout_bytes: run.stdout_bytes,
+                                                        stderr_bytes: run.stderr_bytes,
+                                                        started_at: run.started_at,
+                                                        completed_at: run.completed_at,
+                                                        error_message: run.error_message,
+                                                    };
+                                                    if let Ok(json_res) = serde_json::to_string(&res_frame) {
+                                                        let _ = tx_clone.send(Message::Text(json_res.into())).await;
+                                                    }
+                                                });
+                                                probe_tasks.retain(|t| !t.is_finished());
+                                                probe_tasks.push(handle);
+                                            }
                                             Ok(ServerFrame::CHECK_UPDATE(payload)) => {
                                                 if !authenticated {
                                                     self.log("WARN", "Ignored pre-auth CHECK_UPDATE frame before AUTH_SUCCESS").await;
@@ -890,13 +1043,15 @@ impl CollectorClient {
                                                     client_clone.log("INFO", "Executing shared toolchain provisioning and external prerequisite recheck...").await;
 
                                                     // Shared toolchain provisioning & prerequisite check
-                                                    client_clone.run_toolchain_provisioning_and_check().await;
+                                                    let check_outcome =
+                                                        client_clone.run_toolchain_provisioning_and_check().await;
 
                                                     // A.1 - A.5: Probe truthful redacted capabilities
-                                                    let caps = crate::scout_runner::probe_scout_capabilities_with_storage(
+                                                    let mut caps = crate::scout_runner::probe_scout_capabilities_with_storage(
                                                         client_clone.storage.as_ref(),
                                                     )
                                                     .await;
+                                                    caps.update_check = Some(check_outcome);
 
                                                     let cap_frame = ClientFrame::SCOUT_CAPABILITIES {
                                                         capabilities: caps,

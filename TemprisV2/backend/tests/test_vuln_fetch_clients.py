@@ -381,3 +381,74 @@ class TestOsvFetchClient:
         assert len(result.records) == 2
         assert result.records[0]["id"] == "GHSA-1111-2222-3333"
         assert result.metadata["ecosystem"] == "npm"
+
+
+class TestSnapshotMetadataBoundedness:
+    """Snapshot-bound metadata must never carry the artifact body.
+
+    fetch metadata is persisted verbatim into sync_snapshots.metadata (JSONB,
+    serialized with default=str) — embedding the raw artifact bytes there
+    wrote a garbage ``b'...'`` string sized like the whole feed (KEV catalog,
+    EPSS CSV, entire OSV ecosystem zip) into every snapshot row.
+    """
+
+    def test_kev_metadata_has_no_artifact_bytes(self):
+        kev_payload = {
+            "catalogVersion": "2026.09.01",
+            "dateReleased": "2026-09-01T08:00:00.000Z",
+            "count": 1,
+            "vulnerabilities": [
+                {
+                    "cveID": "CVE-2023-3001",
+                    "vendorProject": "V",
+                    "product": "P",
+                    "vulnerabilityName": "Vuln 1",
+                    "dateAdded": "2023-01-15",
+                    "shortDescription": "d",
+                    "requiredAction": "a",
+                    "dueDate": "2023-02-15",
+                    "knownRansomwareCampaignUse": "Unknown",
+                    "notes": "",
+                },
+            ],
+        }
+        transport = httpx.MockTransport(lambda req: httpx.Response(200, json=kev_payload))
+        fetcher = KevFetchClient(client=httpx.Client(transport=transport))
+        result = fetcher.fetch(cursor=None, batch_size=10)
+        assert result.error is None
+        assert "artifact_bytes" not in result.metadata
+
+    def test_epss_metadata_has_no_artifact_bytes(self):
+        raw_csv = (
+            "#model_version:v2023.03.01,score_date:2026-09-01T00:00:00+0000\n"
+            "cve,epss,percentile\n"
+            "CVE-2023-4001,0.01234,0.45678\n"
+        )
+        transport = httpx.MockTransport(
+            lambda req: httpx.Response(200, content=gzip.compress(raw_csv.encode("utf-8")))
+        )
+        fetcher = EpssFetchClient(client=httpx.Client(transport=transport))
+        result = fetcher.fetch(cursor=None)
+        assert result.error is None
+        assert "artifact_bytes" not in result.metadata
+
+    def test_osv_metadata_has_no_artifact_bytes(self):
+        osv_rec = {
+            "schema_version": "1.6.0",
+            "id": "GHSA-1111-2222-3333",
+            "summary": "s",
+            "modified": "2026-09-01T00:00:00Z",
+            "aliases": [],
+            "package": {"name": "foo", "ecosystem": "npm"},
+        }
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w") as z:
+            z.writestr("GHSA-1111-2222-3333.json", json.dumps(osv_rec))
+        transport = httpx.MockTransport(
+            lambda req: httpx.Response(200, content=zip_buf.getvalue(),
+                                       headers={"Content-Type": "application/zip"})
+        )
+        fetcher = OsvFetchClient(ecosystem="npm", client=httpx.Client(transport=transport))
+        result = fetcher.fetch(cursor=None, batch_size=10)
+        assert result.error is None
+        assert "artifact_bytes" not in result.metadata

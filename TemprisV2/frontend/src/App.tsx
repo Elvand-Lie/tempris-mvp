@@ -80,6 +80,16 @@ const AppShell: React.FC = () => {
   // Native tab state; no router or tenant-switching state.
   const [activeTab, setActiveTab] = useState<ActiveTab>('assets');
 
+  // Cross-module handoffs (e.g. SPECTRUM pre-filling a STRIKE run request).
+  useEffect(() => {
+    const onNavigate = (event: Event) => {
+      const tab = (event as CustomEvent<{ tab?: string }>).detail?.tab;
+      if (typeof tab === 'string' && tab) setActiveTab(tab as ActiveTab);
+    };
+    window.addEventListener('tempris:navigate', onNavigate);
+    return () => window.removeEventListener('tempris:navigate', onNavigate);
+  }, []);
+
   // Asset State
   const [stats, setStats] = useState<AssetStats | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -144,24 +154,17 @@ const AppShell: React.FC = () => {
   useEffect(() => {
     if (!isAuthenticated && applicationRoute === 'platform-dashboard') {
       navigate(PLATFORM_LOGIN_PATH, true);
-    } else if (
-      applicationRoute === 'platform-login'
-      && isAuthenticated
-      && !metadataLoading
-      && !metadataError
-      && isPlatformAuthority
-    ) {
-      navigate(PLATFORM_DASHBOARD_PATH, true);
-    } else if (
-      applicationRoute === 'tenant'
-      && isAuthenticated
-      && !metadataLoading
-      && !metadataError
-      && isPlatformAuthority
-    ) {
-      // A platform-authority session entering the normal tenant UI belongs on
-      // the platform dashboard; the tenant workspace holds no module data for it.
-      navigate(PLATFORM_DASHBOARD_PATH, true);
+    } else if (isAuthenticated && !metadataLoading && !metadataError) {
+      if (isPlatformAuthority && applicationRoute !== 'platform-dashboard') {
+        // A platform-authority session holds the platform control plane: it has
+        // no tenant module data, so the tenant route is not a valid landing pad.
+        navigate(PLATFORM_DASHBOARD_PATH, true);
+      } else if (!isPlatformAuthority && isPlatformRoute) {
+        // Authorization boundary, not a denial screen: a tenant identity that
+        // reaches a platform route is simply sent back to its own workspace.
+        // Platform Administration stays unreachable without platform authority.
+        navigate(TENANT_WORKSPACE_PATH, true);
+      }
     }
   }, [applicationRoute, isAuthenticated, isPlatformAuthority, metadataError, metadataLoading, navigate]);
 
@@ -398,17 +401,19 @@ const AppShell: React.FC = () => {
 
   if (isPlatformRoute) {
     if (!isPlatformAuthority) {
+      // Transient: the effect above has already routed this tenant session to
+      // its workspace. No platform console renders here, so no platform API is
+      // called, and Platform Administration remains unreachable.
       return (
         <div className="session-required-wrapper">
-          <div className="session-required-card" role="alert">
+          <div className="session-required-card" role="status">
             <div className="brand-logo session-logo">T2</div>
-            <h1 className="session-title">Platform access denied</h1>
+            <h1 className="session-title">Opening Tenant Workspace</h1>
             <p className="session-description">
-              This identity does not have platform-administrator authority. Tenant superadmin access is not sufficient.
+              This identity is a tenant member. Returning you to your tenant workspace…
             </p>
             <div className="session-actions">
-              <button type="button" className="btn btn-primary" onClick={() => navigate(TENANT_WORKSPACE_PATH)}>Open Tenant Workspace</button>
-              <button type="button" className="btn btn-secondary" onClick={() => { logout(); navigate(PLATFORM_LOGIN_PATH, true); }}>Sign Out</button>
+              <button type="button" className="btn btn-secondary" onClick={handleLogout}>Sign Out</button>
             </div>
           </div>
         </div>
@@ -788,8 +793,8 @@ const AppShell: React.FC = () => {
             <ModuleNotEntitled module="SYNTHESIS" />
           )
         ) : (
-          role === 'superadmin' ? (
-            <OrganizationConsole />
+          role === 'superadmin' || role === 'admin' ? (
+            <OrganizationConsole currentRole={role} />
           ) : (
             <div className="mutation-warning" role="alert">You do not have permission to administer this organization.</div>
           )

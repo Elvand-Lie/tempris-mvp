@@ -13,11 +13,31 @@ from app.auth import AuthContext, PLATFORM_TENANT_ID, require_platform_admin
 from app.auth_crypto import generate_scrypt_hash
 from app.collector_registry import collector_registry
 from app.db import get_db_connection
+from app.services.membership_lifecycle import (
+    PENDING_MEMBERSHIP_DETAIL,
+    membership_status_for_account,
+)
 
 
 router = APIRouter(prefix="/api/platform", tags=["Platform"])
 OCC_DETAIL = "Resource has been modified concurrently. Please reload and retry."
 ACTIVE_MEMBERSHIP_DETAIL = "User already has an active organization membership"
+# ORG-01: platform tenant provisioning invites the bootstrap Superadmin, and a
+# never-activated account must not hold an active membership. The repair
+# endpoint is for a tenant with no superadmin at all, so an outstanding
+# invitation already occupies that slot; the Platform Administrator completes it
+# through POST /users/{id}/activate instead.
+PENDING_SUPERADMIN_DETAIL = (
+    "Tenant already has a pending superadmin invitation; activate that account instead"
+)
+# ORG-01: an account in 'disabled' account-state can never be activated (that
+# endpoint only accepts pending accounts), so it cannot serve as the tenant's
+# activation path — a disabled membership would leave the tenant permanently
+# without an activatable bootstrap Superadmin.
+DISABLED_ACCOUNT_DETAIL = (
+    "User account is disabled and cannot be activated; use a different email "
+    "or have a Platform Administrator restore the account first"
+)
 
 
 def _reject_platform_control_target(tenant_id: uuid.UUID) -> None:
@@ -100,6 +120,8 @@ def list_tenants(auth: AuthContext = Depends(require_platform_admin)):
                 """
                 SELECT t.id, t.name, t.slug, t.status, t.version, t.created_at,
                        COUNT(m.id) AS member_count,
+                       COUNT(m.id) FILTER (WHERE m.status = 'active') AS active_member_count,
+                       COUNT(m.id) FILTER (WHERE m.status = 'pending') AS pending_invitation_count,
                        COUNT(m.id) FILTER (WHERE m.role = 'superadmin' AND m.status = 'active') AS active_superadmin_count,
                        te.package_id, te.module_overrides, te.version AS entitlement_version
                 FROM tenants t
@@ -132,26 +154,49 @@ def create_tenant(payload: TenantCreate, auth: AuthContext = Depends(require_pla
                 if not cur.fetchone():
                     raise HTTPException(status_code=422, detail="Base package does not exist")
 
-                cur.execute("SELECT id FROM users WHERE LOWER(email) = %s FOR UPDATE;", (email,))
+                cur.execute(
+                    "SELECT id, status FROM users WHERE LOWER(email) = %s FOR UPDATE;",
+                    (email,),
+                )
                 user = cur.fetchone()
                 if user:
                     user_id = user["id"]
+                    if user["status"] == "disabled":
+                        raise HTTPException(status_code=409, detail=DISABLED_ACCOUNT_DETAIL)
                     cur.execute(
                         "SELECT 1 FROM tenant_memberships WHERE user_id = %s AND status = 'active' LIMIT 1;",
                         (str(user_id),),
                     )
                     if cur.fetchone():
                         raise HTTPException(status_code=409, detail=ACTIVE_MEMBERSHIP_DETAIL)
+                    # ORG-01: one outstanding invitation per user, because
+                    # Platform activation then names exactly one membership
+                    # (uq_memberships_user_pending, migration 040).
+                    cur.execute(
+                        "SELECT 1 FROM tenant_memberships WHERE user_id = %s AND status = 'pending' LIMIT 1;",
+                        (str(user_id),),
+                    )
+                    if cur.fetchone():
+                        raise HTTPException(status_code=409, detail=PENDING_MEMBERSHIP_DETAIL)
                 else:
                     cur.execute(
                         """
                         INSERT INTO users (id, email, status, password_hash)
                         VALUES (gen_random_uuid(), %s, 'pending', NULL)
-                        RETURNING id;
+                        RETURNING id, status;
                         """,
                         (email,),
                     )
-                    user_id = cur.fetchone()["id"]
+                    user = cur.fetchone()
+                    user_id = user["id"]
+
+                # ORG-01: the bootstrap Superadmin invitation is a PENDING
+                # membership while the account itself is unactivated — an
+                # unusable account must not be represented as active access.
+                # Platform activation (POST /users/{id}/activate) sets the
+                # initial password and promotes the pending membership in one
+                # atomic step; the first Superadmin can log in right after.
+                bootstrap_membership_status = membership_status_for_account(user["status"])
 
                 cur.execute(
                     """
@@ -165,9 +210,9 @@ def create_tenant(payload: TenantCreate, auth: AuthContext = Depends(require_pla
                 cur.execute(
                     """
                     INSERT INTO tenant_memberships (id, tenant_id, user_id, role, status)
-                    VALUES (gen_random_uuid(), %s, %s, 'superadmin', 'active');
+                    VALUES (gen_random_uuid(), %s, %s, 'superadmin', %s);
                     """,
-                    (str(tenant["id"]), str(user_id)),
+                    (str(tenant["id"]), str(user_id), bootstrap_membership_status),
                 )
                 cur.execute(
                     """
@@ -199,7 +244,9 @@ def create_tenant(payload: TenantCreate, auth: AuthContext = Depends(require_pla
                 }
     except psycopg.errors.UniqueViolation as exc:
         constraint = exc.diag.constraint_name
-        if constraint in {"idx_users_email", "uq_memberships_user_active"}:
+        if constraint == "uq_memberships_user_pending":
+            detail = PENDING_MEMBERSHIP_DETAIL
+        elif constraint in {"idx_users_email", "uq_memberships_user_active"}:
             detail = ACTIVE_MEMBERSHIP_DETAIL
         elif constraint == "idx_tenants_slug":
             detail = "Tenant slug already exists"
@@ -304,7 +351,20 @@ def assign_initial_superadmin(
                 if cur.fetchone()["count"] > 0:
                     raise HTTPException(status_code=409, detail="Tenant already has an active superadmin")
 
-                cur.execute("SELECT id FROM users WHERE LOWER(email) = %s FOR UPDATE;", (email,))
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS pending_count FROM tenant_memberships
+                    WHERE tenant_id = %s AND role = 'superadmin' AND status = 'pending';
+                    """,
+                    (str(tenant_id),),
+                )
+                if cur.fetchone()["pending_count"] > 0:
+                    raise HTTPException(status_code=409, detail=PENDING_SUPERADMIN_DETAIL)
+
+                cur.execute(
+                    "SELECT id, status FROM users WHERE LOWER(email) = %s FOR UPDATE;",
+                    (email,),
+                )
                 user = cur.fetchone()
                 if user:
                     user_id = user["id"]
@@ -314,25 +374,38 @@ def assign_initial_superadmin(
                     )
                     if cur.fetchone():
                         raise HTTPException(status_code=409, detail=ACTIVE_MEMBERSHIP_DETAIL)
+                    cur.execute(
+                        "SELECT 1 FROM tenant_memberships WHERE user_id = %s AND status = 'pending' LIMIT 1;",
+                        (str(user_id),),
+                    )
+                    if cur.fetchone():
+                        raise HTTPException(status_code=409, detail=PENDING_MEMBERSHIP_DETAIL)
                 else:
                     cur.execute(
                         """
                         INSERT INTO users (id, email, status, password_hash)
                         VALUES (gen_random_uuid(), %s, 'pending', NULL)
-                        RETURNING id;
+                        RETURNING id, status;
                         """,
                         (email,),
                     )
-                    user_id = cur.fetchone()["id"]
+                    user = cur.fetchone()
+                    user_id = user["id"]
+
+                # ORG-01: the repair endpoint invites a Superadmin too, so the
+                # same account-state rule applies — a never-activated account
+                # gets a pending invitation, promoted atomically by platform
+                # activation.
+                repair_membership_status = membership_status_for_account(user["status"])
 
                 cur.execute(
                     """
                     INSERT INTO tenant_memberships (id, tenant_id, user_id, role, status)
-                    VALUES (gen_random_uuid(), %s, %s, 'superadmin', 'active')
+                    VALUES (gen_random_uuid(), %s, %s, 'superadmin', %s)
                     ON CONFLICT (tenant_id, user_id) DO UPDATE
-                    SET role = 'superadmin', status = 'active', updated_at = now();
+                    SET role = 'superadmin', status = EXCLUDED.status, updated_at = now();
                     """,
-                    (str(tenant_id), str(user_id)),
+                    (str(tenant_id), str(user_id), repair_membership_status),
                 )
                 _audit(
                     conn,
@@ -341,8 +414,15 @@ def assign_initial_superadmin(
                     {"target_tenant_id": str(tenant_id), "user_id": str(user_id), "email": email},
                 )
                 conn.commit()
-                return {"id": user_id, "email": email, "role": "superadmin", "status": "active"}
+                return {
+                    "id": user_id,
+                    "email": email,
+                    "role": "superadmin",
+                    "status": repair_membership_status,
+                }
     except psycopg.errors.UniqueViolation as exc:
+        if exc.diag.constraint_name == "uq_memberships_user_pending":
+            raise HTTPException(status_code=409, detail=PENDING_MEMBERSHIP_DETAIL) from exc
         raise HTTPException(status_code=409, detail=ACTIVE_MEMBERSHIP_DETAIL) from exc
 
 
@@ -469,9 +549,16 @@ def list_pending_users(auth: AuthContext = Depends(require_platform_admin)):
             cur.execute(
                 """
                 SELECT u.id, u.email, u.full_name, u.status, u.created_at,
-                       t.name AS organization_name, m.role AS organization_role
+                       t.name AS organization_name, m.role AS organization_role,
+                       m.status AS organization_membership_status
                 FROM users u
-                LEFT JOIN tenant_memberships m ON m.user_id = u.id AND m.status = 'active'
+                LEFT JOIN LATERAL (
+                    SELECT tm.tenant_id, tm.role, tm.status, tm.created_at
+                    FROM tenant_memberships tm
+                    WHERE tm.user_id = u.id AND tm.status IN ('active', 'pending')
+                    ORDER BY (tm.status = 'active') DESC, tm.created_at, tm.id
+                    LIMIT 1
+                ) m ON TRUE
                 LEFT JOIN tenants t ON t.id = m.tenant_id
                 WHERE u.status = 'pending'
                 ORDER BY LOWER(u.email), u.id;
@@ -489,6 +576,10 @@ def activate_user(
     password_hash = generate_scrypt_hash(payload.initial_password)
     with get_db_connection() as conn:
         with conn.cursor() as cur:
+            # ORG-01: activation and membership promotion are one atomic change.
+            # The invitation created by a tenant Superadmin (or by platform
+            # provisioning) is what becomes in force here; leaving it pending
+            # would strand an activated account with no usable access.
             cur.execute(
                 """
                 UPDATE users
@@ -501,11 +592,38 @@ def activate_user(
             user = cur.fetchone()
             if not user:
                 raise HTTPException(status_code=404, detail="Pending user not found")
+            cur.execute(
+                """
+                UPDATE tenant_memberships
+                SET status = 'active', updated_at = now()
+                WHERE user_id = %s AND status = 'pending'
+                RETURNING tenant_id, role, status;
+                """,
+                (str(user_id),),
+            )
+            promotions = cur.fetchall()
             _audit(
                 conn,
                 auth,
                 "platform.user_activated",
-                {"user_id": str(user_id), "email": user["email"]},
+                {
+                    "user_id": str(user_id),
+                    "email": user["email"],
+                    "promoted_memberships": [
+                        {"tenant_id": str(row["tenant_id"]), "role": row["role"]}
+                        for row in promotions
+                    ],
+                },
             )
             conn.commit()
-            return user
+            return {
+                **user,
+                "memberships": [
+                    {
+                        "tenant_id": row["tenant_id"],
+                        "role": row["role"],
+                        "status": row["status"],
+                    }
+                    for row in promotions
+                ],
+            }

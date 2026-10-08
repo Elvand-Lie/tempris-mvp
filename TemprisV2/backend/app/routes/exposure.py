@@ -39,11 +39,16 @@ from app.exposure.models import (
     FindingCreate,
     ReviewCreate,
     SssProposalIn,
+    SssVrtDeriveIn,
 )
 from app.exposure.sss import (
     SssClassificationError,
+    SssConflictError,
+    SssNotExploitShapedError,
     SssNotFoundError,
+    SssProductionDisabledError,
     create_sss_proposal,
+    derive_sss_vrt_for_finding,
 )
 from app.exposure.scoring_inputs import (
     BusinessImpactIn,
@@ -809,6 +814,67 @@ def create_tenant_sss_proposal(
     except SssClassificationError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
+        )
+
+
+@router.post(
+    "/findings/{finding_id}/sss/derive-vrt",
+    status_code=status.HTTP_201_CREATED,
+    summary="Derive SSS for a non-CVE finding from its VRT classification (production path 1)",
+)
+def create_tenant_sss_vrt_derivation(
+    finding_id: uuid.UUID,
+    payload: SssVrtDeriveIn,
+    auth: AuthContext = Depends(require_exposure_auth),
+):
+    """
+    Production VRT-backed SSS derivation (P0-06 §3.6.2 path 1, §3.6.6 #1).
+
+    The request carries the exact VRT leaf id from the source
+    report/platform, an OPTIONAL priority claim, optional structured varies
+    facts, and mandatory evidence. The priority is resolved SERVER-SIDE from
+    the pinned vendored release taxonomy; a claim that disagrees fails
+    closed. Tenant, actor, role, taxonomy (the finding's stored
+    classification), the VRT release, and revision fencing are server-owned
+    (extra='forbid' ⇒ 422 on any attempt to submit them). Only
+    exploit-shaped BLFLAW findings take this path.
+    """
+    try:
+        with get_db_connection() as conn:
+            result = derive_sss_vrt_for_finding(
+                conn,
+                auth.tenant_id,
+                finding_id,
+                vrt_id=payload.vrt_id,
+                vrt_priority=payload.vrt_priority,
+                varies_facts=payload.varies_facts,
+                evidence=payload.evidence,
+                actor_id=auth.actor_id,
+                actor_role=auth.role,
+                validation_state=(payload.validation_state or "single_source"),
+            )
+            conn.commit()
+            return _jsonify(result)
+    except (SssNotFoundError, ExposureNotFoundError, TenantMismatchError, EntityNotFoundError):
+        # unknown and cross-tenant findings are the same fail-closed 404
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Finding not found"
+        )
+    except (SssClassificationError, SssNotExploitShapedError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
+        )
+    except SssProductionDisabledError as e:
+        # the pinned release row is missing/unapproved — a version-content
+        # conflict, not a malformed request
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "sss_production_disabled", "message": str(e)},
+        )
+    except SssConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "sss_conflict", "message": str(e), "retry": True},
         )
 
 

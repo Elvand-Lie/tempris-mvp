@@ -142,6 +142,23 @@ VULN_SYNC_ENABLED = os.environ.get("VULN_SYNC_ENABLED", "false").lower() in ("tr
 VULN_SYNC_CHECK_INTERVAL = int(os.environ.get("VULN_SYNC_CHECK_INTERVAL", "60"))
 NVD_API_KEY = os.environ.get("NVD_API_KEY", "").strip() or None
 
+# STRIKE server-vantage pinned nuclei templates (Ch.4). The server plane runs
+# nuclei against THIS directory and nothing else — template paths and content
+# are never accepted from the request, exactly as on the collector. The shape
+# is only a sane default: if the directory is absent at run time the run fails
+# closed ("tool not available on server" family) rather than letting nuclei
+# fall back to its ambient/auto-updated template set.
+# SCOUT server-plane pinned Nuclei templates. Same fail-closed contract as
+# STRIKE_NUCLEI_TEMPLATES_DIR but a dedicated value so the two planes can pin
+# independently; empty means "not deployed" and Nuclei server runs refuse.
+SCOUT_NUCLEI_TEMPLATES_DIR = os.environ.get(
+    "SCOUT_NUCLEI_TEMPLATES_DIR", ""
+).strip() or None
+
+STRIKE_NUCLEI_TEMPLATES_DIR = os.environ.get(
+    "STRIKE_NUCLEI_TEMPLATES_DIR", "/opt/tempris/strike/nuclei-templates"
+).strip()
+
 
 # ---------------------------------------------------------------------------
 # SPEAK LLM provider (PRD-000 Ch.11 — the system's only LLM surface lives in

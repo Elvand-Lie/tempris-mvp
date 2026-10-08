@@ -60,6 +60,26 @@ class SssProposalIn(BaseModel):
         if not (D("0") <= v <= D("10")):
             raise ValueError("proposed_value is outside 0–10")
         return v
+
+
+class SssVrtDeriveIn(BaseModel):
+    """VRT-backed SSS derivation request (§3.6.2 path 1, production). The
+    client supplies only the exact VRT leaf metadata from the source
+    report/platform (vrt_id, vrt_priority), optional structured varies
+    facts, and mandatory evidence. Tenant, actor, role, taxonomy (read from
+    the finding's stored classification), VRT release (pinned server-side),
+    validation state default, and revision fencing are server-owned —
+    extra='forbid' rejects any attempt to submit them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vrt_id: str = Field(..., min_length=1)
+    # OPTIONAL claim only: the server resolves the priority from the pinned
+    # vendored VRT release taxonomy; a claim that disagrees fails closed 422.
+    vrt_priority: Optional[str] = None
+    varies_facts: Optional[dict[str, Any]] = None
+    evidence: dict[str, Any]
+    validation_state: Optional[str] = None
 # V3 exposure lifecycle (PRD-000 v1.11 §3.3.1): exactly four V3 WRITE states —
 # confirmed / resolved / false_positive / superseded. 'remediated' is legacy:
 # storage keeps it compatible (016 CHECK retains it; pre-existing rows are

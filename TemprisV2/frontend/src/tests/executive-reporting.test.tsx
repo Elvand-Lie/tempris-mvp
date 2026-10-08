@@ -141,25 +141,40 @@ beforeEach(() => {
 });
 
 describe('SPOTLIGHT executive view (Ch.10)', () => {
-  it('renders counts and maxima — never a mean — with FINAL/PROVISIONAL separate', async () => {
+  it('renders counts and maxima — never a mean — with FINAL/PROVISIONAL separate, TES to 2 decimals', async () => {
     render(<SpotlightExecutive />);
-    await waitFor(() => expect(screen.getByText('9.270000')).toBeInTheDocument());
-    expect(screen.getByText('8.1')).toBeInTheDocument();
-    expect(
-      screen.getByText((_, el) => el?.textContent === 'UNSCOREABLE: 1 (visible, never hidden)'),
-    ).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('FINAL')).toBeInTheDocument());
+    expect(screen.getByText('9.27')).toBeInTheDocument();
+    expect(screen.getByText('8.10')).toBeInTheDocument();
+    expect(screen.queryByText('9.270000')).not.toBeInTheDocument();
+    expect(screen.getByText('Current exposures')).toBeInTheDocument();
+    expect(screen.getByText('2 final · 1 provisional · 1 unscoreable')).toBeInTheDocument();
   });
 
   it('renders unavailable domains loudly — never zero', async () => {
     render(<SpotlightExecutive />);
-    await waitFor(() => expect(screen.getAllByText(/Unavailable/).length).toBe(3));
-    expect(screen.getAllByText(/chapter8_edip_domain_not_present/).length).toBe(2);
-    expect(screen.getByText(/chapter9_standard_domain_not_present/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(3));
+    expect(screen.getAllByText(/chapter8_edip_domain_not_present/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(/chapter9_standard_domain_not_present/).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('renders available EDIP and STANDARD values instead of an unavailable warning', async () => {
+    (api.spotlight.getSummary as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...summary,
+      remediation_posture: { status: 'ok', total_current_decisions: 3, states: { accepted_risk: 1, deferred: 0 }, overdue_open: 2, review_expired: 1 },
+      accepted_risk_register: { status: 'ok', register_count: 1, register: [], truncated: false },
+      regulatory_pressure: { status: 'ok', total_obligations: 4, obligations_open: 2, obligations_in_progress: 1, obligations_fulfilled: 1, obligations_closed: 0, overdue: 1, breached_recorded: 1, completed_late: 0, overdue_obligations: [] },
+    });
+    render(<SpotlightExecutive />);
+    await waitFor(() => expect(screen.getByText('Active decisions')).toBeInTheDocument());
+    expect(screen.getByText('Accepted / deferred')).toBeInTheDocument();
+    expect(screen.getByText('Completed late')).toBeInTheDocument();
+    expect(screen.queryByText(/chapter8_edip_domain_not_present/)).not.toBeInTheDocument();
   });
 
   it('renders insufficient trend history as such — never a fabricated baseline', async () => {
     render(<SpotlightExecutive />);
-    await waitFor(() => expect(screen.getByText(/Insufficient history/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/No trend available yet/)).toBeInTheDocument());
   });
 
   it('captures an append-only snapshot through the API', async () => {
@@ -175,19 +190,36 @@ describe('SPOTLIGHT executive view (Ch.10)', () => {
     expect(screen.getByText(/Snapshot captured/)).toBeInTheDocument();
   });
 
-  it('surfaces stale feeds', async () => {
+  it('surfaces stale and unknown feeds explicitly — never as healthy', async () => {
     render(<SpotlightExecutive />);
-    await waitFor(() =>
-      expect(
-        screen.getByText((_, el) => el?.tagName === 'LI' && (el.textContent ?? '').startsWith('kev:')),
-      ).toBeInTheDocument(),
-    );
-    expect(
-      screen.getByText((_, el) => el?.tagName === 'LI' && (el.textContent ?? '').startsWith('nvd:')),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText((_, el) => el?.tagName === 'LI' && (el.textContent ?? '').startsWith('kev: stale')),
-    ).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Degraded')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Show feeds'));
+    await waitFor(() => expect(screen.getByText('Feed unhealthy · 3 consecutive failures')).toBeInTheDocument());
+    expect(screen.getByText('kev')).toBeInTheDocument();
+    expect(screen.getAllByText('Never synced').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('lists severe exposures and overdue obligations in Needs attention with a drill-down drawer', async () => {
+    (api.spotlight.getSummary as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...summary,
+      regulatory_pressure: {
+        status: 'ok', total_obligations: 1, obligations_open: 1, obligations_in_progress: 0,
+        obligations_fulfilled: 0, obligations_closed: 0, overdue: 1, breached_recorded: 0,
+        completed_late: 0,
+        overdue_obligations: [{
+          obligation_id: 'o-1', kind: 'regulator_notification', title: 'MAS notice',
+          state: 'open', due_at: '2026-09-19T00:00:00Z', trigger_at: '2026-09-18T00:00:00Z',
+          breached_at: null,
+        }],
+      },
+    });
+    render(<SpotlightExecutive />);
+    await waitFor(() => expect(screen.getByText('Exposure with TES 9.27')).toBeInTheDocument());
+    expect(screen.getByText('MAS notice')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Exposure with TES 9.27'));
+    await waitFor(() => expect(screen.getByText('e1111111-1111-1111-1111-111111111111')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Close'));
+    expect(screen.queryByText('TES (stored)')).not.toBeInTheDocument();
   });
 });
 
@@ -230,13 +262,45 @@ describe('SPEAK report center (Ch.11)', () => {
     fireEvent.change(screen.getByLabelText('Ask SPEAK'), { target: { value: 'worst exposure?' } });
     fireEvent.click(screen.getByText('Ask'));
     await waitFor(() => expect(screen.getByText(/fails closed/)).toBeInTheDocument());
+    expect(screen.getByText('worst exposure?')).toBeInTheDocument();
+  });
+
+  it('renders the assistant answer with model + authority caption and citations', async () => {
+    (api.speak.chat as ReturnType<typeof vi.fn>).mockResolvedValue({
+      answer: 'Your worst exposure is CVE-2026-1234 on host-a.',
+      model: 'test-model',
+      authority: 'interpretation_only',
+      disclaimer: 'AI interpretation; verify against sealed reports.',
+      as_of: '2026-09-20T00:00:00Z',
+      citations: { exposures: [{ id: 'e1111111-1111', kind: 'exposure' }] },
+    });
+    render(<SpeakReports />);
+    await waitFor(() => expect(screen.getByLabelText('Ask SPEAK')).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Ask SPEAK'), { target: { value: 'worst exposure?' } });
+    fireEvent.click(screen.getByText('Ask'));
+    await waitFor(() =>
+      expect(screen.getByText('Your worst exposure is CVE-2026-1234 on host-a.')).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/test-model · interpretation_only/)).toBeInTheDocument();
+    expect(screen.getByText(/exposures: e1111111-1111/)).toBeInTheDocument();
+  });
+
+  it('shows no assistant entry when chat fails, but keeps the user message', async () => {
+    (api.speak.chat as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('unavailable'));
+    render(<SpeakReports />);
+    await waitFor(() => expect(screen.getByLabelText('Ask SPEAK')).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Ask SPEAK'), { target: { value: 'worst exposure?' } });
+    fireEvent.click(screen.getByText('Ask'));
+    await waitFor(() => expect(screen.getByText('SPEAK AI: unavailable')).toBeInTheDocument());
+    expect(screen.getByText('worst exposure?')).toBeInTheDocument();
+    expect(screen.queryByText(/interpretation_only/)).not.toBeInTheDocument();
   });
 });
 
 describe('SYNTHESIS console (Ch.12)', () => {
   it('renders correlated rows with the answer definition', async () => {
     render(<SynthesisConsole />);
-    await waitFor(() => expect(screen.getByText(/recomputed TES/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText(/recomputed TES/).length).toBeGreaterThan(0));
     expect(api.synthesis.unremediatedSerious).toHaveBeenCalled();
   });
 
@@ -256,13 +320,39 @@ describe('SYNTHESIS console (Ch.12)', () => {
       }),
     );
     render(<SynthesisConsole />);
-    await waitFor(() => expect(screen.getByRole('tab', { name: /Accepted risks/ })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('tab', { name: /Accepted risks/ }));
-    await waitFor(() => expect(screen.getByText(/Degraded — missing input domains/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('tab', { name: /Risks vs obligations/ })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: /Risks vs obligations/ }));
+    await waitFor(() => expect(screen.getByText(/Cannot be evaluated yet — missing input domains/)).toBeInTheDocument());
     expect(screen.getByText(/edip_decisions, standard_obligations/)).toBeInTheDocument();
     expect(
-      screen.getByText(/No rows: the join could not run over the missing domains/),
+      screen.getByText(/a data availability problem, not a clean result/),
     ).toBeInTheDocument();
+  });
+
+  it('shows accepted-risk matches with their decision and obligation identities', async () => {
+    (api.synthesis.acceptedRisksVsObligations as ReturnType<typeof vi.fn>).mockResolvedValue(
+      answer({ question: 'accepted_risks_vs_obligations', rows: [{
+        decision_id: 'decision-1', decision_state: 'accepted_risk', exposure_id: 'exposure-1',
+        obligation: { obligation_id: 'obligation-1', title: 'MAS notice', state: 'open', overdue: true },
+        matched_by: ['exposure_id'],
+      }] }),
+    );
+    render(<SynthesisConsole />);
+    fireEvent.click(screen.getByRole('tab', { name: /Risks vs obligations/ }));
+    await waitFor(() => expect(screen.getAllByText('MAS notice').length).toBeGreaterThan(0));
+    expect(screen.queryByText('decision-1')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('View correlation'));
+    await waitFor(() => expect(screen.getByText('decision-1')).toBeInTheDocument());
+    expect(screen.getByText('obligation-1')).toBeInTheDocument();
+  });
+
+  it('does not show a previous answer when a different query fails', async () => {
+    (api.synthesis.acceptedRisksVsObligations as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Join failed'));
+    render(<SynthesisConsole />);
+    await waitFor(() => expect(screen.getByText('CVE-2026-0001')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: /Risks vs obligations/ }));
+    await waitFor(() => expect(screen.getByText('Join failed')).toBeInTheDocument());
+    expect(screen.queryByText('CVE-2026-0001')).not.toBeInTheDocument();
   });
 
   it('switches queries through the tab list', async () => {
@@ -274,7 +364,7 @@ describe('SYNTHESIS console (Ch.12)', () => {
       }),
     );
     render(<SynthesisConsole />);
-    fireEvent.click(screen.getByRole('tab', { name: /Remediation recurrence/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /Returning weaknesses/ }));
     await waitFor(() => expect(api.synthesis.remediationRecurrence).toHaveBeenCalled());
   });
 });

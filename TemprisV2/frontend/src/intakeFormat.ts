@@ -41,6 +41,57 @@ export const INTAKE_SOURCE_LABELS: Record<IntakeSource, string> = {
   THREAT_PACK: 'Threat pack',
 };
 
+/**
+ * The submit selector's option label: the registration NAME plus its adapter.
+ * The analyst picks a destination by what it is, never by typing its UUID —
+ * the option's VALUE is always the full registration id (INTAKE-CONNECTOR-02).
+ */
+export const connectorRegistrationLabel = (registration: {
+  name: string;
+  adapter: string;
+}): string => `${registration.name} — ${registration.adapter}`;
+
+/**
+ * One classification decision's append-only payload, as written into
+ * `intake_record_events.detail` by the backend (INTAKE-CLASSIFICATION-01).
+ * The actor and timestamp are the event row's own columns, not part of this.
+ */
+export interface IntakeClassificationTransition {
+  prior: { taxonomy_class: string | null; taxonomy_subclass: string | null; taxonomy_subtype: string | null };
+  new: { taxonomy_class: string | null; taxonomy_subclass: string | null; taxonomy_subtype: string | null };
+  prior_unclassified: boolean;
+  rationale: string;
+}
+
+const spineToken = (part: string | null): string[] => (part ? [part] : []);
+
+/**
+ * "B L F L A W · I D O R"-style rendering of one taxonomy triple, used for both
+ * sides of a transition. An unclassified triple renders as `—`.
+ */
+export const taxonomyTriple = (triple: {
+  taxonomy_class: string | null;
+  taxonomy_subclass: string | null;
+  taxonomy_subtype: string | null;
+}): string => {
+  const parts = [
+    ...spineToken(triple.taxonomy_class),
+    ...spineToken(triple.taxonomy_subclass),
+    ...spineToken(triple.taxonomy_subtype),
+  ];
+  return parts.length ? parts.join(' · ') : '—';
+};
+
+/** Narrow an unknown event `detail` to a classification transition, or null. */
+export const readClassificationTransition = (detail: unknown): IntakeClassificationTransition | null => {
+  if (!detail || typeof detail !== 'object') return null;
+  const candidate = detail as Partial<IntakeClassificationTransition>;
+  const hasPrior = candidate.prior && typeof candidate.prior === 'object';
+  const hasNew = candidate.new && typeof candidate.new === 'object';
+  if (!hasPrior || !hasNew || typeof candidate.rationale !== 'string') return null;
+  return candidate as IntakeClassificationTransition;
+};
+
 export const INTAKE_EVENT_LABELS: Record<string, string> = {
   created: 'Created',
   classified: 'Classified',

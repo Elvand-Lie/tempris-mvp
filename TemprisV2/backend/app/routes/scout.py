@@ -23,24 +23,39 @@ class ScoutLaunch(BaseModel):
     profile: Literal["SERVICE_DISCOVERY", "VULNERABILITY_ASSESSMENT"]
 
 
-def _source_health(conn, tenant_id: uuid.UUID, job_id: uuid.UUID) -> list[dict]:
+def _source_health(conn, tenant_id: uuid.UUID, job_id: uuid.UUID, include_excerpt: bool) -> list[dict]:
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT engine, ordinal, state, engine_version, templates_version,
-                   exit_code, stdout_bytes, stderr_bytes, started_at, completed_at
-            FROM scout_tool_runs
-            WHERE tenant_id = %s AND job_id = %s
-            ORDER BY ordinal
+                   exit_code, stdout_bytes, stderr_bytes, stderr, started_at, completed_at,
+                   sanitized_output_excerpt, parse_stats,
+                   (
+                       SELECT count(*) FROM scout_observations o
+                       WHERE o.tool_run_id = t.id
+                         AND o.tenant_id = t.tenant_id AND o.job_id = t.job_id
+                   ) AS observation_count
+            FROM scout_tool_runs t
+            WHERE t.tenant_id = %s AND t.job_id = %s
+            ORDER BY t.ordinal
             """,
             (str(tenant_id), str(job_id)),
         )
-        return [dict(row) for row in cur.fetchall()]
+        health = []
+        for row in cur.fetchall():
+            item = dict(row)
+            detail = item.pop("stderr", None) or None
+            item["detail"] = detail
+            if not include_excerpt:
+                # The 256 KiB excerpt must not bloat the /jobs list payload.
+                item["sanitized_output_excerpt"] = None
+            health.append(item)
+        return health
 
 
-def _job_response(conn, row: dict) -> dict:
+def _job_response(conn, row: dict, include_excerpt: bool = False) -> dict:
     result = dict(row)
-    result["source_health"] = _source_health(conn, row["tenant_id"], row["id"])
+    result["source_health"] = _source_health(conn, row["tenant_id"], row["id"], include_excerpt)
     return result
 
 
@@ -148,6 +163,15 @@ def launch_job(
                 raise HTTPException(status_code=404, detail="Asset not found")
             if asset["status"] != "active":
                 raise HTTPException(status_code=409, detail="Asset is not active")
+            if asset.get("target_validation_state") == "needs_revalidation":
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Asset target requires operator revalidation: the bound host reported a "
+                        "network location that no longer matches its IP target. Confirm or correct "
+                        "the target and re-approve authorization before scanning."
+                    )
+                )
 
             if asset["network_scope"] == "internet":
                 route = "CENTRAL_PUBLIC"
@@ -253,7 +277,7 @@ def get_job(
             row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="SCOUT job not found")
-        return _job_response(conn, dict(row))
+        return _job_response(conn, dict(row), include_excerpt=True)
 
 
 @router.get("/jobs/{job_id}/observations")

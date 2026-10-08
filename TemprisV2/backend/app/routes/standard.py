@@ -401,6 +401,48 @@ def download_evidence(
         _raise_domain_error(e)
 
 
+EVIDENCE_INLINE_MEDIA_TYPES = {"text/plain", "application/json", "image/png"}
+
+
+@router.get(
+    "/evidence/{evidence_id}/preview",
+    status_code=status.HTTP_200_OK,
+    summary="Inline-safe evidence preview (audited; non-previewable types force attachment)",
+)
+def preview_evidence(
+    evidence_id: uuid.UUID,
+    auth: AuthContext = Depends(_require_analyst),
+):
+    """V1 preview semantics: only inline-safe media types render inline with
+    nosniff + no-store; everything else falls back to an attachment
+    disposition. The read is audited under its own event name."""
+    try:
+        with get_db_connection() as conn:
+            row = service.download_evidence(
+                conn, auth.tenant_id, evidence_id,
+                actor_id=auth.actor_id, actor_role=auth.role,
+                audit_event="standard.evidence_previewed",
+            )
+            conn.commit()
+        inline = row["media_type"] in EVIDENCE_INLINE_MEDIA_TYPES
+        disposition = (
+            f'inline; filename="evidence-{evidence_id}"' if inline
+            else f'attachment; filename="evidence-{evidence_id}"'
+        )
+        return Response(
+            content=bytes(row["content"]),
+            media_type=row["media_type"] if inline else "application/octet-stream",
+            headers={
+                "X-Evidence-Sha256": row["sha256"],
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "no-store, private",
+                "Content-Disposition": disposition,
+            },
+        )
+    except Exception as e:
+        _raise_domain_error(e)
+
+
 @router.get(
     "/exceptions",
     status_code=status.HTTP_200_OK,
@@ -461,6 +503,39 @@ def decide_exception(
             )
             conn.commit()
             return _jsonify({"exception": row})
+    except Exception as e:
+        _raise_domain_error(e)
+
+
+# --- derived workbench reads (V1 GRC parity) ------------------------------
+
+
+@router.get(
+    "/gap-analysis",
+    status_code=status.HTTP_200_OK,
+    summary="Derived gap analysis: assessment sign-off state per control (read-only)",
+)
+def get_gap_analysis(auth: AuthContext = Depends(_require_analyst)):
+    try:
+        with get_db_connection() as conn:
+            payload = service.get_gap_analysis(conn, auth.tenant_id)
+            conn.commit()
+            return _jsonify(payload)
+    except Exception as e:
+        _raise_domain_error(e)
+
+
+@router.get(
+    "/advisories",
+    status_code=status.HTTP_200_OK,
+    summary="Derived compliance advisories from live data (never mutates state)",
+)
+def list_advisories(auth: AuthContext = Depends(_require_analyst)):
+    try:
+        with get_db_connection() as conn:
+            rows = service.list_advisories(conn, auth.tenant_id)
+            conn.commit()
+            return _jsonify({"advisories": rows})
     except Exception as e:
         _raise_domain_error(e)
 
@@ -582,6 +657,30 @@ def acknowledge_incident(
             )
             conn.commit()
             return _jsonify({"incident": row})
+    except Exception as e:
+        _raise_domain_error(e)
+
+
+@router.post(
+    "/incidents/{incident_id}/report-draft",
+    status_code=status.HTTP_200_OK,
+    summary="Derive a MAS TRM 12.1.5 notification DRAFT from this real incident (nothing stored)",
+)
+def incident_report_draft(
+    incident_id: uuid.UUID,
+    auth: AuthContext = Depends(_require_analyst),
+):
+    """Honesty rules carried over from V1: a draft is generated only from a
+    REAL recorded incident (never fabricated from catalogue totals), and it
+    is a derived artifact — a HUMAN submits via the official channel."""
+    try:
+        with get_db_connection() as conn:
+            draft = service.build_incident_report_draft(
+                conn, auth.tenant_id, incident_id,
+                actor_id=auth.actor_id, actor_role=auth.role,
+            )
+            conn.commit()
+            return _jsonify({"report_draft": draft})
     except Exception as e:
         _raise_domain_error(e)
 

@@ -29,7 +29,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import psycopg
 from psycopg.rows import dict_row
@@ -45,11 +45,16 @@ from app.exposure.service import (
     confirm_exposure,
     create_finding,
 )
+from app.intake.classification_history import (
+    build_transition_detail,
+    normalize_rationale,
+)
 from app.intake.errors import (
     IntakeAnchorRequiredError,
     IntakeAnchorSupersededError,
     IntakeAnchorlessClassError,
     IntakeAmbiguousIdentityError,
+    IntakeClassificationRationaleError,
     IntakeConnectorRegistrationError,
     IntakeDuplicateExposureError,
     IntakeEventConflictError,
@@ -375,9 +380,17 @@ def _transition(
     note: Optional[str] = None,
     updates: Optional[dict[str, Any]] = None,
     require_classification: bool = False,
+    detail_builder: Optional[Callable[[dict], dict[str, Any]]] = None,
 ) -> IntakeRecord:
     """One serialized review transition under the record's advisory lock.
-    ``to_state=None`` keeps the current state (a annotate-only action)."""
+    ``to_state=None`` keeps the current state (a annotate-only action).
+
+    ``detail_builder`` receives the row read FOR UPDATE inside this
+    transaction and its result becomes the event row's typed payload. Building
+    the before/after history from THAT row (never from an earlier unlocked
+    read) is what makes a concurrent reclassification record the true prior.
+    The projection UPDATE and the history INSERT share the transaction, so a
+    decision is never recorded without its history (or the reverse)."""
     with conn.cursor(row_factory=dict_row) as cur:
         _advisory_xact_lock(cur, f"intake:{tenant_id}:{record_id}")
         cur.execute(
@@ -426,9 +439,13 @@ def _transition(
         )
         record = IntakeRecord.model_validate(cur.fetchone())
 
+        # built from the row locked above — the authoritative prior
+        detail = detail_builder(row) if detail_builder is not None else None
+
         _record_event(
             cur, tenant_id, record.id, event=event,
             actor_id=actor_id, actor_role=actor_role, note=note,
+            detail=detail,
         )
         record_audit_event(
             conn=conn, tenant_id=tenant_id, actor_id=actor_id,
@@ -438,6 +455,7 @@ def _transition(
                 "prior_state": row["state"],
                 "state": record.state,
                 "note": note,
+                **({"detail": detail} if detail is not None else {}),
             },
         )
         return record
@@ -453,12 +471,27 @@ def classify_intake_record(
     *,
     actor_id: str,
     actor_role: str,
+    rationale: str,
     note: Optional[str] = None,
 ) -> IntakeRecord:
     """Stamp the closed-spine classification (§3.6.5). Invalid values are
     rejected 422 by the shared validator — V1's arbitrary-string defect is
-    structurally impossible here."""
+    structurally impossible here.
+
+    Append-only classification history (§6:1141/1149): every classification and
+    reclassification preserves the PRIOR class/subclass/subtype, the new values
+    and the mandatory rationale in ``intake_record_events.detail`` on the same
+    transaction as the projection update, while ``intake_records`` keeps
+    holding the current projection. The actor and timestamp are the event row's
+    own columns. Prior events are never touched — this path only INSERTs.
+    """
     validate_taxonomy_spine(taxonomy_class, taxonomy_subclass, taxonomy_subtype)
+    clean_rationale = normalize_rationale(rationale)
+    if clean_rationale is None:
+        raise IntakeClassificationRationaleError(
+            "a classification decision requires a nonblank rationale — the "
+            "append-only history must record why the class was chosen"
+        )
     return _transition(
         conn, tenant_id, record_id,
         from_states=("submitted", "under_review", "needs_info"),
@@ -471,6 +504,13 @@ def classify_intake_record(
             "taxonomy_subclass": taxonomy_subclass,
             "taxonomy_subtype": taxonomy_subtype,
         },
+        detail_builder=lambda prior: build_transition_detail(
+            prior,
+            taxonomy_class=taxonomy_class,
+            taxonomy_subclass=taxonomy_subclass,
+            taxonomy_subtype=taxonomy_subtype,
+            rationale=clean_rationale,
+        ),
     )
 
 
@@ -483,6 +523,53 @@ def start_intake_review(
     actor_role: str,
     note: Optional[str] = None,
 ) -> IntakeRecord:
+    """Review entry resolves the proposed anchor and the canonical CVE so the
+    record stops looking 'Proposed' once an analyst picks it up. The
+    transition itself never fails on resolution: an unknown/inactive asset
+    keeps the anchor 'unresolved', and an unknown canonical CVE is recorded as
+    a null resolution in the event detail (confirmation re-validates)."""
+    updates: dict[str, Any] = {}
+    anchor_detail: Optional[dict] = None
+    canonical_detail: Optional[dict] = None
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT asset_id, canonical_cve_id FROM intake_records "
+            "WHERE tenant_id = %s AND id = %s;",
+            (str(tenant_id), str(record_id)),
+        )
+        row = cur.fetchone()
+        if row is not None:
+            if row["asset_id"] is not None:
+                cur.execute(
+                    "SELECT id, status FROM assets "
+                    "WHERE tenant_id = %s AND id = %s;",
+                    (str(tenant_id), str(row["asset_id"])),
+                )
+                asset = cur.fetchone()
+                if asset is not None and asset["status"] == "active":
+                    updates["anchor_state"] = "resolved"
+                    anchor_detail = {
+                        "asset_id": str(row["asset_id"]),
+                        "status": asset["status"],
+                    }
+            if row["canonical_cve_id"] is not None:
+                # the canonical vulnerability store is global — no tenant filter
+                cur.execute(
+                    "SELECT cve_id, state FROM canonical_vulnerabilities "
+                    "WHERE cve_id = %s;",
+                    (row["canonical_cve_id"],),
+                )
+                cve = cur.fetchone()
+                canonical_detail = (
+                    {"cve_id": cve["cve_id"], "state": cve["state"]}
+                    if cve is not None else None
+                )
+
+    detail = {
+        "anchor_resolved": "anchor_state" in updates,
+        "anchor": anchor_detail,
+        "canonical_cve": canonical_detail,
+    }
     return _transition(
         conn, tenant_id, record_id,
         from_states=("submitted", "needs_info"),
@@ -490,6 +577,8 @@ def start_intake_review(
         event="review_started",
         audit_event="intake.review_started",
         actor_id=actor_id, actor_role=actor_role, note=note,
+        updates=updates or None,
+        detail_builder=lambda prior: detail,
     )
 
 
@@ -593,20 +682,24 @@ def confirm_intake_record(
                 f"intake record {record_id} is in state '{row['state']}'; "
                 "confirmation requires 'under_review'"
             )
-        taxonomy_class = row["taxonomy_class"]
-        if taxonomy_class is None:
-            raise IntakeStateError(
-                f"intake record {record_id} is unclassified — classification "
-                "on the closed spine is required before confirmation"
-            )
+        # The closed SSS spine is the NON-CVE severity vocabulary (§3.6.5);
+        # a CVE-backed record's intrinsic authority is the canonical CVSS
+        # path, so the classification gates apply only to non-CVE records.
+        if row["canonical_cve_id"] is None:
+            taxonomy_class = row["taxonomy_class"]
+            if taxonomy_class is None:
+                raise IntakeStateError(
+                    f"intake record {record_id} is unclassified — classification "
+                    "on the closed spine is required before confirmation"
+                )
 
-        # Anchorless classes (v1: NHI) can be held but NEVER confirmed —
-        # named refusal, never a silent block (§3.6.6 #8).
-        if taxonomy_class == "NHI":
-            raise IntakeAnchorlessClassError(
-                "class NHI has no exposure-anchor semantics yet (§3.6.6 #8) — "
-                "the record can be held (needs_info) but not confirmed"
-            )
+            # Anchorless classes (v1: NHI) can be held but NEVER confirmed —
+            # named refusal, never a silent block (§3.6.6 #8).
+            if taxonomy_class == "NHI":
+                raise IntakeAnchorlessClassError(
+                    "class NHI has no exposure-anchor semantics yet (§3.6.6 #8) — "
+                    "the record can be held (needs_info) but not confirmed"
+                )
 
         anchor_id = cmd.asset_id or row["asset_id"]
         if anchor_id is None:
@@ -974,6 +1067,7 @@ def register_connector(
     actor_id: str,
     actor_role: str,
 ) -> ConnectorRegistration:
+    """v1: registrations are admission records; no adapter executes yet."""
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             """

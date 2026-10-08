@@ -126,6 +126,33 @@ const registration: IntakeConnectorRegistration = {
 
 const renderWorkbench = () => render(<IntakeWorkbench />);
 
+const RATIONALE = 'invoice export lacks an ownership check';
+
+/** Open the first record's detail so the classify form is on screen. */
+const openFirstRecord = async () => {
+  fireEvent.click(await screen.findByRole('button', { name: /MFA fatigue reports/ }));
+  return screen.findByLabelText('Taxonomy class');
+};
+
+/** Fill the closed-spine taxonomy plus the now-mandatory rationale. */
+const fillClassification = (
+  taxonomyClass: string,
+  rationale = RATIONALE,
+  subclass?: string,
+  subtype?: string
+) => {
+  fireEvent.change(screen.getByLabelText('Taxonomy class'), { target: { value: taxonomyClass } });
+  if (subclass) {
+    fireEvent.change(screen.getByLabelText(new RegExp(`^Subclass \\(required for ${taxonomyClass}\\)$`)), {
+      target: { value: subclass },
+    });
+  }
+  if (subtype) {
+    fireEvent.change(screen.getByLabelText(/^Subtype \(required for BLFLAW\)$/), { target: { value: subtype } });
+  }
+  fireEvent.change(screen.getByLabelText(/^Rationale/), { target: { value: rationale } });
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(api.intake.listRecords).mockResolvedValue([submittedRecord, connectorRecord]);
@@ -199,30 +226,84 @@ describe('Intake & Triage workbench (Chapter 6)', () => {
     expect(screen.getByText(/Nothing here is a finding until it confirms/)).toBeInTheDocument();
   });
 
+  it('renders two successive classification decisions as append-only history — prior, new, actor and rationale', async () => {
+    const twoDecisions: IntakeRecordEvent[] = [
+      {
+        id: '93111111-1111-4111-8111-111111111111',
+        tenant_id: submittedRecord.tenant_id,
+        record_id: RECORD_ID,
+        event: 'classified',
+        actor: 'analyst@example.test',
+        actor_role: 'analyst',
+        note: null,
+        created_at: '2026-09-21T00:00:00Z',
+        detail: {
+          prior: { taxonomy_class: null, taxonomy_subclass: null, taxonomy_subtype: null },
+          new: { taxonomy_class: 'BLFLAW', taxonomy_subclass: null, taxonomy_subtype: 'IDOR' },
+          prior_unclassified: true,
+          rationale: 'invoice export allows cross-tenant reads',
+        },
+      },
+      {
+        id: '93222222-2222-4222-8222-222222222222',
+        tenant_id: submittedRecord.tenant_id,
+        record_id: RECORD_ID,
+        event: 'classified',
+        actor: 'reviewer@example.test',
+        actor_role: 'admin',
+        note: null,
+        created_at: '2026-09-22T00:00:00Z',
+        detail: {
+          prior: { taxonomy_class: 'BLFLAW', taxonomy_subclass: null, taxonomy_subtype: 'IDOR' },
+          new: { taxonomy_class: 'IDENTITY_POSTURE', taxonomy_subclass: 'MFA_ENROLMENT', taxonomy_subtype: null },
+          prior_unclassified: false,
+          rationale: 're-read: policy drift, not a flaw',
+        },
+      },
+    ];
+    vi.mocked(api.intake.getRecord).mockResolvedValue(underReviewRecord);
+    vi.mocked(api.intake.getRecordEvents).mockResolvedValue(twoDecisions);
+    renderWorkbench();
+    await openFirstRecord();
+
+    // the trail is the append-only decision store, not just the latest value
+    const history = await screen.findByLabelText('Classification and review history');
+    const rows = history.querySelectorAll('li');
+    expect(rows).toHaveLength(2);
+
+    // newest first — the reclassification shows the PRIOR decision and the new one
+    expect(rows[0].textContent).toContain('reclassified from');
+    expect(rows[0].textContent).toContain('BLFLAW · IDOR');
+    expect(rows[0].textContent).toContain('IDENTITY_POSTURE · MFA_ENROLMENT');
+    expect(rows[0].textContent).toContain('reviewer@example.test');
+    expect(rows[0].textContent).toContain('re-read: policy drift, not a flaw');
+
+    // and the FIRST decision is still there, unrevised
+    expect(rows[1].textContent).toContain('first classification');
+    expect(rows[1].textContent).toContain('BLFLAW · IDOR');
+    expect(rows[1].textContent).toContain('analyst@example.test');
+    expect(rows[1].textContent).toContain('invoice export allows cross-tenant reads');
+  });
+
   it('classifies on the closed spine: subclass required for IDENTITY_POSTURE, subtype for BLFLAW, none for others', async () => {
     vi.mocked(api.intake.getRecord).mockResolvedValue(submittedRecord);
     vi.mocked(api.intake.classifyRecord).mockResolvedValue(submittedRecord);
     renderWorkbench();
-
-    fireEvent.click(await screen.findByRole('button', { name: /MFA fatigue reports/ }));
-    expect(await screen.findByLabelText('Taxonomy class')).toBeInTheDocument();
+    await openFirstRecord();
 
     // SUPPLY_CHAIN has no subclass/subtype vocabulary — absence is the representation
     fireEvent.change(screen.getByLabelText('Taxonomy class'), { target: { value: 'SUPPLY_CHAIN' } });
     expect(screen.queryByLabelText(/Subclass/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Subtype/)).not.toBeInTheDocument();
 
-    // IDENTITY_POSTURE requires a closed subclass
-    fireEvent.change(screen.getByLabelText('Taxonomy class'), { target: { value: 'IDENTITY_POSTURE' } });
-    const subclassSelect = screen.getByLabelText('Subclass (required for IDENTITY_POSTURE)');
-    expect(subclassSelect).toBeInTheDocument();
-    fireEvent.change(subclassSelect, { target: { value: 'MFA_ENROLMENT' } });
+    fillClassification('IDENTITY_POSTURE', RATIONALE, 'MFA_ENROLMENT');
 
     fireEvent.click(screen.getByRole('button', { name: 'Save classification' }));
     await waitFor(() => {
       expect(api.intake.classifyRecord).toHaveBeenCalledWith(
         RECORD_ID,
         { taxonomy_class: 'IDENTITY_POSTURE', taxonomy_subclass: 'MFA_ENROLMENT', taxonomy_subtype: null },
+        RATIONALE,
         null,
       );
     });
@@ -232,19 +313,82 @@ describe('Intake & Triage workbench (Chapter 6)', () => {
     vi.mocked(api.intake.getRecord).mockResolvedValue(submittedRecord);
     vi.mocked(api.intake.classifyRecord).mockResolvedValue(submittedRecord);
     renderWorkbench();
+    await openFirstRecord();
 
-    fireEvent.click(await screen.findByRole('button', { name: /MFA fatigue reports/ }));
-    fireEvent.change(await screen.findByLabelText('Taxonomy class'), { target: { value: 'BLFLAW' } });
-    fireEvent.change(screen.getByLabelText('Subtype (required for BLFLAW)'), { target: { value: 'IDOR' } });
+    fillClassification('BLFLAW', RATIONALE, undefined, 'IDOR');
     fireEvent.click(screen.getByRole('button', { name: 'Save classification' }));
 
     await waitFor(() => {
       expect(api.intake.classifyRecord).toHaveBeenCalledWith(
         RECORD_ID,
         { taxonomy_class: 'BLFLAW', taxonomy_subclass: null, taxonomy_subtype: 'IDOR' },
+        RATIONALE,
         null,
       );
     });
+  });
+
+  it('requires a rationale before a classification can be saved', async () => {
+    vi.mocked(api.intake.getRecord).mockResolvedValue(submittedRecord);
+    vi.mocked(api.intake.classifyRecord).mockResolvedValue(submittedRecord);
+    renderWorkbench();
+    await openFirstRecord();
+
+    fireEvent.change(screen.getByLabelText('Taxonomy class'), { target: { value: 'BLFLAW' } });
+    fireEvent.change(screen.getByLabelText(/^Subtype \(required for BLFLAW\)$/), { target: { value: 'IDOR' } });
+
+    // taxonomy chosen but no rationale → the decision cannot be saved
+    const save = screen.getByRole('button', { name: 'Save classification' });
+    expect(save).toBeDisabled();
+    expect(screen.getByText(/A rationale is required/)).toBeInTheDocument();
+    fireEvent.click(save);
+    expect(api.intake.classifyRecord).not.toHaveBeenCalled();
+
+    // a whitespace-only rationale is still no rationale
+    fireEvent.change(screen.getByLabelText(/^Rationale/), { target: { value: '   ' } });
+    expect(screen.getByRole('button', { name: 'Save classification' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save classification' }));
+    expect(api.intake.classifyRecord).not.toHaveBeenCalled();
+
+    // a real rationale unlocks the (trimmed) submission
+    fireEvent.change(screen.getByLabelText(/^Rationale/), { target: { value: `  ${RATIONALE}  ` } });
+    const enabled = screen.getByRole('button', { name: 'Save classification' });
+    expect(enabled).toBeEnabled();
+    fireEvent.click(enabled);
+
+    await waitFor(() => {
+      expect(api.intake.classifyRecord).toHaveBeenCalledWith(
+        RECORD_ID,
+        { taxonomy_class: 'BLFLAW', taxonomy_subclass: null, taxonomy_subtype: 'IDOR' },
+        RATIONALE,
+        null,
+      );
+    });
+  });
+
+  it('reclassifies with an explicit verb and appends the decision instead of replacing it', async () => {
+    // the record already carries a classification → this act is a reclassification
+    vi.mocked(api.intake.getRecord).mockResolvedValue(underReviewRecord);
+    vi.mocked(api.intake.classifyRecord).mockResolvedValue(underReviewRecord);
+    renderWorkbench();
+    await openFirstRecord();
+
+    // the action names itself honestly — the prior decision stays in history
+    expect(screen.getByRole('button', { name: 'Reclassify' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save classification' })).not.toBeInTheDocument();
+
+    fillClassification('IDENTITY_POSTURE', 're-read: policy drift, not a flaw', 'MFA_ENROLMENT');
+    fireEvent.click(screen.getByRole('button', { name: 'Reclassify' }));
+
+    await waitFor(() => {
+      expect(api.intake.classifyRecord).toHaveBeenCalledWith(
+        RECORD_ID,
+        { taxonomy_class: 'IDENTITY_POSTURE', taxonomy_subclass: 'MFA_ENROLMENT', taxonomy_subtype: null },
+        're-read: policy drift, not a flaw',
+        null,
+      );
+    });
+    expect(await screen.findByText(/Reclassified on the closed spine/)).toBeInTheDocument();
   });
 
   it('moves submitted → under_review → request info → reject through the named-deficiency actions', async () => {
@@ -439,21 +583,65 @@ describe('Intake & Triage workbench (Chapter 6)', () => {
     expect(await screen.findByText(/Replay: this source event was already consumed/)).toBeInTheDocument();
   });
 
-  it('requires a connector registration and event id for CONNECTOR-source submissions', async () => {
+  it('keeps CONNECTOR submissions blocked, with no user-entered UUID, when no registration is active', async () => {
+    vi.mocked(api.intake.listConnectors).mockResolvedValue([]);
+    renderWorkbench();
+    await screen.findByText('Raw intake queue');
+
+    fireEvent.change(screen.getByLabelText(/^Source$/), { target: { value: 'CONNECTOR' } });
+    const select = await screen.findByLabelText('Connector destination (required for CONNECTOR)');
+    // the destination is a selector — a free-text UUID box no longer exists
+    expect(select.tagName).toBe('SELECT');
+    expect(screen.queryByPlaceholderText(/Registration UUID/i)).not.toBeInTheDocument();
+    // ...and with nothing registered it is empty and disabled, not silently blank
+    expect(select).toBeDisabled();
+    expect(screen.getByRole('option', { name: 'No active connector registrations' })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Entra drift' } });
+    fireEvent.change(screen.getByLabelText('Source payload (mandatory JSON object)'), { target: { value: '{"k":"v"}' } });
+    const submitButton = screen.getByRole('button', { name: 'Submit intake record' });
+    expect(submitButton).toBeDisabled();
+    fireEvent.click(submitButton);
+    expect(api.intake.createRecord).not.toHaveBeenCalled();
+  });
+
+  it('requires CONNECTOR submissions to CHOOSE an active destination labelled by name + adapter, submitting its full registration id', async () => {
+    const disabledRegistration: IntakeConnectorRegistration = {
+      ...registration,
+      id: 'c2222222-2222-4222-8222-222222222222',
+      name: 'legacy-forwarder',
+      adapter: 'legacy_verdicts',
+      status: 'disabled',
+    };
+    vi.mocked(api.intake.listConnectors).mockResolvedValue([registration, disabledRegistration]);
     vi.mocked(api.intake.createRecord).mockResolvedValue({ record: submittedRecord, outcome: 'created' });
     renderWorkbench();
     await screen.findByText('Raw intake queue');
 
     fireEvent.change(screen.getByLabelText(/^Source$/), { target: { value: 'CONNECTOR' } });
-    expect(screen.getByLabelText('Connector registration (required for CONNECTOR)')).toBeInTheDocument();
+    const select = await screen.findByLabelText('Connector destination (required for CONNECTOR)');
+    expect(select.tagName).toBe('SELECT');
+
+    // options display the registration NAME + its adapter...
+    const options = Array.from(select.querySelectorAll('option'));
+    expect(options.map((option) => option.textContent)).toContain('entra-id-observations — entra_authentication_methods');
+    // ...their value is the FULL registration id (never a short form)...
+    const chosen = options.find((option) => option.textContent === 'entra-id-observations — entra_authentication_methods');
+    expect(chosen?.value).toBe(registration.id);
+    expect(chosen?.value).toHaveLength(36);
+    // ...and a non-active registration is never offered
+    expect(options.map((option) => option.value)).not.toContain(disabledRegistration.id);
 
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Entra drift' } });
     fireEvent.change(screen.getByLabelText('Source payload (mandatory JSON object)'), { target: { value: '{"k":"v"}' } });
-    fireEvent.change(screen.getByLabelText('Connector registration (required for CONNECTOR)'), {
-      target: { value: registration.id },
-    });
+    const submitButton = screen.getByRole('button', { name: 'Submit intake record' });
+    // mandatory destination: the command stays disabled until one is chosen
+    expect(submitButton).toBeDisabled();
+
+    fireEvent.change(select, { target: { value: registration.id } });
+    expect(submitButton).toBeEnabled();
     fireEvent.change(screen.getByLabelText('Source event id (optional, replay identity)'), { target: { value: 'evt-42' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Submit intake record' }));
+    fireEvent.click(submitButton);
 
     await waitFor(() => {
       expect(api.intake.createRecord).toHaveBeenCalledWith(expect.objectContaining({
@@ -464,9 +652,13 @@ describe('Intake & Triage workbench (Chapter 6)', () => {
     });
   });
 
-  it('lists connector registrations and registers a routing-only destination (no credential fields)', async () => {
+  it('lists connector registrations and creates one through the form (no credential fields)', async () => {
     vi.mocked(api.intake.listConnectors).mockResolvedValue([registration]);
-    vi.mocked(api.intake.registerConnector).mockResolvedValue(registration);
+    vi.mocked(api.intake.registerConnector).mockResolvedValue({
+      ...registration,
+      name: 'new-destination',
+      adapter: 'my_custom_adapter',
+    });
     renderWorkbench();
 
     expect(await screen.findByText('entra-id-observations')).toBeInTheDocument();
@@ -475,20 +667,59 @@ describe('Intake & Triage workbench (Chapter 6)', () => {
     expect(screen.queryByLabelText(/secret/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/credential/i)).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('Name (re-registering updates the routing)'), { target: { value: 'aev-verdicts' } });
-    fireEvent.change(screen.getByLabelText('Adapter'), { target: { value: 'aev_verdicts' } });
-    fireEvent.change(screen.getByLabelText('Destination routing (JSON object)'), { target: { value: '{"queue":"intake"}' } });
+    // registrations are admission records: creation is available again
+    fireEvent.change(screen.getByLabelText(/Name \(re-registering updates the routing\)/), {
+      target: { value: 'new-destination' },
+    });
+    fireEvent.change(screen.getByLabelText(/^Adapter$/), {
+      target: { value: 'my_custom_adapter' },
+    });
+    fireEvent.change(screen.getByLabelText(/Destination routing \(JSON object\)/), {
+      target: { value: '{"queue": "intake"}' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Register connector' }));
 
     await waitFor(() => {
-      expect(api.intake.registerConnector).toHaveBeenCalledWith({
-        name: 'aev-verdicts',
-        adapter: 'aev_verdicts',
+      expect(api.intake.registerConnector).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'new-destination',
+        adapter: 'my_custom_adapter',
         destination_routing: { queue: 'intake' },
-        payload_semantics: null,
-      });
+      }));
     });
-    expect(await screen.findByText(/registered \(routing \+ payload semantics only/)).toBeInTheDocument();
-    expect(api.intake.listConnectors).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText(/new-destination registered/)).toBeInTheDocument();
+    // the list reloads and the submit selector refreshes after creation
+    await waitFor(() => expect(vi.mocked(api.intake.listConnectors).mock.calls.length).toBeGreaterThanOrEqual(2));
   });
+
+  it('shows the no-adapter-executes caption under the registration form', async () => {
+    vi.mocked(api.intake.listConnectors).mockResolvedValue([registration]);
+    renderWorkbench();
+    expect(
+      await screen.findByText(/No adapter executes yet — registrations are admission records/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/connector_adapter_unavailable/)).not.toBeInTheDocument();
+  });
+
+  it('a failing registrations read leaves no selectable destination', async () => {
+    vi.mocked(api.intake.listConnectors).mockRejectedValue(new Error('registrations unavailable'));
+    renderWorkbench();
+    await screen.findByText('Raw intake queue');
+
+    fireEvent.change(screen.getByLabelText(/^Source$/), { target: { value: 'CONNECTOR' } });
+    const select = await screen.findByLabelText('Connector destination (required for CONNECTOR)');
+    await waitFor(() => expect(select).toBeDisabled());
+    expect(screen.getByRole('button', { name: 'Submit intake record' })).toBeDisabled();
+  });
+
+  it('offers no stale registration path once creation is removed', async () => {
+    vi.mocked(api.intake.listConnectors).mockResolvedValue([registration]);
+    renderWorkbench();
+    await screen.findByText('Raw intake queue');
+
+    fireEvent.change(screen.getByLabelText(/^Source$/), { target: { value: 'CONNECTOR' } });
+    const select = await screen.findByLabelText('Connector destination (required for CONNECTOR)');
+    await waitFor(() => expect(select).toBeEnabled());
+    expect(screen.getByRole('option', { name: 'entra-id-observations — entra_authentication_methods' })).toBeInTheDocument();
+  });
+
 });

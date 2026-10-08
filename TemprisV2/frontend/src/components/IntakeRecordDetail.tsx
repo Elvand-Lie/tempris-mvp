@@ -6,12 +6,14 @@ import {
   INTAKE_SOURCE_LABELS,
   INTAKE_STATE_LABELS,
   intakeStateBadgeClass,
+  readClassificationTransition,
   severityBadgeClass,
   shortId,
   stamp,
   taxonomySubclassOptions,
   taxonomySubtypeOptions,
   taxonomyText,
+  taxonomyTriple,
   TAXONOMY_CLASSES,
 } from '../intakeFormat';
 
@@ -341,6 +343,7 @@ const ClassifyForm: React.FC<{ record: IntakeRecord; onDone: (outcome?: IntakeCo
   );
   const [subclass, setSubclass] = useState(record.taxonomy_subclass || '');
   const [subtype, setSubtype] = useState(record.taxonomy_subtype || '');
+  const [rationale, setRationale] = useState('');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -349,8 +352,14 @@ const ClassifyForm: React.FC<{ record: IntakeRecord; onDone: (outcome?: IntakeCo
   const subclassOptions = taxonomyClass ? taxonomySubclassOptions(taxonomyClass) : null;
   const subtypeOptions = taxonomyClass ? taxonomySubtypeOptions(taxonomyClass) : null;
 
+  // Every classification/reclassification is an append-only decision: the
+  // rationale is mandatory, so the history always carries WHY the class was
+  // chosen (INTAKE-CLASSIFICATION-01).
+  const rationaleMissing = !rationale.trim();
+  const reclassifying = Boolean(record.taxonomy_class);
+
   const submit = async () => {
-    if (!taxonomyClass) return;
+    if (!taxonomyClass || rationaleMissing) return;
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -362,10 +371,15 @@ const ClassifyForm: React.FC<{ record: IntakeRecord; onDone: (outcome?: IntakeCo
           taxonomy_subclass: subclassOptions ? subclass : null,
           taxonomy_subtype: subtypeOptions ? subtype : null,
         },
+        rationale.trim(),
         note.trim() || null
       );
+      setRationale('');
       setNote('');
-      setNotice(`Classified on the closed spine: ${taxonomyClass}${subclass ? ` · ${subclass}` : ''}${subtype ? ` · ${subtype}` : ''}.`);
+      setNotice(
+        `${reclassifying ? 'Reclassified' : 'Classified'} on the closed spine: ${taxonomyClass}` +
+          `${subclass ? ` · ${subclass}` : ''}${subtype ? ` · ${subtype}` : ''} — decision appended to the trail.`
+      );
       onDone();
     } catch (cause: any) {
       setError(cause.message || 'Classification failed.');
@@ -450,6 +464,23 @@ const ClassifyForm: React.FC<{ record: IntakeRecord; onDone: (outcome?: IntakeCo
             </select>
           </div>
         )}
+        <div className="form-group intake-form-wide">
+          <label htmlFor="intake-classify-rationale">Rationale (required — why this class)</label>
+          <input
+            id="intake-classify-rationale"
+            type="text"
+            className="form-control"
+            value={rationale}
+            onChange={(event) => setRationale(event.target.value)}
+            placeholder="What in the payload/evidence supports this class and subclass"
+            required
+          />
+          {rationaleMissing && (
+            <small className="intake-muted" role="alert">
+              A rationale is required — it is stored with this decision in the append-only history.
+            </small>
+          )}
+        </div>
         <div className="form-group">
           <label htmlFor="intake-classify-note">Note (optional, recorded in the trail)</label>
           <input
@@ -458,12 +489,14 @@ const ClassifyForm: React.FC<{ record: IntakeRecord; onDone: (outcome?: IntakeCo
             className="form-control"
             value={note}
             onChange={(event) => setNote(event.target.value)}
-            placeholder="Why this classification"
+            placeholder="Housekeeping note for the trail"
           />
         </div>
         <div className="form-group spectrum-form-actions">
-          <button type="submit" className="btn btn-primary" disabled={saving || !taxonomyClass}>
-            {saving ? 'Saving…' : 'Save classification'}
+          <button type="submit" className="btn btn-primary" disabled={saving || !taxonomyClass || rationaleMissing}>
+            {saving
+              ? 'Saving…'
+              : `${reclassifying ? 'Reclassify' : 'Save classification'}`}
           </button>
         </div>
       </div>
@@ -728,16 +761,38 @@ const ConfirmForm: React.FC<{ record: IntakeRecord; onDone: (outcome?: IntakeCon
 const EventsPanel: React.FC<{ events: IntakeRecordEvent[] }> = ({ events }) => (
   <div className="spectrum-section" aria-labelledby="intake-events-title">
     <h3 id="intake-events-title">Actor trail</h3>
+    <p className="spectrum-muted">
+      Append-only: each classification decision keeps its prior and new class, the actor, the timestamp and the
+      rationale — the current classification above is only the latest projection of this history.
+    </p>
     {!events.length && <p className="scout-empty">No events recorded yet.</p>}
     {events.length > 0 && (
-      <ul className="spectrum-history intake-history">
-        {[...events].reverse().map((event) => (
-          <li key={event.id}>
-            <strong>{EVENT_LABELS[event.event] ?? event.event}</strong> · {event.actor}
-            {event.actor_role ? ` (${event.actor_role})` : ''} · {stamp(event.created_at)}
-            {event.note && <span className="spectrum-history-note">{event.note}</span>}
-          </li>
-        ))}
+      <ul className="spectrum-history intake-history" aria-label="Classification and review history">
+        {[...events].reverse().map((event) => {
+          const transition = event.event === 'classified' ? readClassificationTransition(event.detail) : null;
+          return (
+            <li key={event.id}>
+              <strong>{EVENT_LABELS[event.event] ?? event.event}</strong> · {event.actor}
+              {event.actor_role ? ` (${event.actor_role})` : ''} · {stamp(event.created_at)}
+              {transition && (
+                <span className="intake-history-transition">
+                  <span className="intake-muted">
+                    {transition.prior_unclassified ? 'first classification' : 'reclassified from'}
+                  </span>{' '}
+                  {!transition.prior_unclassified && (
+                    <>
+                      <span className="intake-history-prior">{taxonomyTriple(transition.prior)}</span>{' '}
+                      <span aria-hidden="true">→</span>{' '}
+                    </>
+                  )}
+                  <strong className="intake-history-new">{taxonomyTriple(transition.new)}</strong>
+                  <span className="spectrum-history-note">{transition.rationale}</span>
+                </span>
+              )}
+              {event.note && <span className="spectrum-history-note">{event.note}</span>}
+            </li>
+          );
+        })}
       </ul>
     )}
   </div>

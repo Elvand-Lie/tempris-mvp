@@ -56,6 +56,24 @@ pub enum ServerFrame {
         timeout_seconds: u64,
         expires_at: String,
     },
+    STRIKE_JOB {
+        job_id: Uuid,
+        capability: String,
+        #[serde(default)]
+        method: String,
+        #[serde(default)]
+        url: String,
+        #[serde(default)]
+        pinned_ips: Vec<String>,
+        // additive Phase-1 tool fields: nmap's pinned IPs/CIDR (the whole
+        // authorized range) and dig's allow-listed qtype
+        #[serde(default)]
+        pinned_targets: Vec<String>,
+        #[serde(default)]
+        record_type: Option<String>,
+        timeout_seconds: u64,
+        expires_at: String,
+    },
     CHECK_UPDATE(CheckUpdatePayload),
 }
 
@@ -96,12 +114,31 @@ impl Default for EngineCapability {
     }
 }
 
+/// Outcome of an explicit toolchain update-check attempt (CHECK_UPDATE or the
+/// scheduled check). "Attempted" is distinct from "applied": a no-op check
+/// still succeeded, a failed fetch must not read as newly verified.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UpdateCheckOutcome {
+    pub attempted_at: String,
+    pub succeeded: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ScoutCapabilities {
     pub nmap: EngineCapability,
     pub nuclei: EngineCapability,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nuclei_templates: Option<EngineCapability>,
+    // Phase-1 STRIKE toolbox readiness (additive; older reports omit them
+    // and the server treats absent as NOT ready — fail closed)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curl: Option<EngineCapability>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ffuf: Option<EngineCapability>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dig: Option<EngineCapability>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collector_version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -112,6 +149,8 @@ pub struct ScoutCapabilities {
     pub update_status: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_checked_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_check: Option<UpdateCheckOutcome>,
 }
 
 impl Default for ScoutCapabilities {
@@ -120,11 +159,15 @@ impl Default for ScoutCapabilities {
             nmap: EngineCapability::default(),
             nuclei: EngineCapability::default(),
             nuclei_templates: None,
+            curl: None,
+            ffuf: None,
+            dig: None,
             collector_version: None,
             manifest_sequence: None,
             channel: None,
             update_status: None,
             last_checked_at: None,
+            update_check: None,
         }
     }
 }
@@ -141,6 +184,22 @@ pub enum ClientFrame {
     },
     HEARTBEAT {
         timestamp: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        network_state: Option<crate::network_state::NetworkState>,
+    },
+    STRIKE_JOB_RESULT {
+        job_id: Uuid,
+        status: String, // "completed" | "failed" | "rejected"
+        #[serde(default)]
+        exit_code: Option<i32>,
+        stdout: String,
+        stderr: String,
+        stdout_bytes: usize,
+        stderr_bytes: usize,
+        started_at: String,
+        completed_at: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error_message: Option<String>,
     },
     SCOUT_CAPABILITIES {
         capabilities: ScoutCapabilities,
@@ -322,6 +381,19 @@ mod tests {
                     prerequisite_health: None,
                 },
                 nuclei_templates: None,
+                curl: Some(EngineCapability {
+                    available: true,
+                    version: Some("8.5.0".to_string()),
+                    templates_version: None,
+                    managed: Some(false),
+                    status: Some("ready".to_string()),
+                    integrity_status: Some("verified".to_string()),
+                    path: None,
+                    last_checked_at: Some("2026-09-05T12:00:00Z".to_string()),
+                    prerequisite_health: Some("ready".to_string()),
+                }),
+                ffuf: None,
+                dig: None,
                 collector_version: Some("0.4.0".to_string()),
                 manifest_sequence: Some(1),
                 channel: Some("stable".to_string()),

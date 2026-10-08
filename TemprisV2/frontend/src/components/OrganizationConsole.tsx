@@ -1,8 +1,31 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
-import { OrgMember, UserRole } from '../types';
+import { MembershipStatus, OrgMember, UserRole } from '../types';
 
-export const OrganizationConsole: React.FC = () => {
+// ORG-01 (PRD Ch.5, as amended 2026-09-24): a Tenant Admin manages ordinary
+// (analyst/admin) memberships; Superadmin memberships and activation of
+// pending accounts are tenant Superadmin authorities. The backend owns these
+// rules — these strings only mirror its 409 details for display, and the
+// console additionally refuses to send the impossible request.
+const ADD_ACTIVE_MEMBERSHIP_DETAIL =
+  'This user already has an active membership in an organization. Single active membership policy prohibits duplicate memberships.';
+const ADD_PENDING_MEMBERSHIP_DETAIL =
+  'This user already has a pending organization membership invitation. A Superadmin can activate that account, and one invitation may be outstanding at a time.';
+const EDIT_LAST_SUPERADMIN_DETAIL =
+  'Cannot demote or disable the last active superadmin of this organization.';
+const EDIT_UNACTIVATED_ACCOUNT_DETAIL =
+  'User account is not active. A Superadmin must activate the account before its membership can be enabled.';
+const TENANT_ADMIN_FORBIDDEN_DETAIL =
+  'Tenant Admins cannot create or modify Superadmin memberships.';
+
+/** A 409 from the invitation endpoints names which conflict it hit. */
+const isPendingInvitationConflict = (message: string) => /pending/i.test(message);
+/** A 409 from the membership editors names which guard it hit. */
+const isUnactivatedAccountConflict = (message: string) =>
+  /not active|unactivated|Platform Administrator/i.test(message);
+
+export const OrganizationConsole: React.FC<{ currentRole: UserRole }> = ({ currentRole }) => {
+  const isSuperadmin = currentRole === 'superadmin';
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -15,13 +38,18 @@ export const OrganizationConsole: React.FC = () => {
 
   const [editMember, setEditMember] = useState<OrgMember | null>(null);
   const [editRole, setEditRole] = useState<UserRole>('analyst');
-  const [editStatus, setEditStatus] = useState<'active' | 'disabled'>('active');
+  const [editStatus, setEditStatus] = useState<MembershipStatus>('active');
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
   const [removeMember, setRemoveMember] = useState<OrgMember | null>(null);
   const [removeSubmitting, setRemoveSubmitting] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+
+  const [activateMember, setActivateMember] = useState<OrgMember | null>(null);
+  const [activatePassword, setActivatePassword] = useState('');
+  const [activateSubmitting, setActivateSubmitting] = useState(false);
+  const [activateError, setActivateError] = useState<string | null>(null);
 
   const loadMembers = useCallback(async () => {
     setLoading(true);
@@ -54,7 +82,11 @@ export const OrganizationConsole: React.FC = () => {
       await loadMembers();
     } catch (err: any) {
       if (err.status === 409) {
-        setAddError('This user already has an active membership in an organization. Single active membership policy prohibits duplicate memberships.');
+        setAddError(
+          isPendingInvitationConflict(err.message || '')
+            ? ADD_PENDING_MEMBERSHIP_DETAIL
+            : ADD_ACTIVE_MEMBERSHIP_DETAIL
+        );
       } else {
         setAddError(err.message || 'Failed to add member.');
       }
@@ -75,13 +107,31 @@ export const OrganizationConsole: React.FC = () => {
     if (!editMember) return;
     setEditSubmitting(true);
     setEditError(null);
+    // ORG-01: a Tenant Admin never modifies Superadmin memberships nor
+    // promotes into Superadmin — refuse locally as well.
+    if (!isSuperadmin && (editMember.role === 'superadmin' || editRole === 'superadmin')) {
+      setEditError(TENANT_ADMIN_FORBIDDEN_DETAIL);
+      setEditSubmitting(false);
+      return;
+    }
+    // ORG-01: enabling a membership is not account activation. Refuse locally
+    // rather than round-tripping a request the backend must reject anyway.
+    if (editStatus === 'active' && editMember.user_status !== 'active') {
+      setEditError(EDIT_UNACTIVATED_ACCOUNT_DETAIL);
+      setEditSubmitting(false);
+      return;
+    }
     try {
       await api.updateOrgMember(editMember.id, { role: editRole, status: editStatus });
       setEditMember(null);
       await loadMembers();
     } catch (err: any) {
       if (err.status === 409) {
-        setEditError('Cannot demote or disable the last active superadmin of this organization.');
+        setEditError(
+          isUnactivatedAccountConflict(err.message || '')
+            ? EDIT_UNACTIVATED_ACCOUNT_DETAIL
+            : EDIT_LAST_SUPERADMIN_DETAIL
+        );
       } else {
         setEditError(err.message || 'Failed to update member.');
       }
@@ -109,18 +159,40 @@ export const OrganizationConsole: React.FC = () => {
     }
   };
 
-  const statusBadge = (userStatus: string, membershipStatus: string) => {
-    if (userStatus === 'pending') {
-      return <span className="badge badge-warning">Pending Activation</span>;
+  const handleActivateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activateMember || !activatePassword) return;
+    setActivateSubmitting(true);
+    setActivateError(null);
+    try {
+      await api.activateOrgUser(activateMember.id, { initial_password: activatePassword });
+      setActivateMember(null);
+      setActivatePassword('');
+      await loadMembers();
+    } catch (err: any) {
+      setActivateError(err.message || 'Failed to activate user.');
+    } finally {
+      setActivateSubmitting(false);
     }
-    if (membershipStatus === 'disabled' || userStatus === 'disabled') {
+  };
+
+  // ORG-01: report the account's own state first. A never-activated account
+  // grants nothing, so it is never shown as "Active" even when its membership
+  // row is in force — and a pending invitation never reads as in force either.
+  const statusBadge = (userStatus: string, membershipStatus: string) => {
+    if (userStatus === 'disabled' || membershipStatus === 'disabled') {
       return <span className="badge badge-muted">Disabled</span>;
+    }
+    if (userStatus === 'pending' || membershipStatus === 'pending') {
+      return <span className="badge badge-warning">Pending Activation</span>;
     }
     return <span className="badge badge-success">Active</span>;
   };
 
   const activeMembers = members.filter((member) => member.user_status === 'active' && member.membership_status === 'active').length;
-  const pendingMembers = members.filter((member) => member.user_status === 'pending').length;
+  const pendingMembers = members.filter(
+    (member) => member.user_status === 'pending' || member.membership_status === 'pending'
+  ).length;
   const activeSuperadmins = members.filter(
     (member) => member.role === 'superadmin' && member.user_status === 'active' && member.membership_status === 'active'
   ).length;
@@ -200,8 +272,21 @@ export const OrganizationConsole: React.FC = () => {
                   <td data-label="Joined"><span className="control-secondary">{new Date(m.created_at).toLocaleDateString()}</span></td>
                   <td data-label="Actions">
                     <div className="control-actions">
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(m)}>Edit</button>
-                      <button type="button" className="btn btn-quiet-danger btn-sm" onClick={() => { setRemoveMember(m); setRemoveError(null); }}>Remove</button>
+                      {(isSuperadmin || m.role !== 'superadmin') && (
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(m)}>Edit</button>
+                      )}
+                      {isSuperadmin && (m.user_status === 'pending' || m.membership_status === 'pending') && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => { setActivateMember(m); setActivatePassword(''); setActivateError(null); }}
+                        >
+                          Activate
+                        </button>
+                      )}
+                      {isSuperadmin && (
+                        <button type="button" className="btn btn-quiet-danger btn-sm" onClick={() => { setRemoveMember(m); setRemoveError(null); }}>Remove</button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -219,7 +304,8 @@ export const OrganizationConsole: React.FC = () => {
             <p className="control-eyebrow">New membership</p>
             <h3 className="modal-title">Add Organization Member</h3>
             <p className="modal-description">
-              New users will be created in pending status and must be activated by a Platform Administrator.
+              New users are created in pending status. A Superadmin activates the account
+              from this console before the membership becomes usable.
             </p>
             {addError && (
               <div className="mutation-warning" role="alert">{addError}</div>
@@ -249,7 +335,7 @@ export const OrganizationConsole: React.FC = () => {
                 >
                   <option value="analyst">Analyst</option>
                   <option value="admin">Admin</option>
-                  <option value="superadmin">Superadmin</option>
+                  {isSuperadmin && <option value="superadmin">Superadmin</option>}
                 </select>
               </div>
               <div className="modal-actions">
@@ -284,7 +370,7 @@ export const OrganizationConsole: React.FC = () => {
                 >
                   <option value="analyst">Analyst</option>
                   <option value="admin">Admin</option>
-                  <option value="superadmin">Superadmin</option>
+                  {isSuperadmin && <option value="superadmin">Superadmin</option>}
                 </select>
               </div>
               <div className="form-group">
@@ -293,12 +379,19 @@ export const OrganizationConsole: React.FC = () => {
                   id="edit-member-status"
                   className="form-control"
                   value={editStatus}
-                  onChange={(e) => setEditStatus(e.target.value as 'active' | 'disabled')}
+                  onChange={(e) => setEditStatus(e.target.value as MembershipStatus)}
                   disabled={editSubmitting}
                 >
+                  <option value="pending">Pending Activation</option>
                   <option value="active">Active</option>
                   <option value="disabled">Disabled</option>
                 </select>
+                {editMember.user_status !== 'active' && (
+                  <p className="control-secondary">
+                    This account has not been activated yet. A Superadmin can activate it
+                    from this console; until then the membership cannot be set to Active.
+                  </p>
+                )}
               </div>
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setEditMember(null)} disabled={editSubmitting}>Cancel</button>
@@ -327,6 +420,45 @@ export const OrganizationConsole: React.FC = () => {
                 {removeSubmitting ? 'Removing…' : 'Confirm Remove'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Activate User Modal (Superadmin, own tenant) */}
+      {activateMember && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Activate User">
+          <div className="modal-card">
+            <p className="control-eyebrow">Account activation</p>
+            <h3 className="modal-title">Activate {activateMember.email}</h3>
+            <p className="modal-description">
+              Set the initial password. This activates the account and brings the pending
+              membership in this tenant into force.
+            </p>
+            {activateError && (
+              <div className="mutation-warning" role="alert">{activateError}</div>
+            )}
+            <form onSubmit={handleActivateSubmit}>
+              <div className="form-group">
+                <label htmlFor="activate-user-password" className="form-label">Initial password</label>
+                <input
+                  id="activate-user-password"
+                  type="password"
+                  className="form-control"
+                  value={activatePassword}
+                  onChange={(e) => setActivatePassword(e.target.value)}
+                  required
+                  minLength={1}
+                  disabled={activateSubmitting}
+                  autoComplete="new-password"
+                />
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setActivateMember(null)} disabled={activateSubmitting}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={activateSubmitting}>
+                  {activateSubmitting ? 'Activating…' : 'Activate User'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

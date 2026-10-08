@@ -534,3 +534,92 @@ class TestDeterminismAndIsolation:
             client, auth_headers_tenant_b_admin, "/remediation-recurrence"
         ).json()
         assert recurrence_b["row_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Source-population diagnostics (additive envelope field)
+# ---------------------------------------------------------------------------
+
+
+class TestSourceCounts:
+    def test_unremediated_serious_counts_base_population(
+        self, client, analyst_headers
+    ):
+        make_final_episode("CVE-2026-82030", business_impact=8)
+        make_unscoreable_episode("CVE-2026-82031")
+        answer = _get(client, analyst_headers, "/unremediated-serious").json()
+        assert answer["source_counts"] == {
+            "confirmed_exposures_active_assets": 2,
+        }
+
+    def test_accepted_risks_counts_both_join_domains(
+        self, client, analyst_headers
+    ):
+        episode = make_unscoreable_episode("CVE-2026-82032")
+        seed_edip_decision(
+            episode["exposure_id"], state="accepted_risk",
+            decision_type="accept-risk",
+            review_due_at=datetime.now(timezone.utc) + timedelta(days=30),
+        )
+        seed_obligation({"exposure_id": str(episode["exposure_id"])})
+        seed_obligation({"incident_kind": "cyber_security_incident"})
+        answer = _get(
+            client, analyst_headers, "/accepted-risks-vs-obligations"
+        ).json()
+        assert answer["source_counts"] == {
+            "accepted_risk_decisions": 1,
+            "standard_obligations": 2,
+        }
+
+    def test_recurrence_counts_confirmed_and_resolved_bases(
+        self, client, analyst_headers
+    ):
+        episode = make_unscoreable_episode("CVE-2026-82033")
+        resolve_episode(episode["exposure_id"], status="resolved")
+        confirm_finding_on_asset(episode["finding_id"], episode["asset_id"])
+        answer = _get(
+            client, analyst_headers, "/remediation-recurrence"
+        ).json()
+        counts = answer["source_counts"]
+        assert counts["confirmed_episodes_active_assets"] >= 1
+        assert counts["resolved_episodes"] >= 1
+
+    def test_coverage_gaps_counts_confirmed_exposures(
+        self, client, analyst_headers
+    ):
+        make_final_episode("CVE-2026-82034")
+        answer = _get(client, analyst_headers, "/coverage-gaps").json()
+        assert answer["source_counts"] == {"confirmed_exposures": 1}
+
+    def test_weakness_recurrence_counts_episode_base(
+        self, client, analyst_headers
+    ):
+        make_final_episode("CVE-2026-82035", business_impact=8)
+        answer = _get(client, analyst_headers, "/weakness-recurrence").json()
+        assert answer["source_counts"] == {
+            "confirmed_episodes_active_assets": 1,
+        }
+
+    def test_zero_populations_are_reported_not_hidden(
+        self, client, auth_headers_tenant_b_admin
+    ):
+        """A tenant with no source data at all reports empty base
+        populations — the diagnostics that let the console say
+        'insufficient source data' instead of a bare zero."""
+        for path, counts in (
+            ("/unremediated-serious", {"confirmed_exposures_active_assets": 0}),
+            ("/accepted-risks-vs-obligations", {
+                "accepted_risk_decisions": 0, "standard_obligations": 0,
+            }),
+            ("/coverage-gaps", {"confirmed_exposures": 0}),
+            ("/weakness-recurrence", {"confirmed_episodes_active_assets": 0}),
+        ):
+            answer = _get(client, auth_headers_tenant_b_admin, path).json()
+            assert answer["row_count"] == 0
+            assert answer["source_counts"] == counts
+        recurrence = _get(
+            client, auth_headers_tenant_b_admin, "/remediation-recurrence"
+        ).json()
+        assert recurrence["source_counts"] == {
+            "confirmed_episodes_active_assets": 0, "resolved_episodes": 0,
+        }

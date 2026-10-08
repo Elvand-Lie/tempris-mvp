@@ -576,8 +576,13 @@ def request_edip_handoff(
 ) -> dict:
     """The explicit action-required transition: the exposure's analysis_state
     becomes 'action_required' and the EDIP decision is created in
-    Needs-Decision state — recorded and retryable (upstream truth intact,
-    Q16). Manual at v1: no auto-handoff policy exists (§3.6.6 #9 reserved)."""
+    Needs-Decision state ATOMICALLY in this transaction — the handoff row is
+    inserted, immediately consumed by the decision it correlates to (PATCH-09),
+    and any failure (e.g. a standing decision on the exposure) rolls the whole
+    boundary back, leaving no stranded open handoff. Manual at v1: no
+    auto-handoff policy exists (§3.6.6 #9 reserved)."""
+    from app.edip import service as edip_service
+
     with conn.cursor(row_factory=dict_row) as cur:
         _load_current_exposure(cur, tenant_id, exposure_id)
         _advisory_xact_lock(cur, f"spectrum:{tenant_id}:{exposure_id}")
@@ -603,6 +608,24 @@ def request_edip_handoff(
             (str(tenant_id), str(exposure_id), actor_id, note),
         )
         handoff = dict(cur.fetchone())
+        # The decision leg of the handoff (PATCH-09): the EDIP service creates
+        # the Needs-Decision decision, seals the score snapshot it consumes,
+        # and flips this handoff to CONSUMED — all in THIS transaction. Its
+        # standing-decision guard is the duplicate-handoff refusal: the 409
+        # rolls back the whole boundary, never stranding an open handoff.
+        decision = edip_service.create_decision(
+            conn, tenant_id,
+            exposure_id=exposure_id,
+            decision_type="remediate",
+            owner=actor_id,
+            rationale=None,
+            plan=None,
+            due_at=None,
+            handoff_id=handoff["id"],
+            previous_decision_id=None,
+            actor_id=actor_id,
+            actor_role=actor_role,
+        )
         cur.execute(
             """
             UPDATE spectrum_exposure_workflow
@@ -631,4 +654,14 @@ def request_edip_handoff(
                 "edip_handoff_id": str(handoff["id"]),
             },
         )
-        return {"handoff": handoff, "workflow": dict(updated)}
+        cur.execute(
+            """
+            SELECT id, tenant_id, exposure_id, state, requested_by, note, created_at,
+                   consumed_at, consumed_by, edip_decision_id
+            FROM spectrum_edip_handoffs
+            WHERE tenant_id = %s AND id = %s;
+            """,
+            (str(tenant_id), str(handoff["id"])),
+        )
+        consumed = dict(cur.fetchone())
+        return {"handoff": consumed, "decision": dict(decision), "workflow": dict(updated)}

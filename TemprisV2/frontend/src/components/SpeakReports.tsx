@@ -1,6 +1,16 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { SpeakReport, SpeakReportListResponse } from '../types';
+import { SpeakChatResult, SpeakReport, SpeakReportListResponse } from '../types';
+
+interface ChatTranscriptEntry {
+  role: 'user' | 'assistant';
+  message: string;
+  model?: string;
+  authority?: string;
+  disclaimer?: string;
+  citations?: SpeakChatResult['citations'];
+  at: string;
+}
 
 /**
  * SPEAK report center (PRD Ch.11): sealed, versioned, template-identified
@@ -25,6 +35,13 @@ export const SpeakReports: React.FC = () => {
   const [registerType, setRegisterType] = useState('executive_summary');
   const [registerTitle, setRegisterTitle] = useState('');
   const [chatMessage, setChatMessage] = useState('');
+  const [transcript, setTranscript] = useState<ChatTranscriptEntry[]>([]);
+  const [chatBusy, setChatBusy] = useState(false);
+  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [transcript]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -71,17 +88,38 @@ export const SpeakReports: React.FC = () => {
   }, [act, registerTitle, registerType]);
 
   const chat = useCallback(async () => {
-    if (!chatMessage.trim()) return;
+    const message = chatMessage.trim();
+    if (!message || chatBusy) return;
     setError(null);
     setNotice(null);
+    setChatBusy(true);
+    setChatMessage('');
+    setTranscript((current) => [
+      ...current.slice(-49),
+      { role: 'user', message, at: new Date().toISOString() },
+    ]);
     try {
-      await api.speak.chat(chatMessage.trim());
+      const reply = await api.speak.chat(message);
+      setTranscript((current) => [
+        ...current.slice(-49),
+        {
+          role: 'assistant',
+          message: reply.answer,
+          model: reply.model,
+          authority: reply.authority,
+          disclaimer: reply.disclaimer,
+          citations: reply.citations,
+          at: new Date().toISOString(),
+        },
+      ]);
     } catch (cause: any) {
       // The expected path with no LLM provider: the surface fails closed
       // and says so — it never renders invented numbers.
       setError(`SPEAK AI: ${cause.message}`);
+    } finally {
+      setChatBusy(false);
     }
-  }, [chatMessage]);
+  }, [chatBusy, chatMessage]);
 
   const reports = listing?.items ?? [];
 
@@ -287,15 +325,62 @@ export const SpeakReports: React.FC = () => {
           configured it is <strong>unavailable</strong> — it never invents
           numbers or content.
         </p>
+        <div className="speak-chat-transcript" aria-label="SPEAK AI transcript">
+          {transcript.length === 0 && (
+            <p className="scout-empty" role="status">No questions asked yet.</p>
+          )}
+          {transcript.map((entry, index) => (
+            <div
+              key={index}
+              className={entry.role === 'user' ? 'speak-chat-user' : 'speak-chat-assistant'}
+            >
+              {entry.role === 'user' ? (
+                <p style={{ margin: 0 }}>{entry.message}</p>
+              ) : (
+                <>
+                  <p style={{ margin: '0 0 4px 0', fontWeight: 600 }}>{entry.message}</p>
+                  <p style={{ margin: '0 0 4px 0', fontSize: '0.85em', color: 'var(--text-muted, #6b7280)' }}>
+                    {entry.model} · {entry.authority}
+                  </p>
+                  {entry.citations && Object.keys(entry.citations).length > 0 && (
+                    <ul style={{ margin: '0 0 4px 0', paddingLeft: '20px', fontSize: '0.85em' }}>
+                      {Object.entries(entry.citations).flatMap(([group, refs]) =>
+                        refs.map((ref, refIndex) => {
+                          const label =
+                            (ref && typeof ref === 'object' && 'id' in ref)
+                              ? `${group}: ${String((ref as any).id)}${'kind' in (ref as any) ? ` (${String((ref as any).kind)})` : ''}`
+                              : `${group}: ${JSON.stringify(ref)}`;
+                          return <li key={`${group}-${refIndex}`}>{label}</li>;
+                        })
+                      )}
+                    </ul>
+                  )}
+                  {entry.disclaimer && (
+                    <p style={{ margin: 0, fontSize: '0.8em', fontStyle: 'italic', color: 'var(--text-muted, #6b7280)' }}>
+                      {entry.disclaimer}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          ))}
+          <div ref={transcriptEndRef} />
+        </div>
         <div style={{ display: 'flex', gap: '8px' }}>
           <input
             className="form-control"
             aria-label="Ask SPEAK"
             value={chatMessage}
             onChange={(e) => setChatMessage(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void chat();
+              }
+            }}
             placeholder="Ask about current posture…"
           />
-          <button className="btn btn-secondary" type="button" onClick={chat}>
+          <button className="btn btn-secondary" type="button" onClick={chat} disabled={chatBusy}>
             Ask
           </button>
         </div>

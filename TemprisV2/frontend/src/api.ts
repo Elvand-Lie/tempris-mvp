@@ -16,6 +16,7 @@ import {
   LoginResponse,
   TenantSessionMetadata,
   OrgMember,
+  MemberActivatePayload,
   MemberCreatePayload,
   MemberUpdatePayload,
   PlatformTenant,
@@ -40,8 +41,8 @@ import {
   SpectrumHistoryEntry,
   SpectrumQueueParams,
   SpectrumQueueResponse,
-  SpectrumStrikeRequestResult,
   SpectrumWorkflow,
+  SpeakChatResult,
   SpeakReport,
   SpeakReportListResponse,
   SpotlightSnapshot,
@@ -431,8 +432,8 @@ export const api = {
     });
   },
 
-  checkCollectorUpdate: (id: string): Promise<{ status: string; collector_id: string; message: string }> => {
-    return request<{ status: string; collector_id: string; message: string }>(
+  checkCollectorUpdate: (id: string): Promise<{ status: string; collector_id: string; check_id?: string; message: string }> => {
+    return request<{ status: string; collector_id: string; check_id?: string; message: string }>(
       `${COLLECTORS_V1_API_BASE}/${id}/check-update`,
       {
         method: 'POST',
@@ -462,6 +463,13 @@ export const api = {
   removeOrgMember: (userId: string): Promise<void> => {
     return request<void>(`${ORG_API_BASE}/members/${userId}`, {
       method: 'DELETE',
+    });
+  },
+
+  activateOrgUser: (userId: string, payload: MemberActivatePayload): Promise<OrgMember> => {
+    return request<OrgMember>(`${ORG_API_BASE}/users/${userId}/activate`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   },
 
@@ -567,12 +575,6 @@ export const api = {
         `${SPECTRUM_API_BASE}/exposures/${exposureId}/notes`,
         { method: 'POST', body: JSON.stringify({ note }) }
       ),
-
-    requestStrike: (exposureId: string, note?: string | null): Promise<SpectrumStrikeRequestResult> =>
-      request<SpectrumStrikeRequestResult>(`${SPECTRUM_API_BASE}/exposures/${exposureId}/strike-request`, {
-        method: 'POST',
-        body: JSON.stringify({ note: note || null }),
-      }),
 
     requestEdipHandoff: (exposureId: string, note?: string | null): Promise<SpectrumEdipHandoffResult> =>
       request<SpectrumEdipHandoffResult>(`${SPECTRUM_API_BASE}/exposures/${exposureId}/edip-handoff`, {
@@ -716,8 +718,8 @@ export const api = {
         { method: 'POST', body: JSON.stringify(payload) }
       ),
 
-    chat: (message: string): Promise<never> =>
-      request<never>(`${SPEAK_API_BASE}/chat`, {
+    chat: (message: string): Promise<SpeakChatResult> =>
+      request<SpeakChatResult>(`${SPEAK_API_BASE}/chat`, {
         method: 'POST',
         body: JSON.stringify({ message }),
       }),
@@ -883,11 +885,14 @@ export const api = {
     classifyRecord: (
       recordId: string,
       taxonomy: { taxonomy_class: string; taxonomy_subclass?: string | null; taxonomy_subtype?: string | null },
+      rationale: string,
       note?: string | null
     ): Promise<IntakeRecord> =>
       request<IntakeRecord>(`${INTAKE_API_BASE}/${recordId}/classify`, {
         method: 'POST',
-        body: JSON.stringify({ taxonomy, note: note || null }),
+        // rationale is mandatory: classification is an append-only decision
+        // and the history must carry why the class was chosen
+        body: JSON.stringify({ taxonomy, rationale, note: note || null }),
       }),
 
     /** submitted | needs_info → under_review. */

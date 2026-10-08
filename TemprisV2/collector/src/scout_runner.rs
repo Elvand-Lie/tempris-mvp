@@ -10,13 +10,153 @@ use chrono::Utc;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
 pub const OUTPUT_LIMIT: usize = 4 * 1024 * 1024; // 4 MiB
+
+// Keep the 120s host bound below the backend's 180s Nmap job envelope.
+fn nmap_scout_args(pinned_target: &str) -> Vec<String> {
+    [
+        "-sV",
+        "-sT",
+        "-T3",
+        "--open",
+        "-Pn",
+        "--max-retries",
+        "2",
+        "--host-timeout",
+        "120s",
+        "-p",
+        "1-10000",
+        "-oX",
+        "-",
+        pinned_target,
+    ]
+    .iter()
+    .map(|arg| (*arg).to_string())
+    .collect()
+}
+
+fn nmap_host_timed_out(engine: &str, output: &str) -> bool {
+    engine == "nmap" && output.contains("timedout=\"true\"")
+}
+
+struct SharedCapture {
+    buf: Vec<u8>,
+    total: usize,
+    truncated: bool,
+}
+
+impl SharedCapture {
+    fn push(&mut self, chunk: &[u8]) {
+        self.total += chunk.len();
+        if self.truncated {
+            return;
+        }
+        let room = OUTPUT_LIMIT.saturating_sub(self.buf.len());
+        if chunk.len() <= room {
+            self.buf.extend_from_slice(chunk);
+        } else {
+            if room > 0 {
+                self.buf.extend_from_slice(&chunk[..room]);
+            }
+            self.truncated = true;
+        }
+    }
+
+    fn finish(&self) -> (String, usize) {
+        let mut text = String::from_utf8_lossy(&self.buf).into_owned();
+        if self.truncated {
+            text.push_str("\n[output_limited]");
+        }
+        (text, self.total)
+    }
+}
+
+fn lock_capture(cap: &Arc<Mutex<SharedCapture>>) -> std::sync::MutexGuard<'_, SharedCapture> {
+    cap.lock().unwrap_or_else(|err| err.into_inner())
+}
+
+fn snapshot_capture(cap: &Arc<Mutex<SharedCapture>>) -> (String, usize) {
+    lock_capture(cap).finish()
+}
+
+/// Collector Nuclei profile. `-sj` emits stats JSON so a deadline kill can
+/// show whether requests were still moving. Paths in the recorded profile
+/// are redacted separately.
+fn nuclei_scout_args(
+    pinned_target: &str,
+    templates_dir: &str,
+    original_target: Option<&str>,
+    target_type: Option<&str>,
+) -> Vec<String> {
+    let mut args = vec![
+        "-target".to_string(),
+        pinned_target.to_string(),
+        "-severity".to_string(),
+        "critical,high,medium,low,info".to_string(),
+        "-jsonl".to_string(),
+        "-silent".to_string(),
+        "-nc".to_string(),
+        "-duc".to_string(),
+        "-ni".to_string(),
+        "-no-stdin".to_string(),
+        "-c".to_string(),
+        "25".to_string(),
+        "-timeout".to_string(),
+        "3".to_string(),
+        "-retries".to_string(),
+        "0".to_string(),
+        "-sj".to_string(),
+        "-si".to_string(),
+        "15".to_string(),
+        "-t".to_string(),
+        templates_dir.to_string(),
+    ];
+
+    if let (Some(orig_target), Some(ttype)) = (original_target, target_type) {
+        let ttype_norm = ttype.to_lowercase().trim().to_string();
+        if ttype_norm == "hostname" || ttype_norm == "domain" {
+            let host_trimmed = orig_target.trim();
+            if crate::safety::validate_hostname_syntax(host_trimmed).is_ok() {
+                args.push("-H".to_string());
+                args.push(format!("Host: {}", host_trimmed));
+                args.push("-sni".to_string());
+                args.push(host_trimmed.to_string());
+            } else {
+                warn!(
+                    "Original target '{}' failed hostname syntax validation; omitting Host/SNI overrides",
+                    host_trimmed
+                );
+            }
+        }
+    }
+    args
+}
+
+fn sanitized_profile(binary: &str, args: &[String], known: &KnownPaths) -> String {
+    let mut parts = Vec::with_capacity(args.len() + 1);
+    parts.push(binary.to_string());
+    parts.extend(args.iter().cloned());
+    redact_paths(&parts.join(" "), Some(known))
+}
+
+fn collector_deadline_message(
+    elapsed_secs: u64,
+    deadline_secs: u64,
+    stdout_bytes: usize,
+    stderr_bytes: usize,
+    profile: &str,
+) -> String {
+    format!(
+        "collector_deadline: termination=collector_deadline elapsed={elapsed_secs}s deadline={deadline_secs}s stdout_bytes={stdout_bytes} stderr_bytes={stderr_bytes} profile={profile}"
+    )
+}
 
 // Concurrency guard: hard limit of at most 1 active concurrent SCOUT scan job
 static SCOUT_JOB_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -139,6 +279,9 @@ pub async fn probe_scout_capabilities_with_storage(
         nmap: nmap_cap,
         nuclei: nuclei_cap,
         nuclei_templates: templates_cap,
+        curl: Some(crate::strike_runner::probe_binary_version("curl", &["--version"]).await),
+        ffuf: Some(crate::strike_runner::probe_binary_version("ffuf", &["-V"]).await),
+        dig: Some(crate::strike_runner::probe_binary_version("dig", &["-v"]).await),
         collector_version: Some(env!("CARGO_PKG_VERSION").to_string()),
         manifest_sequence: manifest_seq,
         channel: Some("stable".to_string()),
@@ -360,18 +503,7 @@ pub async fn run_scout_job_with_context(
                 NmapPrerequisiteState::Ready { path, .. } => {
                     nmap_binary_path = Some(path.clone());
                     let bin_str = path.to_string_lossy().to_string();
-                    let args = vec![
-                        "-sV".to_string(),
-                        "-sT".to_string(),
-                        "-T3".to_string(),
-                        "--open".to_string(),
-                        "-Pn".to_string(),
-                        "-p".to_string(),
-                        "1-10000".to_string(),
-                        "-oX".to_string(),
-                        "-".to_string(),
-                        pinned_target.to_string(),
-                    ];
+                    let args = nmap_scout_args(pinned_target);
                     (bin_str, args, 180)
                 }
                 other => {
@@ -491,47 +623,14 @@ pub async fn run_scout_job_with_context(
             };
 
             let bin_str = bin_path.to_string_lossy().to_string();
-            let mut args = vec![
-                "-target".to_string(),
-                pinned_target.to_string(),
-                "-severity".to_string(),
-                "critical,high,medium,low,info".to_string(),
-                "-jsonl".to_string(),
-                "-silent".to_string(),
-                "-nc".to_string(),
-                "-duc".to_string(),
-                "-ni".to_string(),
-                "-no-stdin".to_string(),
-                "-c".to_string(),
-                "25".to_string(),
-                "-timeout".to_string(),
-                "3".to_string(),
-                "-retries".to_string(),
-                "0".to_string(),
-                "-t".to_string(),
-                tmpl_path.to_string_lossy().to_string(),
-            ];
+            let args = nuclei_scout_args(
+                pinned_target,
+                &tmpl_path.to_string_lossy(),
+                original_target,
+                target_type,
+            );
 
-            // If target_type is hostname or domain, bind HTTP Host header and TLS SNI to the validated authorized target
-            if let (Some(orig_target), Some(ttype)) = (original_target, target_type) {
-                let ttype_norm = ttype.to_lowercase().trim().to_string();
-                if ttype_norm == "hostname" || ttype_norm == "domain" {
-                    let host_trimmed = orig_target.trim();
-                    if crate::safety::validate_hostname_syntax(host_trimmed).is_ok() {
-                        args.push("-H".to_string());
-                        args.push(format!("Host: {}", host_trimmed));
-                        args.push("-sni".to_string());
-                        args.push(host_trimmed.to_string());
-                    } else {
-                        warn!(
-                            "Original target '{}' failed hostname syntax validation; omitting Host/SNI overrides",
-                            host_trimmed
-                        );
-                    }
-                }
-            }
-
-            (bin_str, args, 300)
+            (bin_str, args, 1200)
         }
         _ => {
             let completed_at = Utc::now().to_rfc3339();
@@ -597,92 +696,68 @@ pub async fn run_scout_job_with_context(
         }
     };
 
+    let started_instant = Instant::now();
+    let stdout_cap = Arc::new(Mutex::new(SharedCapture {
+        buf: Vec::new(),
+        total: 0,
+        truncated: false,
+    }));
+    let stderr_cap = Arc::new(Mutex::new(SharedCapture {
+        buf: Vec::new(),
+        total: 0,
+        truncated: false,
+    }));
     let mut stdout_handle = child.stdout.take().expect("child stdout piped");
     let mut stderr_handle = child.stderr.take().expect("child stderr piped");
+    let stdout_cap_task = Arc::clone(&stdout_cap);
+    let stderr_cap_task = Arc::clone(&stderr_cap);
 
     let read_stdout_task = tokio::spawn(async move {
-        let mut buf = Vec::new();
         let mut chunk = [0u8; 8192];
-        let mut total_read = 0;
-        let mut truncated = false;
-
         loop {
             match stdout_handle.read(&mut chunk).await {
                 Ok(0) => break,
-                Ok(n) => {
-                    total_read += n;
-                    if buf.len() + n <= OUTPUT_LIMIT {
-                        buf.extend_from_slice(&chunk[..n]);
-                    } else if !truncated {
-                        let remaining = OUTPUT_LIMIT.saturating_sub(buf.len());
-                        if remaining > 0 {
-                            buf.extend_from_slice(&chunk[..remaining]);
-                        }
-                        truncated = true;
-                    }
-                }
+                Ok(n) => lock_capture(&stdout_cap_task).push(&chunk[..n]),
                 Err(_) => break,
             }
         }
-
-        let mut out_str = String::from_utf8_lossy(&buf).to_string();
-        if truncated {
-            out_str.push_str("\n[output_limited]");
-        }
-        (out_str, total_read)
     });
 
     let read_stderr_task = tokio::spawn(async move {
-        let mut buf = Vec::new();
         let mut chunk = [0u8; 8192];
-        let mut total_read = 0;
-        let mut truncated = false;
-
         loop {
             match stderr_handle.read(&mut chunk).await {
                 Ok(0) => break,
-                Ok(n) => {
-                    total_read += n;
-                    if buf.len() + n <= OUTPUT_LIMIT {
-                        buf.extend_from_slice(&chunk[..n]);
-                    } else if !truncated {
-                        let remaining = OUTPUT_LIMIT.saturating_sub(buf.len());
-                        if remaining > 0 {
-                            buf.extend_from_slice(&chunk[..remaining]);
-                        }
-                        truncated = true;
-                    }
-                }
+                Ok(n) => lock_capture(&stderr_cap_task).push(&chunk[..n]),
                 Err(_) => break,
             }
         }
-
-        let mut err_str = String::from_utf8_lossy(&buf).to_string();
-        if truncated {
-            err_str.push_str("\n[output_limited]");
-        }
-        (err_str, total_read)
     });
 
-    let wait_child = async {
-        let status = child.wait().await;
-        let (stdout, stdout_bytes) = read_stdout_task.await.unwrap_or_default();
-        let (stderr, stderr_bytes) = read_stderr_task.await.unwrap_or_default();
-        (status, stdout, stdout_bytes, stderr, stderr_bytes)
-    };
-
-    let result = tokio::time::timeout(Duration::from_secs(effective_timeout), wait_child).await;
+    let result = tokio::time::timeout(Duration::from_secs(effective_timeout), child.wait()).await;
     let completed_at = Utc::now().to_rfc3339();
 
     match result {
-        Ok((status_res, raw_stdout, stdout_bytes, raw_stderr, stderr_bytes)) => {
+        Ok(status_res) => {
+            let _ = tokio::time::timeout(Duration::from_secs(2), async {
+                let _ = read_stdout_task.await;
+                let _ = read_stderr_task.await;
+            })
+            .await;
+            let (raw_stdout, stdout_bytes) = snapshot_capture(&stdout_cap);
+            let (raw_stderr, stderr_bytes) = snapshot_capture(&stderr_cap);
+            // Nmap can exit 0 after --host-timeout and mark the host as timed out
+            // in XML. That is an incomplete scan, not an empty successful scan.
+            let nmap_timed_out = nmap_host_timed_out(engine, &raw_stdout);
             let stdout = redact_paths(&raw_stdout, Some(&known_paths));
             let stderr = redact_paths(&raw_stderr, Some(&known_paths));
 
             match status_res {
                 Ok(exit_status) => {
                     let code = exit_status.code().unwrap_or(-1);
-                    let (status, err_msg) = if exit_status.success() {
+                    let (status, err_msg) = if nmap_timed_out {
+                        ("failed".to_string(), Some("timeout".to_string()))
+                    } else if exit_status.success() {
                         ("completed".to_string(), None)
                     } else {
                         (
@@ -726,23 +801,44 @@ pub async fn run_scout_job_with_context(
             }
         }
         Err(_) => {
+            let elapsed = started_instant.elapsed().as_secs();
             warn!(
-                "SCOUT job {} timed out after {}s",
+                "SCOUT job {} still running after {}s; killing and keeping partial output",
                 job_id, effective_timeout
             );
-            let _ = child.kill().await;
+            // The child has not exited. Kill it, keep bytes already captured,
+            // and reap in the background so a stuck wait cannot eat the server margin.
+            let _ = child.start_kill();
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            let (raw_stdout, stdout_bytes) = snapshot_capture(&stdout_cap);
+            let (raw_stderr, stderr_bytes) = snapshot_capture(&stderr_cap);
+            let stdout = redact_paths(&raw_stdout, Some(&known_paths));
+            let stderr = redact_paths(&raw_stderr, Some(&known_paths));
+            let profile = sanitized_profile(&binary, &args, &known_paths);
+            tokio::spawn(async move {
+                let _guard = _guard;
+                let _ = child.wait().await;
+                read_stdout_task.abort();
+                read_stderr_task.abort();
+            });
             ScoutRunResult {
                 job_id,
                 engine: engine.to_string(),
-                status: "failed".to_string(),
+                status: "timed_out".to_string(),
                 exit_code: None,
-                stdout: "".to_string(),
-                stderr: "".to_string(),
-                stdout_bytes: 0,
-                stderr_bytes: 0,
+                stdout,
+                stderr,
+                stdout_bytes,
+                stderr_bytes,
                 started_at,
                 completed_at,
-                error_message: Some("timeout".to_string()),
+                error_message: Some(collector_deadline_message(
+                    elapsed,
+                    effective_timeout,
+                    stdout_bytes,
+                    stderr_bytes,
+                    &profile,
+                )),
             }
         }
     }
@@ -751,6 +847,20 @@ pub async fn run_scout_job_with_context(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nmap_self_timeout_precedes_collector_envelope() {
+        let args = nmap_scout_args("192.0.2.1");
+        assert!(args.windows(2).any(|w| w == ["--host-timeout", "120s"]));
+        assert!(args.windows(2).any(|w| w == ["--max-retries", "2"]));
+        assert_eq!(args.last().unwrap(), "192.0.2.1");
+        assert!(120 < 180);
+        assert!(nmap_host_timed_out(
+            "nmap",
+            "<host starttime=\"1\" timedout=\"true\"><status state=\"up\"/></host>"
+        ));
+        assert!(!nmap_host_timed_out("nmap", "<host timedout=\"false\"/>"));
+    }
 
     #[tokio::test]
     async fn test_concurrency_guard() {
@@ -785,6 +895,35 @@ mod tests {
         if caps.nuclei.available {
             assert!(caps.nuclei.version.is_some());
         }
+    }
+
+    #[test]
+    fn nuclei_deadline_profile_redacts_paths_and_names_its_limits() {
+        let templates = r"C:\ProgramData\Tempris\Collector\tools\nuclei_templates\10.4.4";
+        let binary = r"C:\ProgramData\Tempris\Collector\tools\nuclei\3.8.0\nuclei.exe";
+        let args = nuclei_scout_args("192.0.2.10", templates, None, None);
+        assert!(args.windows(2).any(|w| w == ["-timeout", "3"]));
+        assert!(args.windows(2).any(|w| w == ["-retries", "0"]));
+        assert!(args.windows(2).any(|w| w == ["-si", "15"]));
+        assert!(args.iter().any(|arg| arg == "-sj"));
+        assert!(args.iter().any(|arg| arg == "-ni"));
+        assert!(args.iter().any(|arg| arg == "-duc"));
+        let known = KnownPaths {
+            nuclei_path: Some(binary.to_string()),
+            templates_path: Some(templates.to_string()),
+            nmap_path: None,
+        };
+        let profile = sanitized_profile(binary, &args, &known);
+        assert!(profile.contains("[MANAGED_NUCLEI]"));
+        assert!(profile.contains("[MANAGED_TEMPLATES]"));
+        assert!(!profile.to_lowercase().contains("programdata"));
+        let message = collector_deadline_message(300, 300, 12, 340, &profile);
+        assert!(message.starts_with("collector_deadline:"));
+        assert!(message.contains("termination=collector_deadline"));
+        assert!(message.contains("elapsed=300s"));
+        assert!(message.contains("deadline=300s"));
+        assert!(message.contains("stdout_bytes=12"));
+        assert!(message.contains("stderr_bytes=340"));
     }
 
     #[test]

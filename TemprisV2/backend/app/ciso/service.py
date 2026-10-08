@@ -266,7 +266,7 @@ def _workflow_posture_tile(cur: psycopg.Cursor, tenant_id: uuid.UUID) -> dict:
     )
 
 
-def _coverage_quality_tile(cur: psycopg.Cursor) -> dict:
+def _coverage_quality_tile(cur: psycopg.Cursor, as_of: datetime) -> dict:
     """Feed health straight from the Ch.1 sync_state — the authoritative feed
     facts, carried through with their own freshness semantics. A feed that
     never synced or is unhealthy renders as exactly that ('stale'/'unknown'),
@@ -274,7 +274,7 @@ def _coverage_quality_tile(cur: psycopg.Cursor) -> dict:
     cur.execute(
         """
         SELECT source, is_healthy, last_successful_at, consecutive_failures,
-               last_good_snapshot_id, sync_interval_seconds
+               last_good_snapshot_id, sync_interval_seconds, sync_enabled
         FROM sync_state
         ORDER BY source ASC;
         """
@@ -282,12 +282,16 @@ def _coverage_quality_tile(cur: psycopg.Cursor) -> dict:
     feeds = []
     healthy = stale = unknown = 0
     for row in cur.fetchall():
-        if not row["is_healthy"]:
-            feed_status = "stale"
-            stale += 1
-        elif row["last_successful_at"] is None:
+        interval_seconds = row["sync_interval_seconds"] or 0
+        if row["last_successful_at"] is None:
             feed_status = "unknown"
             unknown += 1
+        elif (not row["is_healthy"] or not row["sync_enabled"]
+              or interval_seconds <= 0
+              or (as_of - row["last_successful_at"]).total_seconds()
+              > interval_seconds):
+            feed_status = "stale"
+            stale += 1
         else:
             feed_status = "healthy"
             healthy += 1
@@ -295,6 +299,7 @@ def _coverage_quality_tile(cur: psycopg.Cursor) -> dict:
             "source": row["source"],
             "status": feed_status,
             "is_healthy": bool(row["is_healthy"]),
+            "sync_enabled": bool(row["sync_enabled"]),
             "last_successful_at": row["last_successful_at"],
             "consecutive_failures": row["consecutive_failures"],
             "last_good_snapshot_id": (
@@ -602,7 +607,7 @@ def build_executive_summary(
 
     with conn.cursor(row_factory=dict_row) as cur:
         workflow_tile = _workflow_posture_tile(cur, tenant_id)
-        coverage_tile = _coverage_quality_tile(cur)
+        coverage_tile = _coverage_quality_tile(cur, as_of)
         remediation_tile = _remediation_posture_tile(cur, tenant_id, as_of)
         register_tile = _accepted_risk_register_tile(cur, tenant_id, as_of)
         regulatory_tile = _regulatory_pressure_tile(cur, tenant_id, as_of)

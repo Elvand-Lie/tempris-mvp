@@ -165,12 +165,17 @@ def test_tenant_superadmin_uses_org_but_not_platform(client):
 # Persona 3: tenant admin / analyst
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("actor_id,role", [("admin-a", "admin"), ("analyst-a", "analyst")])
-def test_tenant_admin_and_analyst_get_neither_org_management_nor_platform(client, actor_id, role):
-    headers = _tenant_headers(actor_id, role)
+# ORG-01 (amended boundary): a Tenant Admin may view the organization's
+# members (limited management), an Analyst may not. Neither touches the
+# platform plane.
+def test_tenant_admin_views_members_but_neither_role_touches_platform(client):
+    admin_headers = _tenant_headers("admin-a", "admin")
+    assert client.get("/api/org/members", headers=admin_headers).status_code == 200
+    assert client.get("/api/platform/tenants", headers=admin_headers).status_code == 403
 
-    assert client.get("/api/org/members", headers=headers).status_code == 403
-    assert client.get("/api/platform/tenants", headers=headers).status_code == 403
+    analyst_headers = _tenant_headers("analyst-a", "analyst")
+    assert client.get("/api/org/members", headers=analyst_headers).status_code == 403
+    assert client.get("/api/platform/tenants", headers=analyst_headers).status_code == 403
 
 
 # ---------------------------------------------------------------------------

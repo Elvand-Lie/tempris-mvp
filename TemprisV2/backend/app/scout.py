@@ -10,10 +10,12 @@ import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable, Optional
 
 from psycopg.types.json import Jsonb
 
+from app import config
 from app.db import get_db_connection
 from app.exposure.models import ExposureConfirm
 from app.exposure.scoring_inputs import ReachabilityEvidenceIn, record_reachability_evidence
@@ -22,7 +24,53 @@ from app.exposure.service import allocate_finding_for_cve, confirm_exposure
 OUTPUT_LIMIT = 4 * 1024 * 1024
 PROBE_TIMEOUT = 10
 NMAP_TIMEOUT = 180
-NUCLEI_TIMEOUT = 300
+NUCLEI_TIMEOUT = 1200
+_PARTIAL_OUTPUT_CHARS = 4000
+_STORED_TIMEOUT_CHARS = 8192
+
+
+def collector_timeout_message(engine: str, raw_result: dict) -> str:
+    """Operator-facing reason for a collector scan that did not finish.
+
+    A legacy daemon frame says only ``timeout`` and carries no profile. A
+    transport timeout is the server giving up before any result frame arrives.
+    A collector deadline names the envelope, elapsed time, and sanitized argv.
+    """
+    message = raw_result.get("error_message") or ""
+    if not isinstance(message, str) or not message.strip():
+        return f"Collector scan timed out for {engine}"
+    if message == "timeout":
+        stdout_bytes = int(raw_result.get("stdout_bytes") or 0)
+        stderr_bytes = int(raw_result.get("stderr_bytes") or 0)
+        return (
+            "collector_deadline: termination=collector_deadline "
+            f"engine={engine} exit=unset "
+            f"stdout_bytes={stdout_bytes} stderr_bytes={stderr_bytes} "
+            "partial_output=absent legacy_collector=true"
+        )
+    return message
+
+
+def collector_timeout_detail(engine: str, raw_result: dict) -> str:
+    """Summary plus whatever stdout/stderr the daemon managed to keep."""
+    parts = [collector_timeout_message(engine, raw_result)]
+    stderr = raw_result.get("stderr") or ""
+    stdout = raw_result.get("stdout") or ""
+    if isinstance(stderr, str) and stderr.strip():
+        parts.append("partial_stderr:\n" + stderr[:_PARTIAL_OUTPUT_CHARS])
+    if isinstance(stdout, str) and stdout.strip():
+        parts.append("partial_stdout:\n" + stdout[:_PARTIAL_OUTPUT_CHARS])
+    return "\n".join(parts)[:_STORED_TIMEOUT_CHARS]
+
+
+def _is_collector_timeout(raw_result: dict) -> bool:
+    message = raw_result.get("error_message") or ""
+    return (
+        raw_result.get("error_code") == "collector_timeout"
+        or raw_result.get("status") == "timed_out"
+        or message == "timeout"
+        or (isinstance(message, str) and message.startswith("collector_deadline:"))
+    )
 
 PROFILE_ENGINES = {
     "SERVICE_DISCOVERY": ("nmap",),
@@ -216,11 +264,48 @@ def nmap_argv(executable: str, target: str) -> list[str]:
     ]
 
 
-def nuclei_argv(executable: str, target: str) -> list[str]:
+class ScoutTemplatesUnavailable(Exception):
+    """Server-plane Nuclei has no usable pinned templates directory."""
+
+
+def resolve_scout_nuclei_templates_dir() -> str:
+    """The pinned templates dir for server-plane SCOUT Nuclei, or a refusal.
+
+    Fails closed: an unset/empty/missing directory is refused before the
+    process spawns, because Nuclei without -t falls back to its ambient
+    (and possibly auto-updated) template set — the unpinned behavior this
+    plane must not have. Mirrors the STRIKE server-plane check
+    (app/strike/sandbox.py::resolve_nuclei_templates_dir).
+    """
+    configured = (config.SCOUT_NUCLEI_TEMPLATES_DIR or "").strip()
+    if not configured or not Path(configured).is_dir():
+        raise ScoutTemplatesUnavailable(
+            "SCOUT server-plane Nuclei templates are not deployed: "
+            f"'{configured or '<unset>'}' (SCOUT_NUCLEI_TEMPLATES_DIR) is not "
+            "a directory. Refusing to run against ambient templates."
+        )
+    has_templates = any(
+        p.suffix.lower() in (".yaml", ".yml")
+        for p in Path(configured).rglob("*")
+        if p.is_file()
+    )
+    if not has_templates:
+        raise ScoutTemplatesUnavailable(
+            f"SCOUT_NUCLEI_TEMPLATES_DIR '{configured}' contains no .yaml/.yml "
+            "templates. Refusing to run a template-less Nuclei scan."
+        )
+    return configured
+
+
+def nuclei_argv(executable: str, target: str, templates_dir: str) -> list[str]:
     return [
-        executable, "-target", target, "-jsonl", "-silent", "-no-color",
+        executable,
+        "-t",
+        templates_dir,
+        "-target", target, "-jsonl", "-silent", "-no-color",
         "-disable-update-check", "-no-interactsh", "-disable-redirects",
         "-disable-unsigned-templates", "-exclude-type", "headless,code,file,javascript",
+        "-severity", "low,medium,high,critical",
         "-rate-limit", "20", "-bulk-size", "1", "-concurrency", "5",
         "-timeout", "10", "-retries", "1", "-max-host-error", "10",
         "-response-size-read", "1048576", "-response-size-save", "1048576",
@@ -256,20 +341,76 @@ def parse_nmap_xml(payload: bytes) -> list[tuple[str, dict]]:
 
 
 def parse_nuclei_jsonl(payload: bytes) -> list[tuple[str, dict]]:
+    return parse_nuclei_jsonl_with_stats(payload)[0]
+
+
+def parse_nuclei_jsonl_with_stats(payload: bytes) -> tuple[list[tuple[str, dict]], dict]:
+    """Identical parsing to parse_nuclei_jsonl plus line telemetry: counts over
+    nonblank lines only (skipped = malformed JSON or non-dict)."""
     observations = []
-    for raw_line in payload.decode("utf-8").splitlines():
+    total_lines = 0
+    parsed_lines = 0
+    skipped_lines = 0
+    for raw_line in payload.decode("utf-8", errors="replace").splitlines():
         if not raw_line.strip():
             continue
-        event = json.loads(raw_line)
+        total_lines += 1
+        try:
+            event = json.loads(raw_line)
+        except json.JSONDecodeError:
+            # One malformed Nuclei line (observed: invalid \uXXXX escape in a
+            # matched URL) must not discard the rest of the scan output.
+            skipped_lines += 1
+            continue
         if not isinstance(event, dict):
-            raise ValueError("Nuclei JSONL entries must be objects")
+            skipped_lines += 1
+            continue
+        parsed_lines += 1
         safe_event = {
             key: event[key]
             for key in ("template-id", "matcher-name", "type", "host", "matched-at", "timestamp", "info")
             if key in event
         }
         observations.append(("template_match", {"scanner": "nuclei", "event": safe_event}))
-    return observations
+    stats = {
+        "total_lines": total_lines,
+        "parsed_lines": parsed_lines,
+        "skipped_lines": skipped_lines,
+    }
+    return observations, stats
+
+
+_EXCERPT_LINE_CAP = 2048
+_EXCERPT_TOTAL_CAP = 262144
+_EXCERPT_TOTAL_MARKER = "\n…[excerpt truncated at 256 KiB]"
+_SECRET_PATTERN = re.compile(
+    r"(?i)\b(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api-key|apikey|token|secret|password|private-key)(\s*[\"':=]\s*)((?:bearer\s+)?\S+(?:;[^\r\n]*)?)"
+)
+_WINDOWS_PATH_PATTERN = re.compile(
+    r"(?i)[a-z]:\\(?:[^\\\r\n]+\\)*[^\\\r\n]*|\\\\[^\\\r\n]+\\[^\\\r\n]*|\\Users\\[^\r\n\s\"']*"
+)
+_UNIX_PATH_PATTERN = re.compile(
+    r"(?<![\w-])/(?:home|tmp|var|usr|etc|opt)(?:/[^\r\n\s\"']*)+"
+)
+
+
+def _sanitize_nuclei_stdout(text: str) -> str:
+    """Redact secrets and filesystem paths and cap each line, so the raw
+    Nuclei stdout (including -irr embedded request/response bulk) can be
+    persisted as a bounded diagnostic excerpt."""
+    sanitized_lines = []
+    for raw_line in text.splitlines():
+        line = raw_line[:_EXCERPT_LINE_CAP]
+        if len(raw_line) > _EXCERPT_LINE_CAP:
+            line += "…[line truncated]"
+        line = _SECRET_PATTERN.sub(lambda m: f"{m.group(1)}{m.group(2)}[REDACTED]", line)
+        line = _WINDOWS_PATH_PATTERN.sub("[REDACTED_PATH]", line)
+        line = _UNIX_PATH_PATTERN.sub("[REDACTED_PATH]", line)
+        sanitized_lines.append(line)
+    excerpt = "\n".join(sanitized_lines)
+    if len(excerpt) > _EXCERPT_TOTAL_CAP:
+        excerpt = excerpt[:_EXCERPT_TOTAL_CAP] + _EXCERPT_TOTAL_MARKER
+    return excerpt
 
 
 def _qualifying_nuclei(kind: str, evidence: dict) -> Optional[dict]:
@@ -652,6 +793,8 @@ def _finish_tool_run(
     result: ProcessResult,
     observations: Optional[list[tuple[str, dict]]] = None,
     normalize_nuclei: bool = False,
+    parse_stats: Optional[dict] = None,
+    sanitized_excerpt: Optional[str] = None,
 ) -> None:
     with get_db_connection() as conn:
         with conn.cursor() as cur:
@@ -671,13 +814,17 @@ def _finish_tool_run(
                 UPDATE scout_tool_runs
                 SET state = %s, exit_code = %s, stderr = %s,
                     stdout_bytes = %s, stderr_bytes = %s,
+                    sanitized_output_excerpt = COALESCE(%s, sanitized_output_excerpt),
+                    parse_stats = COALESCE(%s, parse_stats),
                     started_at = COALESCE(started_at, now()), completed_at = now()
                 WHERE id = %s AND tenant_id = %s AND job_id = %s
                 """,
                 (
                     result.state, result.returncode,
                     result.stderr.decode("utf-8", errors="replace"),
-                    len(result.stdout), len(result.stderr), str(tool_run_id),
+                    len(result.stdout), len(result.stderr),
+                    sanitized_excerpt, Jsonb(parse_stats) if parse_stats is not None else None,
+                    str(tool_run_id),
                     str(job["tenant_id"]), str(job["id"]),
                 ),
             )
@@ -692,6 +839,8 @@ def _fail_tool_run(
     stdout_bytes: int = 0,
     stderr_bytes: int = 0,
     error_message: Optional[str] = None,
+    started_at: Optional[str] = None,
+    completed_at: Optional[str] = None,
 ) -> None:
     with get_db_connection() as conn:
         with conn.cursor() as cur:
@@ -701,7 +850,8 @@ def _fail_tool_run(
                 SET state = %s, exit_code = %s,
                     stdout_bytes = %s, stderr_bytes = %s,
                     stderr = %s,
-                    completed_at = now()
+                    started_at = COALESCE(%s::timestamptz, started_at),
+                    completed_at = COALESCE(%s::timestamptz, now())
                 WHERE id = %s AND tenant_id = %s AND job_id = %s
                 """,
                 (
@@ -710,6 +860,8 @@ def _fail_tool_run(
                     stdout_bytes,
                     stderr_bytes,
                     error_message or "",
+                    started_at or None,
+                    completed_at or None,
                     str(tool_run_id),
                     str(job["tenant_id"]),
                     str(job["id"]),
@@ -739,7 +891,21 @@ def _execute_central_job(job: dict) -> None:
 
     for engine in PROFILE_ENGINES[job["profile"]]:
         probe = probes[engine]
-        argv = nmap_argv(probe.executable, job["normalized_target"]) if engine == "nmap" else nuclei_argv(probe.executable, job["normalized_target"])
+        if engine == "nuclei":
+            # Authorization is evaluated before the templates refusal so the
+            # barrier test semantics are unchanged for unauthorized targets.
+            try:
+                _assert_authorized(job)
+                templates_dir = resolve_scout_nuclei_templates_dir()
+            except AuthorizationInvalid as exc:
+                _fail_job(job, "authorization_invalid", str(exc))
+                return
+            except ScoutTemplatesUnavailable as exc:
+                _fail_job(job, "nuclei_templates_unavailable", str(exc))
+                return
+            argv = nuclei_argv(probe.executable, job["normalized_target"], templates_dir)
+        else:
+            argv = nmap_argv(probe.executable, job["normalized_target"])
         timeout = NMAP_TIMEOUT if engine == "nmap" else NUCLEI_TIMEOUT
         try:
             result = _authorized_run(job, argv, timeout)
@@ -750,8 +916,14 @@ def _execute_central_job(job: dict) -> None:
             _finish_tool_run(job, tool_runs[engine], result)
             _fail_job(job, f"tool_{result.state}", f"{engine} scan: {result.state}")
             return
+        parse_stats = None
+        sanitized_excerpt = None
         try:
-            observations = parse_nmap_xml(result.stdout) if engine == "nmap" else parse_nuclei_jsonl(result.stdout)
+            if engine == "nmap":
+                observations = parse_nmap_xml(result.stdout)
+            else:
+                observations, parse_stats = parse_nuclei_jsonl_with_stats(result.stdout)
+                sanitized_excerpt = _sanitize_nuclei_stdout(result.stdout.decode("utf-8", errors="replace"))
         except (ET.ParseError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
             parse_result = ProcessResult("parse_failed", result.returncode, result.stdout, str(exc).encode())
             _finish_tool_run(job, tool_runs[engine], parse_result)
@@ -764,6 +936,8 @@ def _execute_central_job(job: dict) -> None:
                 result,
                 observations,
                 normalize_nuclei=engine == "nuclei",
+                parse_stats=parse_stats,
+                sanitized_excerpt=sanitized_excerpt,
             )
         except Exception:
             if engine != "nuclei":
@@ -849,9 +1023,19 @@ async def _execute_collector_job(job: dict) -> None:
             _fail_job(job, "collector_disconnected", raw_result.get("error_message", "Collector disconnected during scan"))
             return
 
-        if raw_result.get("error_code") == "collector_timeout" or raw_result.get("status") == "timed_out" or raw_result.get("error_message") == "timeout":
-            _fail_tool_run(job, tool_runs[engine], state="timed_out", error_message="Collector scan timed out")
-            _fail_job(job, "collector_timeout", raw_result.get("error_message", f"Collector scan timed out for {engine}"))
+        if _is_collector_timeout(raw_result):
+            _fail_tool_run(
+                job,
+                tool_runs[engine],
+                state="timed_out",
+                exit_code=raw_result.get("exit_code"),
+                stdout_bytes=int(raw_result.get("stdout_bytes") or 0),
+                stderr_bytes=int(raw_result.get("stderr_bytes") or 0),
+                error_message=collector_timeout_detail(engine, raw_result),
+                started_at=raw_result.get("started_at") or None,
+                completed_at=raw_result.get("completed_at") or None,
+            )
+            _fail_job(job, "collector_timeout", collector_timeout_message(engine, raw_result))
             return
 
         if raw_result.get("status") != "completed":
@@ -863,8 +1047,16 @@ async def _execute_collector_job(job: dict) -> None:
 
         stdout_raw = raw_result.get("stdout", "")
         stdout_bytes = stdout_raw.encode("utf-8") if isinstance(stdout_raw, str) else stdout_raw
+        parse_stats = None
+        sanitized_excerpt = None
         try:
-            observations = parse_nmap_xml(stdout_bytes) if engine == "nmap" else parse_nuclei_jsonl(stdout_bytes)
+            if engine == "nmap":
+                observations = parse_nmap_xml(stdout_bytes)
+            else:
+                observations, parse_stats = parse_nuclei_jsonl_with_stats(stdout_bytes)
+                sanitized_excerpt = _sanitize_nuclei_stdout(
+                    stdout_bytes.decode("utf-8", errors="replace")
+                )
         except (ET.ParseError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
             _fail_tool_run(
                 job,
@@ -906,6 +1098,8 @@ async def _execute_collector_job(job: dict) -> None:
                         UPDATE scout_tool_runs
                         SET state = 'succeeded', exit_code = %s,
                             stdout_bytes = %s, stderr_bytes = %s,
+                            sanitized_output_excerpt = %s,
+                            parse_stats = %s,
                             started_at = COALESCE(started_at, now()), completed_at = now()
                         WHERE id = %s AND tenant_id = %s AND job_id = %s
                         """,
@@ -913,6 +1107,8 @@ async def _execute_collector_job(job: dict) -> None:
                             raw_result.get("exit_code", 0),
                             raw_result.get("stdout_bytes", len(stdout_bytes)),
                             raw_result.get("stderr_bytes", 0),
+                            sanitized_excerpt,
+                            Jsonb(parse_stats) if parse_stats is not None else None,
                             str(tool_runs[engine]),
                             str(job["tenant_id"]),
                             str(job["id"]),

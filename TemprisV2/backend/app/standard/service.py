@@ -23,7 +23,7 @@ from typing import Any, Optional
 import psycopg
 from psycopg.rows import dict_row
 
-from app.audit import record_audit_event
+from app.audit import record_audit_event, verify_tenant_audit_chain
 from app.edip.service import _advisory_xact_lock
 from app.standard.errors import (
     StandardConflictError,
@@ -562,9 +562,11 @@ def download_evidence(
     *,
     actor_id: str,
     actor_role: str,
+    audit_event: str = "standard.evidence_downloaded",
 ) -> dict:
     """Evidence/artifact download is one of the audited reads (Appendix C
-    Q12) — the audit event commits in the same transaction."""
+    Q12) — the audit event commits in the same transaction. The preview
+    endpoint reuses this audited read under its own event name."""
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             """
@@ -580,7 +582,7 @@ def download_evidence(
             raise StandardNotFoundError(f"Evidence {evidence_id} not found")
         record_audit_event(
             conn=conn, tenant_id=tenant_id, actor_id=actor_id,
-            actor_role=actor_role, event_name="standard.evidence_downloaded",
+            actor_role=actor_role, event_name=audit_event,
             asset_id=None,
             details={"evidence_id": str(evidence_id), "sha256": row["sha256"]},
         )
@@ -878,7 +880,7 @@ def _get_incident_view(cur, tenant_id: uuid.UUID, incident_id: uuid.UUID) -> dic
     incident["evaluations"] = [dict(r) for r in cur.fetchall()]
     cur.execute(
         """
-        SELECT id, obligation_key, kind, title, state, due_at, trigger_at,
+        SELECT id, obligation_key, kind, title, draft_notice, state, due_at, trigger_at,
                fulfilled_at, closed_at, breached_at, revision
         FROM standard_obligations
         WHERE tenant_id = %s AND incident_id = %s
@@ -1816,3 +1818,252 @@ def list_submissions(
             (str(tenant_id), str(obligation_id)),
         )
         return [dict(r) for r in cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# V1-parity workbench reads — gap analysis, advisories, MAS report drafts.
+# All derived at read time: no stored truth, no new tables.
+# ---------------------------------------------------------------------------
+
+
+def get_gap_analysis(conn: psycopg.Connection, tenant_id: uuid.UUID) -> dict:
+    """Read-only derived view over control assessments vs framework controls
+    (V1 grc.py GET /gap-analysis, adapted to the V2 substrate): a SIGNED
+    assessment is completed, a DRAFT one is in review, no live assessment is
+    pending. Completion is the sign-off state — never an invented percentage
+    of compliance."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """
+            SELECT f.framework_code, c.id AS control_id, c.control_code,
+                   c.title, a.state AS assessment_state, a.status AS assessment_status
+            FROM standard_controls c
+            JOIN standard_frameworks f ON f.framework_code = c.framework_code
+            LEFT JOIN standard_control_assessments a
+              ON a.control_id = c.id AND a.tenant_id = %s AND a.state <> 'archived'
+            ORDER BY f.framework_code, c.control_code;
+            """,
+            (str(tenant_id),),
+        )
+        rows = cur.fetchall()
+
+    controls = []
+    completed = in_review = pending = 0
+    for row in rows:
+        if row["assessment_state"] == "signed":
+            state = "completed"
+            completed += 1
+        elif row["assessment_state"] == "draft":
+            state = "in_review"
+            in_review += 1
+        else:
+            state = "pending"
+            pending += 1
+        controls.append({
+            "framework_code": row["framework_code"],
+            "control_id": row["control_id"],
+            "control_code": row["control_code"],
+            "title": row["title"],
+            "state": state,
+            "assessment_status": row["assessment_status"],
+        })
+
+    total = len(controls)
+    completion_pct = round((completed / total) * 100) if total > 0 else 0
+    return {
+        "controls": controls,
+        "summary": {
+            "total": total,
+            "completed": completed,
+            "in_review": in_review,
+            "pending": pending,
+            "completion_pct": completion_pct,
+        },
+    }
+
+
+# Control codes the derived advisories speak to — the same cross-framework
+# mapping the V1 advisory engine used, adapted to the V2 seed catalog.
+_AUDIT_MONITORING_CONTROLS = ("MAS-TRM-9.1.1", "ISO-A.8.15", "SOC2-CC7.1")
+_INCIDENT_RESPONSE_CONTROLS = ("MAS-TRM-12.1.1", "ISO-A.5.24", "SOC2-CC7.2")
+
+
+def list_advisories(conn: psycopg.Connection, tenant_id: uuid.UUID) -> list[dict]:
+    """Live-data advisory alerts per control code (V1 standard.py
+    /advisories precedent: derived warnings that never mutate statuses or
+    scores). Mapped onto the data V2 actually has: the tamper-evident audit
+    chain, signed gap assessments, and overdue regulatory obligations.
+    Advisories against control codes not present in any seeded catalog are
+    dropped — an advisory must anchor to a real control."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT control_code FROM standard_controls;"
+        )
+        known_codes = {r["control_code"] for r in cur.fetchall()}
+
+        cur.execute(
+            """
+            SELECT a.status, c.control_code
+            FROM standard_control_assessments a
+            JOIN standard_controls c ON c.id = a.control_id
+            WHERE a.tenant_id = %s AND a.state = 'signed'
+              AND a.status IN ('partial', 'non_compliant');
+            """,
+            (str(tenant_id),),
+        )
+        gap_rows = cur.fetchall()
+
+        cur.execute(
+            """
+            SELECT id, obligation_key, due_at, breached_at
+            FROM standard_obligations
+            WHERE tenant_id = %s AND state IN ('open', 'in_progress')
+              AND due_at < %s;
+            """,
+            (str(tenant_id), _now()),
+        )
+        overdue = cur.fetchall()
+
+    advisories: dict[str, dict] = {}
+
+    try:
+        verification = verify_tenant_audit_chain(conn, tenant_id)
+        intact = bool(verification.get("intact"))
+        if not intact:
+            message = "TACF audit-chain verification failed for this tenant."
+            level = "critical"
+        else:
+            message = "TACF audit trail verified — the tamper-evident chain is intact."
+            level = "ok"
+        for code in _AUDIT_MONITORING_CONTROLS:
+            if code in known_codes:
+                advisories[code] = {"level": level, "message": message,
+                                    "type": "audit_chain_integrity"}
+    except Exception:
+        # verification infrastructure unavailable is itself worth surfacing,
+        # but never at the cost of failing the read
+        pass
+
+    for row in gap_rows:
+        code = row["control_code"]
+        advisories[code] = {
+            "level": "warning",
+            "message": (
+                f"Signed assessment reports {row['status'].replace('_', ' ')} "
+                "for this control — remediation review required."
+            ),
+            "type": "signed_gap",
+        }
+
+    if overdue:
+        message = (
+            f"{len(overdue)} regulatory obligation(s) past their deadline — "
+            "incident response readiness and notification clocks need review."
+        )
+        for code in _INCIDENT_RESPONSE_CONTROLS:
+            if code in known_codes:
+                advisories[code] = {
+                    "level": "warning", "message": message,
+                    "type": "overdue_obligations",
+                    "overdue_count": len(overdue),
+                }
+
+    return [
+        {"control_code": code, **payload}
+        for code, payload in sorted(advisories.items())
+    ]
+
+
+MAS_REPORT_TYPE = "MAS TRM 12.1.5 — 1-Hour Incident Notification"
+MAS_NOTIFICATION_CLOCK = timedelta(hours=1)
+
+
+def build_incident_report_draft(
+    conn: psycopg.Connection,
+    tenant_id: uuid.UUID,
+    incident_id: uuid.UUID,
+    *,
+    actor_id: str,
+    actor_role: str,
+) -> dict:
+    """Derived MAS TRM 12.1.5 notification DRAFT from a REAL incident (V1
+    standard.py POST /mas-trm/incident-report honesty rules carried over: a
+    draft is only ever generated from a recorded incident — never fabricated
+    from catalogue totals). Nothing is stored: the draft is derived at read
+    time; a HUMAN submits through the official channel and the submission
+    proof lands on the obligation, not here."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        view = _get_incident_view(cur, tenant_id, incident_id)
+
+    now = _now()
+    trigger_at = view["event_time"]
+    deadline = trigger_at + MAS_NOTIFICATION_CLOCK
+    evaluations = view["evaluations"]
+    obligations = view["obligations"]
+    unfinished = [
+        e for e in evaluations
+        if e["state"] in UNFINISHED_EVALUATION_STATES and e["is_current"]
+    ]
+    overdue = [o for o in obligations if o.get("overdue")]
+
+    draft = {
+        "report_id": f"INR-{now.strftime('%Y%m%d%H%M%S%f')}",
+        "incident_id": str(view["id"]),
+        "type": MAS_REPORT_TYPE,
+        "generated_at": now.astimezone(timezone.utc).isoformat(),
+        "generated_by": actor_id,
+        "notification_deadline": deadline.astimezone(timezone.utc).isoformat(),
+        "deadline_clock_seconds": int(MAS_NOTIFICATION_CLOCK.total_seconds()),
+        "status": "DRAFT — PENDING SUBMISSION TO MAS",
+        "incident_summary": {
+            "external_event_id": view["external_event_id"],
+            "source": view["source"],
+            "title": view["title"],
+            "state": view["state"],
+            "description": view["description"],
+            "event_time": trigger_at.astimezone(timezone.utc).isoformat(),
+            "current_revision": view["current_revision"],
+        },
+        "rule_evaluations": [
+            {
+                "rule_key": e["rule_key"],
+                "rule_version": e["rule_version"],
+                "state": e["state"],
+                "result": e["result"],
+                "is_current": e["is_current"],
+            }
+            for e in evaluations
+        ],
+        "related_obligations": [
+            {
+                "obligation_id": o["id"],
+                "obligation_key": o["obligation_key"],
+                "title": o["title"],
+                "kind": o["kind"],
+                "state": o["state"],
+                "due_at": o["due_at"].astimezone(timezone.utc).isoformat(),
+                "overdue": bool(o.get("overdue")),
+            }
+            for o in obligations
+        ],
+        "unfinished_evaluation_count": len(unfinished),
+        "overdue_obligation_count": len(overdue),
+        "scope_note": (
+            "Only the recorded incident, its rule evaluations, and its "
+            "obligations are included; global intelligence is excluded. "
+            "This is a prepared draft — a HUMAN submits via the official "
+            "channel; Tempris records the submission proof only."
+        ),
+    }
+    record_audit_event(
+        conn=conn, tenant_id=tenant_id, actor_id=actor_id,
+        actor_role=actor_role,
+        event_name="standard.incident_report_drafted",
+        asset_id=None,
+        details={
+            "incident_id": str(incident_id),
+            "report_id": draft["report_id"],
+            "report_type": MAS_REPORT_TYPE,
+        },
+    )
+    return draft

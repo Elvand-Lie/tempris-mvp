@@ -790,7 +790,6 @@ class KevFetchClient:
                         "url": str(resp.url),
                         "bytes_downloaded": len(resp.content),
                         "content_hash": hashlib.sha256(resp.content).hexdigest(),
-                        "artifact_bytes": resp.content,
                     },
                 )
         except httpx.HTTPStatusError as e:
@@ -941,7 +940,6 @@ class EpssFetchClient:
                             "url": str(resp.url),
                             "bytes_downloaded": len(raw_bytes),
                             "content_hash": hashlib.sha256(raw_bytes).hexdigest(),
-                            "artifact_bytes": raw_bytes,
                         },
                     )
 
@@ -990,7 +988,6 @@ class EpssFetchClient:
                         "url": str(resp.url),
                         "bytes_downloaded": len(raw_bytes),
                         "content_hash": hashlib.sha256(raw_bytes).hexdigest(),
-                        "artifact_bytes": raw_bytes,
                     },
                 )
         except httpx.HTTPStatusError as e:
@@ -1174,7 +1171,6 @@ class OsvFetchClient:
                 "url": str(resp.url),
                 "bytes_downloaded": len(resp.content),
                 "content_hash": hashlib.sha256(resp.content).hexdigest(),
-                "artifact_bytes": resp.content,
             },
         )
 

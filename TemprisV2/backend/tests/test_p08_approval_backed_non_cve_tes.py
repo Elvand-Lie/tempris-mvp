@@ -755,6 +755,32 @@ class TestReadModelDesignA:
         assert er_row["selected_rung"] == "exact_exposure_evidence"
         assert er_row["raw_value"] == {"__decimal__": "10"}
 
+    def test_exploitation_evidence_without_derivation_is_unscoreable_with_truthful_er(self):
+        """No-derivation twin: the episode stays UNSCOREABLE
+        (no_valid_sss), but the established ER rung is no longer ERASED from
+        the decomposition — the exploit_reality row renders the real
+        exact-exposure evidence (state 'known', raw_value 10, rung named)
+        for decomposition only, with no contribution implying a TES."""
+        fid, asset_id, exposure_id = _make_episode(with_derivation=False,
+                                                    posture=False)
+        with get_db_connection() as conn:
+            record_exploitation_evidence(
+                conn, TENANT_A, exposure_id,
+                ExploitationEvidenceIn(basis="observed", result="succeeded",
+                                       evidence={"actor": "red-team"}),
+                actor_id=ANALYST, actor_role="analyst")
+            conn.commit()
+        payload = _read_tes(exposure_id)
+        assert payload["state"] == "UNSCOREABLE"
+        assert payload["source_view"]["cvss_unscoreable_reason_code"] == \
+            "no_valid_sss"
+        er_row = [r for r in payload["decomposition"]
+                  if r["axis"] == "exploit_reality"][0]
+        assert er_row["raw_value"] == {"__decimal__": "10"}
+        assert er_row["selected_rung"] == "exact_exposure_evidence"
+        assert er_row["state"] == "known"
+        assert er_row["contribution"] is None
+
 
 # ===========================================================================
 # Races + failure injection
