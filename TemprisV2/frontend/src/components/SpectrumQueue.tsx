@@ -187,7 +187,7 @@ export const SpectrumQueue: React.FC<Props> = ({ items, total, loading, error, s
                       <span className="badge badge-spectrum-unscoreable">UNSCOREABLE</span>
                     ) : (
                       <>
-                        <strong>{item.tes.display_value ?? '—'}</strong>{' '}
+                        <strong>{decimalText(item.tes.display_value) ?? '—'}</strong>{' '}
                         <span className={`badge badge-spectrum-tes-${item.tes.state}`}>{item.tes.state}</span>
                       </>
                     )}

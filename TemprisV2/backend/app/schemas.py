@@ -80,6 +80,11 @@ class CollectorEnrollRequest(BaseModel):
     public_key: str = Field(..., min_length=1)
     platform_metadata: dict = Field(default_factory=dict)
 
+class CollectorHostBindingRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    asset_id: uuid.UUID
+
 class CollectorResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -101,6 +106,7 @@ class CollectorResponse(BaseModel):
     last_seen_at: Optional[datetime] = None
     platform_metadata: dict = Field(default_factory=dict)
     req_rate_per_sec: Optional[float] = 0.0
+    last_toolchain_check: Optional[dict] = None
     server_url: Optional[str] = None
     capabilities: Optional[dict] = None
     created_at: datetime

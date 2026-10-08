@@ -27,6 +27,16 @@ from app.collector_registry import collector_registry
 
 router = APIRouter(prefix="/api/assets", tags=["Assets"], dependencies=[Depends(require_module("ASSETS"))])
 
+def _collector_scan_capable(collector_id: uuid.UUID) -> bool:
+    # Usable scanning route = live session AND the collector reports a working
+    # nmap (the base SCOUT engine). Connection state, reachability, and scan
+    # authorization are tracked separately and deliberately not folded in here.
+    if not collector_registry.is_connected(collector_id):
+        return False
+    capabilities = collector_registry.get_collector_capabilities(collector_id)
+    nmap_cap = capabilities.get("nmap") if isinstance(capabilities, dict) else None
+    return bool(isinstance(nmap_cap, dict) and nmap_cap.get("available") is True)
+
 def _validate_collector_routing(conn: psycopg.Connection, tenant_id: uuid.UUID, collector_id: Optional[uuid.UUID]):
     """
     Validates collector route: must exist in same tenant and must not be revoked.
@@ -155,7 +165,7 @@ def get_asset_stats(
             cur.execute(
                 """
                 WITH active_assets AS (
-                    SELECT id, target_type, normalized_target, network_scope, reachability_status, verification_source
+                    SELECT id, target_type, normalized_target, network_scope, reachability_status, verification_source, collector_id
                     FROM assets
                     WHERE tenant_id = %s AND status = 'active'
                 )
@@ -183,17 +193,45 @@ def get_asset_stats(
                       AND auth.normalized_target = a.normalized_target
                       AND auth.network_scope = a.network_scope
                     ) AS pending_authorization,
-                    (SELECT COUNT(*) FROM active_assets WHERE network_scope = 'internal') AS no_scanner_available;
+                    (SELECT COALESCE(json_object_agg(cid, cnt), '{}'::json) FROM (
+                        SELECT COALESCE(collector_id::text, '') AS cid, COUNT(*) AS cnt
+                        FROM active_assets WHERE network_scope = 'internal' GROUP BY 1
+                    ) g) AS internal_by_collector
                 """,
                 (str(auth.tenant_id), str(auth.tenant_id), str(auth.tenant_id))
             )
             row = cur.fetchone()
+            # Internet-scope assets always have the tempris_cloud scanning route,
+            # so "no scanner available" only evaluates internal-scope assets: an
+            # asset counts unless its assigned collector is a same-tenant,
+            # enrolled, active, connected collector with a usable nmap engine.
+            internal_by_collector = row["internal_by_collector"] or {}
+            no_scanner_available = 0
+            if internal_by_collector:
+                cur.execute(
+                    """
+                    SELECT id FROM collectors
+                    WHERE tenant_id = %s
+                      AND enrollment_status = 'enrolled'
+                      AND operator_status = 'active'
+                      AND id::text = ANY(%s);
+                    """,
+                    (str(auth.tenant_id), list(internal_by_collector.keys()))
+                )
+                tenant_usable_ids = {c["id"] for c in cur.fetchall()}
+                for collector_key, asset_count in internal_by_collector.items():
+                    if not collector_key:
+                        no_scanner_available += asset_count
+                        continue
+                    collector_id = uuid.UUID(collector_key)
+                    if collector_id not in tenant_usable_ids or not _collector_scan_capable(collector_id):
+                        no_scanner_available += asset_count
             return {
                 "total_assets": row["total_assets"] or 0,
                 "reachable_by_scout": row["reachable_by_scout"] or 0,
                 "authorized_to_scan": row["authorized_to_scan"] or 0,
                 "pending_authorization": row["pending_authorization"] or 0,
-                "no_scanner_available": row["no_scanner_available"] or 0
+                "no_scanner_available": no_scanner_available
             }
 
 @router.post(
@@ -470,6 +508,7 @@ def update_asset(
                         reachability_status = %s,
                         verification_source = %s,
                         last_verified_at = %s,
+                        target_validation_state = 'ok',
                         updated_at = now()
                     WHERE id = %s AND tenant_id = %s
                     RETURNING *;

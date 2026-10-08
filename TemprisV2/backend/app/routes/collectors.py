@@ -17,6 +17,7 @@ from app.schemas import (
     CollectorEnrollRequest,
     CollectorResponse,
     CollectorEnrollmentResponse,
+    CollectorHostBindingRequest,
 )
 from app.config import COLLECTOR_SERVER_URL
 from app.collector_crypto import (
@@ -32,7 +33,7 @@ logger = logging.getLogger("collectors_router")
 router = APIRouter(prefix="/api/collectors", tags=["Collectors"])
 v1_router = APIRouter(prefix="/api/v1/collectors", tags=["Collectors v1"])
 
-def _with_derived_collector_fields(collector_row: dict) -> dict:
+def _with_derived_collector_fields(collector_row: dict, last_toolchain_check: Optional[dict] = None) -> dict:
     cid = collector_row["id"] if isinstance(collector_row["id"], uuid.UUID) else uuid.UUID(str(collector_row["id"]))
     conn_status = collector_registry.get_connection_status(cid)
     derived_status = collector_registry.get_derived_status(
@@ -52,6 +53,7 @@ def _with_derived_collector_fields(collector_row: dict) -> dict:
         "req_rate_per_sec": req_rate,
         "server_url": COLLECTOR_SERVER_URL,
         "capabilities": capabilities,
+        "last_toolchain_check": last_toolchain_check,
     }
 
 @router.post(
@@ -258,7 +260,11 @@ def list_collectors(
                 (str(auth.tenant_id),)
             )
             rows = cur.fetchall()
-            return [_with_derived_collector_fields(dict(r)) for r in rows]
+            from app.toolchain_checks import latest_check
+            return [
+                _with_derived_collector_fields(dict(r), last_toolchain_check=latest_check(cur, auth.tenant_id, r["id"]))
+                for r in rows
+            ]
 
 @router.get(
     "/{id}",
@@ -293,7 +299,176 @@ def get_collector(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Collector not found"
                 )
-            return _with_derived_collector_fields(dict(row))
+            from app.toolchain_checks import latest_check
+            check = latest_check(cur, auth.tenant_id, id)
+            return _with_derived_collector_fields(dict(row), last_toolchain_check=check)
+
+@router.put(
+    "/{id}/host-binding",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_module("ASSETS"))],
+    summary="Explicitly bind this collector to its own host asset (PRD §2.12 identity anchor)"
+)
+def bind_collector_host(
+    id: uuid.UUID,
+    binding: CollectorHostBindingRequest,
+    auth: AuthContext = Depends(require_roles(["admin", "superadmin"]))
+):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM collectors WHERE id = %s AND tenant_id = %s;",
+                (str(id), str(auth.tenant_id))
+            )
+            if not cur.fetchone():
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Collector not found")
+
+            cur.execute(
+                """
+                SELECT id, network_scope, status FROM assets
+                WHERE id = %s AND tenant_id = %s;
+                """,
+                (str(binding.asset_id), str(auth.tenant_id))
+            )
+            asset = cur.fetchone()
+            if not asset:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+            if asset["network_scope"] != "internal":
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="A collector host asset must be an internal-scope asset"
+                )
+            if asset["status"] != "active":
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="A collector host asset must be active"
+                )
+
+            cur.execute(
+                "SELECT collector_id, asset_id FROM collector_host_bindings WHERE collector_id = %s OR asset_id = %s;",
+                (str(id), str(binding.asset_id))
+            )
+            existing = cur.fetchone()
+            if existing:
+                if existing["collector_id"] == id and existing["asset_id"] == binding.asset_id:
+                    return {
+                        "collector_id": str(id),
+                        "asset_id": str(binding.asset_id),
+                        "already_bound": True,
+                    }
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="One collector binds to exactly one host asset and vice versa; either party is already bound differently"
+                )
+
+            cur.execute(
+                """
+                INSERT INTO collector_host_bindings (collector_id, asset_id, tenant_id, bound_by)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (str(id), str(binding.asset_id), str(auth.tenant_id), auth.actor_id)
+            )
+            record_audit_event(
+                conn=conn,
+                tenant_id=auth.tenant_id,
+                actor_id=auth.actor_id,
+                actor_role=auth.role,
+                event_name="collector.host_bound",
+                details={
+                    "collector_id": str(id),
+                    "asset_id": str(binding.asset_id),
+                }
+            )
+        conn.commit()
+    return {"collector_id": str(id), "asset_id": str(binding.asset_id), "already_bound": False}
+
+
+@router.get(
+    "/{id}/host-binding",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_module("ASSETS"))],
+    summary="Read the collector's host binding and current reported network location"
+)
+def get_collector_host_binding(
+    id: uuid.UUID,
+    auth: AuthContext = Depends(require_roles(["analyst", "admin", "superadmin"]))
+):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT b.asset_id, b.bound_at, b.bound_by,
+                       a.network_location
+                FROM collector_host_bindings b
+                JOIN collectors c ON c.id = b.collector_id
+                LEFT JOIN assets a ON a.id = b.asset_id
+                WHERE b.collector_id = %s AND b.tenant_id = %s;
+                """,
+                (str(id), str(auth.tenant_id))
+            )
+            binding = cur.fetchone()
+            if not binding:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No host binding for this collector")
+            cur.execute(
+                """
+                SELECT network_location, observed_at
+                FROM asset_network_observations
+                WHERE collector_id = %s
+                ORDER BY observed_at DESC
+                LIMIT 50;
+                """,
+                (str(id),)
+            )
+            history = cur.fetchall()
+    return {
+        "collector_id": str(id),
+        "asset_id": str(binding["asset_id"]),
+        "bound_at": binding["bound_at"].isoformat() if binding["bound_at"] else None,
+        "current_location": binding["network_location"],
+        "observation_history": [
+            {
+                "network_location": row["network_location"],
+                "observed_at": row["observed_at"].isoformat() if row["observed_at"] else None,
+            }
+            for row in history
+        ],
+    }
+
+
+@router.delete(
+    "/{id}/host-binding",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_module("ASSETS"))],
+    summary="Remove the collector's host binding"
+)
+def unbind_collector_host(
+    id: uuid.UUID,
+    auth: AuthContext = Depends(require_roles(["admin", "superadmin"]))
+):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT asset_id FROM collector_host_bindings WHERE collector_id = %s AND tenant_id = %s;",
+                (str(id), str(auth.tenant_id))
+            )
+            binding = cur.fetchone()
+            if not binding:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No host binding for this collector")
+            cur.execute(
+                "DELETE FROM collector_host_bindings WHERE collector_id = %s;",
+                (str(id),)
+            )
+            record_audit_event(
+                conn=conn,
+                tenant_id=auth.tenant_id,
+                actor_id=auth.actor_id,
+                actor_role=auth.role,
+                event_name="collector.host_unbound",
+                details={"collector_id": str(id), "asset_id": str(binding["asset_id"])}
+            )
+        conn.commit()
+    return {"collector_id": str(id), "asset_id": str(binding["asset_id"]), "unbound": True}
+
 
 @router.post(
     "/{id}/pause",
@@ -649,13 +824,22 @@ async def check_collector_update(
         )
         conn.commit()
 
+    # Persist the request lifecycle BEFORE dispatch: dispatch alone is not
+    # completion. The row leaves 'dispatched' only when the collector's
+    # SCOUT_CAPABILITIES response arrives, an explicit failure lands, or the
+    # timeout lapses.
+    from app.toolchain_checks import begin_check, fail_pending_check
+    check = begin_check(auth.tenant_id, id, requested_by=auth.actor_id)
+
     # Invariant B.1, B.2: Dispatch typed CHECK_UPDATE frame with zero remote execution vector
     dispatched = await collector_registry.dispatch_check_update(
         collector_id=id,
         tenant_id=auth.tenant_id,
         force_recheck=True,
+        check_id=str(check["check_id"]),
     )
     if not dispatched:
+        fail_pending_check(id, "Collector session disconnected during check dispatch.")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Collector session disconnected during check dispatch"
@@ -664,6 +848,7 @@ async def check_collector_update(
     return {
         "status": "checking",
         "collector_id": str(id),
+        "check_id": str(check["check_id"]),
         "message": "Toolchain update check dispatched successfully"
     }
 
@@ -710,7 +895,28 @@ def delete_collector(
                     detail="Cannot delete collector with an active live session."
                 )
 
-            # 4. Gate: Zero assets (active or historical) reference collector_id
+            # 4. Gate: A host-identity binding must be explicitly unbound first —
+            # ON DELETE CASCADE would otherwise silently destroy the identity bind
+            # and the asset's location history (PRD §2.12).
+            cur.execute(
+                """
+                SELECT asset_id FROM collector_host_bindings
+                WHERE collector_id = %s;
+                """,
+                (str(id),)
+            )
+            binding_row = cur.fetchone()
+            if binding_row:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Cannot delete collector while it is bound to host asset "
+                        f"{binding_row['asset_id']}; remove the host binding first "
+                        "(the identity bind and location history must not be cascade-deleted)."
+                    )
+                )
+
+            # 5. Gate: Zero assets (active or historical) reference collector_id
             cur.execute(
                 """
                 SELECT COUNT(*) AS ref_count
@@ -727,7 +933,7 @@ def delete_collector(
                     detail=f"Cannot delete collector referenced by {ref_count} asset(s). Reassign or unroute assets prior to deletion."
                 )
 
-            # 5. Insert sanitized collector.deleted audit event (zero key/enrollment/secret data)
+            # 6. Insert sanitized collector.deleted audit event (zero key/enrollment/secret data)
             record_audit_event(
                 conn=conn,
                 tenant_id=auth.tenant_id,
@@ -744,7 +950,7 @@ def delete_collector(
                 }
             )
 
-            # 6. Execute permanent parameterized deletion
+            # 7. Execute permanent parameterized deletion
             cur.execute(
                 """
                 DELETE FROM collectors
@@ -926,7 +1132,10 @@ async def websocket_collector_endpoint(websocket: WebSocket):
 
             frame_type = frame.get("type")
             if frame_type == "HEARTBEAT":
-                collector_registry.record_heartbeat(col_uuid, session_id=current_session_id)
+                heartbeat_accepted = collector_registry.record_heartbeat(col_uuid, session_id=current_session_id)
+                network_state = frame.get("network_state")
+                if heartbeat_accepted and isinstance(network_state, dict):
+                    collector_registry.record_network_observation(col_uuid, network_state)
                 now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 await websocket.send_text(json.dumps({
                     "type": "HEARTBEAT_ACK",
@@ -934,6 +1143,12 @@ async def websocket_collector_endpoint(websocket: WebSocket):
                 }))
             elif frame_type == "VERIFY_TARGET_RESULT":
                 collector_registry.handle_verify_target_result(
+                    col_uuid,
+                    frame,
+                    session_id=current_session_id
+                )
+            elif frame_type == "STRIKE_JOB_RESULT":
+                collector_registry.handle_strike_job_result(
                     col_uuid,
                     frame,
                     session_id=current_session_id

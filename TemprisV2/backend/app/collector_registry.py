@@ -13,6 +13,56 @@ from app.audit import record_audit_event
 
 logger = logging.getLogger("collector_registry")
 
+# The server-side wait for a SCOUT_JOB result must STRICTLY exceed the engine envelope it
+# hands the collector. The daemon bounds the engine at that same envelope
+# (collector/src/scout_runner.rs: `tokio::time::timeout(effective_timeout, wait_child)`),
+# KILLS the engine when it expires, and only THEN emits SCOUT_JOB_RESULT — so this margin
+# has to cover engine teardown/reap, up to OUTPUT_LIMIT (4 MiB) of serialized result, and
+# the WSS transit back to this process.
+#
+# It is NOT spare scan time. Widening it does not make a slow engine finish sooner; it only
+# stops a slow-but-successful result — or the daemon's own truthful timeout frame — from
+# being discarded and misreported as a server-side `Collector scan timed out after Ns`.
+#
+# Both central and collector Nmap paths now use --host-timeout 120s under a 180s
+# envelope. The margin covers result delivery after engine teardown, including
+# the daemon's truthful timeout frame if its outer envelope fires instead.
+SCOUT_RESULT_GRACE_SECONDS = 30
+
+
+def _deliver_future_result(future: asyncio.Future, payload: dict) -> None:
+    """Complete an in-flight result future on the loop that is waiting for it.
+
+    SCOUT execution runs through ``asyncio.run`` on a worker thread, while the
+    collector socket is read on the server loop. ``Future.set_result`` from the
+    reader thread marks the future done but does not wake the worker loop, so
+    ``wait_for`` only notices the result when its own deadline fires. Scheduling
+    the completion on the future's loop delivers it immediately.
+    """
+    if future.done():
+        return
+
+    def _set() -> None:
+        if not future.done():
+            future.set_result(payload)
+
+    try:
+        loop = future.get_loop()
+    except RuntimeError:
+        return
+    try:
+        current = asyncio.get_running_loop()
+    except RuntimeError:
+        current = None
+    if current is loop:
+        _set()
+        return
+    try:
+        loop.call_soon_threadsafe(_set)
+    except RuntimeError:
+        return
+
+
 class CollectorSession:
     def __init__(
         self,
@@ -84,7 +134,7 @@ class CollectorSession:
     def fail_all_jobs(self, error_message: str = "Collector disconnected or timed out during verification.") -> None:
         for job_id, future in list(self.in_flight_jobs.items()):
             if not future.done():
-                future.set_result({
+                _deliver_future_result(future, {
                     "job_id": str(job_id),
                     "status": "failed",
                     "reachability_status": "unverified",
@@ -204,6 +254,11 @@ class CollectorRegistry:
                             if f_type == "SCOUT_CAPABILITIES":
                                 caps = parsed.get("capabilities") or {}
                                 session.capabilities = caps
+                                try:
+                                    from app.toolchain_checks import complete_check
+                                    complete_check(collector_id, caps)
+                                except Exception:
+                                    pass
                                 col_ver = caps.get("collector_version")
                                 if col_ver and isinstance(col_ver, str):
                                     sanitized_ver = "".join(c for c in col_ver if c.isalnum() or c in ".-_")[:64]
@@ -248,6 +303,11 @@ class CollectorRegistry:
             session = self._sessions.pop(collector_id, None)
             if session:
                 session.fail_all_jobs(reason or "Collector disconnected or timed out during verification.")
+                try:
+                    from app.toolchain_checks import fail_pending_check
+                    fail_pending_check(collector_id, reason or "Collector disconnected mid-check.")
+                except Exception:
+                    pass
             return session
         return None
 
@@ -524,7 +584,7 @@ class CollectorRegistry:
 
         future = session.in_flight_jobs.pop(job_id, None)
         if future and not future.done():
-            future.set_result(result_payload)
+            _deliver_future_result(future, result_payload)
             return True
         return False
 
@@ -556,6 +616,182 @@ class CollectorRegistry:
                 conn.commit()
         except Exception as e:
             logger.debug("Could not persist collector %s version %s to DB: %s", collector_id, version, e)
+
+    @staticmethod
+    def _sanitize_network_state(network_state: Any) -> Optional[Tuple[datetime, list]]:
+        """Bound and validate a collector-reported location. Returns (observed_at, addresses) or None."""
+        import ipaddress
+        if not isinstance(network_state, dict):
+            return None
+        now = datetime.now(timezone.utc)
+        observed_at_raw = network_state.get("observed_at")
+        if isinstance(observed_at_raw, str) and observed_at_raw:
+            try:
+                observed_at = datetime.fromisoformat(observed_at_raw.replace("Z", "+00:00"))
+            except ValueError:
+                observed_at = now
+            # Reject implausible clock skew: an observation cannot come from the future.
+            if observed_at > now + timedelta(minutes=5):
+                observed_at = now
+            if observed_at.tzinfo is None:
+                observed_at = observed_at.replace(tzinfo=timezone.utc)
+        else:
+            observed_at = now
+
+        addresses = network_state.get("addresses")
+        if not isinstance(addresses, list):
+            return None
+        cleaned = []
+        for entry in addresses[:64]:
+            if not isinstance(entry, dict):
+                continue
+            interface = entry.get("interface")
+            ip_raw = entry.get("ip")
+            prefix = entry.get("prefix")
+            if not isinstance(interface, str) or not interface.strip() or len(interface) > 64:
+                continue
+            if not isinstance(ip_raw, str):
+                continue
+            try:
+                ip = ipaddress.ip_address(ip_raw)
+            except ValueError:
+                continue
+            if ip.is_unspecified or ip.is_loopback:
+                continue
+            max_prefix = 32 if ip.version == 4 else 128
+            if not isinstance(prefix, int) or isinstance(prefix, bool) or not (0 <= prefix <= max_prefix):
+                continue
+            cleaned.append({"interface": interface.strip()[:64], "ip": str(ip), "prefix": prefix})
+        if not cleaned:
+            return None
+        return observed_at, cleaned
+
+    def record_network_observation(self, collector_id: uuid.UUID, network_state: Any) -> Optional[dict]:
+        """Persist a collector-reported network location (PRD §2.12).
+
+        Location is written ONLY to the explicitly bound host asset — never used
+        to infer, create, or rebind identity. Without a binding this is a no-op.
+        History is append-only; the CURRENT location advances only monotonically
+        (a stale or reordered frame can never roll it back). If the current
+        address no longer matches the bound asset's IP target tuple, prior scan
+        authorizations are revoked and the asset is flagged for operator
+        revalidation — fail-closed, no silent retargeting.
+        """
+        sanitized = self._sanitize_network_state(network_state)
+        if sanitized is None:
+            return None
+        observed_at, addresses = sanitized
+        payload = json.dumps({"observed_at": observed_at.isoformat(), "addresses": addresses})
+        try:
+            from app.db import get_db_connection
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT b.asset_id, b.tenant_id
+                        FROM collector_host_bindings b
+                        WHERE b.collector_id = %s
+                        """,
+                        (str(collector_id),),
+                    )
+                    binding = cur.fetchone()
+                    if not binding:
+                        return None
+
+                    cur.execute(
+                        """
+                        SELECT network_location, target_type, normalized_target,
+                               target_validation_state
+                        FROM assets
+                        WHERE id = %s AND tenant_id = %s
+                        FOR UPDATE
+                        """,
+                        (str(binding["asset_id"]), str(binding["tenant_id"])),
+                    )
+                    asset = cur.fetchone()
+                    if not asset:
+                        return None
+
+                    cur.execute(
+                        """
+                        INSERT INTO asset_network_observations (
+                            tenant_id, asset_id, collector_id, network_location, observed_at
+                        ) VALUES (%s, %s, %s, %s::jsonb, %s)
+                        """,
+                        (
+                            str(binding["tenant_id"]), str(binding["asset_id"]),
+                            str(collector_id), payload, observed_at,
+                        ),
+                    )
+
+                    # Monotonic current: history keeps everything, current never regresses.
+                    current = asset["network_location"] if isinstance(asset["network_location"], dict) else None
+                    current_observed_at = None
+                    if current and isinstance(current.get("observed_at"), str):
+                        try:
+                            current_observed_at = datetime.fromisoformat(current["observed_at"].replace("Z", "+00:00"))
+                        except ValueError:
+                            current_observed_at = None
+                    advances = current_observed_at is None or observed_at >= current_observed_at
+                    if advances:
+                        cur.execute(
+                            """
+                            UPDATE assets
+                            SET network_location = %s::jsonb, updated_at = now()
+                            WHERE id = %s AND tenant_id = %s
+                            """,
+                            (payload, str(binding["asset_id"]), str(binding["tenant_id"])),
+                        )
+
+                        # Fail-closed: a bound host whose current IP no longer matches
+                        # its IP target tuple must not keep scanning the old address —
+                        # that address may now belong to a different occupant.
+                        mismatch = None
+                        if asset["target_type"] == "ip":
+                            current_ips = {address["ip"] for address in addresses}
+                            mismatch = asset["normalized_target"] not in current_ips
+                            desired_state = "needs_revalidation" if mismatch else "ok"
+                            if asset["target_validation_state"] != desired_state:
+                                cur.execute(
+                                    """
+                                    UPDATE assets
+                                    SET target_validation_state = %s, updated_at = now()
+                                    WHERE id = %s AND tenant_id = %s
+                                    """,
+                                    (desired_state, str(binding["asset_id"]), str(binding["tenant_id"])),
+                                )
+                                if mismatch:
+                                    cur.execute(
+                                        """
+                                        UPDATE asset_scan_authorizations
+                                        SET status = 'revoked',
+                                            revoked_by = 'system:identity_guard',
+                                            revoked_at = now(),
+                                            revocation_reason =
+                                                'Bound host reported a network location that no longer matches its IP target; operator must confirm the target and re-approve'
+                                        WHERE asset_id = %s AND tenant_id = %s
+                                          AND status IN ('pending', 'approved');
+                                        """,
+                                        (str(binding["asset_id"]), str(binding["tenant_id"])),
+                                    )
+                                    record_audit_event(
+                                        conn=conn,
+                                        tenant_id=binding["tenant_id"],
+                                        actor_id="system:identity_guard",
+                                        actor_role="system",
+                                        event_name="asset.target_revalidation_required",
+                                        details={
+                                            "asset_id": str(binding["asset_id"]),
+                                            "collector_id": str(collector_id),
+                                            "reported_addresses": sorted(current_ips),
+                                            "asset_target": asset["normalized_target"],
+                                        }
+                                    )
+                conn.commit()
+            return {"asset_id": str(binding["asset_id"]), "target_mismatch": mismatch if advances else None}
+        except Exception as e:
+            logger.debug("Could not record network observation for collector %s: %s", collector_id, e)
+            return None
 
     def handle_scout_job_result(
         self,
@@ -594,7 +830,7 @@ class CollectorRegistry:
             )
             return False
 
-        matched_future.set_result(result_payload)
+        _deliver_future_result(matched_future, result_payload)
         return True
 
     async def dispatch_scout_job(
@@ -673,7 +909,7 @@ class CollectorRegistry:
                 "error_message": f"Failed to send frame to collector: {e}"
             }
 
-        grace_period = 15
+        grace_period = SCOUT_RESULT_GRACE_SECONDS
         total_timeout = int(timeout_seconds) + grace_period
         try:
             result = await asyncio.wait_for(future, timeout=total_timeout)
@@ -686,17 +922,163 @@ class CollectorRegistry:
                 "engine": engine,
                 "status": "failed",
                 "error_code": "collector_timeout",
-                "error_message": f"Collector scan timed out after {total_timeout}s"
+                "error_message": (
+                    f"collector_transport_timeout: no result frame within {total_timeout}s "
+                    f"(envelope {int(timeout_seconds)}s + grace {grace_period}s)"
+                ),
             }
         finally:
             session.in_flight_jobs.pop(job_uuid, None)
             session.in_flight_jobs.pop(job_str, None)
+
+    def strike_capability_ready(self, collector_id: uuid.UUID, capability: str) -> bool:
+        """Fail-closed readiness: the collector must have reported the
+        capability explicitly available. An unknown/absent report is NOT
+        ready (older collectors must upgrade their capability report before
+        STRIKE runs dispatch to them)."""
+        caps = self.get_collector_capabilities(collector_id)
+        if not isinstance(caps, dict):
+            return False
+        entry = caps.get(capability)
+        if not isinstance(entry, dict):
+            return False
+        return entry.get("available") is True
+
+    async def dispatch_strike_job(
+        self,
+        collector_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        job_id: uuid.UUID,
+        method: Optional[str] = None,
+        url: Optional[str] = None,
+        pinned_ips: Optional[List[str]] = None,
+        timeout_seconds: int = 60,
+        *,
+        capability: str = "curl",
+        pinned_targets: Optional[List[str]] = None,
+        record_type: Optional[str] = None,
+    ) -> dict:
+        """Dispatch a STRIKE toolbox run to the user-selected collector over
+        the authenticated WSS and await its bounded result. Mirrors the
+        SCOUT_JOB dispatch: one in-flight future resolved by the matching
+        STRIKE_JOB_RESULT frame (or by fail_all_jobs on disconnect).
+
+        The frame stays backward-compatible: a curl run carries exactly the
+        fields it always has; the other Phase-1 tools add capability-specific
+        fields (pinned_targets for nmap, record_type for dig) and omit the
+        HTTP-only ones."""
+        pinned_ips = list(pinned_ips or [])
+        session = self.get_session(collector_id)
+        if not session or not self.is_connected(collector_id):
+            return {
+                "job_id": str(job_id),
+                "status": "failed",
+                "error_code": "collector_disconnected",
+                "error_message": "The selected collector is not connected",
+            }
+        if session.tenant_id != tenant_id:
+            return {
+                "job_id": str(job_id),
+                "status": "failed",
+                "error_code": "tenant_mismatch",
+                "error_message": "Collector does not belong to the requested tenant",
+            }
+        if session.operator_status != "active":
+            return {
+                "job_id": str(job_id),
+                "status": "failed",
+                "error_code": "collector_inactive",
+                "error_message": f"Collector operator status is {session.operator_status}",
+            }
+
+        job_uuid = uuid.UUID(str(job_id))
+        job_str = str(job_uuid)
+
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future = loop.create_future()
+        session.in_flight_jobs[job_uuid] = future
+        session.in_flight_jobs[job_str] = future
+
+        expires_at_dt = datetime.now(timezone.utc) + timedelta(seconds=int(timeout_seconds))
+        expires_at_str = expires_at_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        payload = {
+            "type": "STRIKE_JOB",
+            "job_id": job_str,
+            "capability": capability,
+            "timeout_seconds": int(timeout_seconds),
+            "expires_at": expires_at_str,
+        }
+        if method is not None:
+            payload["method"] = method
+        if url is not None:
+            payload["url"] = url
+        payload["pinned_ips"] = list(pinned_ips)
+        if pinned_targets is not None:
+            payload["pinned_targets"] = list(pinned_targets)
+        if record_type is not None:
+            payload["record_type"] = record_type
+
+        try:
+            await session.websocket.send_text(json.dumps(payload))
+        except Exception as e:
+            session.in_flight_jobs.pop(job_uuid, None)
+            session.in_flight_jobs.pop(job_str, None)
+            return {
+                "job_id": job_str,
+                "status": "failed",
+                "error_code": "collector_unreachable",
+                "error_message": f"Failed to send STRIKE job to collector: {e}"
+            }
+
+        total_timeout = int(timeout_seconds) + SCOUT_RESULT_GRACE_SECONDS
+        try:
+            return await asyncio.wait_for(future, timeout=total_timeout)
+        except asyncio.TimeoutError:
+            session.in_flight_jobs.pop(job_uuid, None)
+            session.in_flight_jobs.pop(job_str, None)
+            return {
+                "job_id": job_str,
+                "status": "failed",
+                "error_code": "collector_timeout",
+                "error_message": f"Collector run timed out after {total_timeout}s",
+            }
+        finally:
+            session.in_flight_jobs.pop(job_uuid, None)
+            session.in_flight_jobs.pop(job_str, None)
+
+    def handle_strike_job_result(
+        self,
+        collector_id: uuid.UUID,
+        result_payload: dict,
+        session_id: Optional[uuid.UUID] = None
+    ) -> bool:
+        session = self.get_session(collector_id)
+        if not session:
+            return False
+        if session_id is not None and session.session_id != session_id:
+            return False
+        job_id_raw = result_payload.get("job_id")
+        if not job_id_raw:
+            return False
+        try:
+            job_uuid = uuid.UUID(str(job_id_raw))
+        except ValueError:
+            job_uuid = None
+        future = session.in_flight_jobs.pop(job_uuid, None) if job_uuid else None
+        future_str = session.in_flight_jobs.pop(str(job_id_raw), None)
+        matched = future or future_str
+        if not matched or matched.done():
+            return False
+        _deliver_future_result(matched, result_payload)
+        return True
 
     async def dispatch_check_update(
         self,
         collector_id: uuid.UUID,
         tenant_id: uuid.UUID,
         force_recheck: bool = False,
+        check_id: Optional[str] = None,
     ) -> bool:
         session = self.get_session(collector_id)
         if not session or not self.is_connected(collector_id):
@@ -704,11 +1086,10 @@ class CollectorRegistry:
         if session.tenant_id != tenant_id:
             return False
 
-        check_id = str(uuid.uuid4())
         # Typed ServerFrame::CHECK_UPDATE carrying strictly check_id and force_recheck (Anti-RCE B.1, B.2)
         payload = {
             "type": "CHECK_UPDATE",
-            "check_id": check_id,
+            "check_id": check_id or str(uuid.uuid4()),
             "force_recheck": force_recheck,
         }
         try:

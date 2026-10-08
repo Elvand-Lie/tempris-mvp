@@ -18,6 +18,7 @@ export const CollectorDetailModal: React.FC<CollectorDetailModalProps> = ({
 }) => {
   const [isChecking, setIsChecking] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [checkOutcome, setCheckOutcome] = useState<'completed' | 'failed' | 'timed_out' | null>(null);
 
   if (!isOpen || !collector) return null;
 
@@ -36,13 +37,40 @@ export const CollectorDetailModal: React.FC<CollectorDetailModalProps> = ({
   const handleCheckAgain = async () => {
     if (collector.connection_status !== 'connected' || isChecking) return;
     setIsChecking(true);
+    setCheckOutcome(null);
     setFeedback(null);
     try {
       const res = await api.checkCollectorUpdate(collector.id);
-      setFeedback({
-        type: 'success',
-        message: res.message || 'Toolchain update check dispatched successfully',
-      });
+      // Dispatch is not completion: poll the authoritative backend record until
+      // this check_id leaves 'dispatched' (completed/failed/timed_out).
+      const deadline = Date.now() + 100_000;
+      let outcome: 'completed' | 'failed' | 'timed_out' = 'timed_out';
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const fresh = await api.getCollector(collector.id);
+        const chk = fresh.last_toolchain_check;
+        if (res.check_id && chk && chk.check_id === res.check_id && chk.status !== 'dispatched') {
+          if (chk.status === 'completed' || chk.status === 'failed' || chk.status === 'timed_out') {
+            outcome = chk.status;
+          }
+          break;
+        }
+        if (fresh.connection_status !== 'connected') {
+          outcome = 'failed';
+          break;
+        }
+        if (onRefreshCollector) {
+          await onRefreshCollector();
+        }
+      }
+      setCheckOutcome(outcome);
+      if (outcome === 'completed') {
+        setFeedback({ type: 'success', message: 'Toolchain update check completed.' });
+      } else if (outcome === 'failed') {
+        setFeedback({ type: 'error', message: 'Toolchain update check failed — the collector disconnected or reported an error.' });
+      } else {
+        setFeedback({ type: 'error', message: 'Toolchain update check timed out — no result received from the collector.' });
+      }
       if (onRefreshCollector) {
         await onRefreshCollector();
       }
@@ -297,8 +325,29 @@ export const CollectorDetailModal: React.FC<CollectorDetailModalProps> = ({
                     {updateStatus.replace(/_/g, ' ')}
                   </span>
                   <span style={{ display: 'block', fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                    {lastCheckedAt ? `Checked: ${new Date(lastCheckedAt).toLocaleString()}` : 'No recent check'}
+                    {isChecking
+                      ? 'Checking… (dispatched, awaiting collector result)'
+                      : checkOutcome === 'completed'
+                        ? 'Check completed just now'
+                        : checkOutcome === 'failed'
+                          ? 'Last check FAILED — status above is not newly verified'
+                          : checkOutcome === 'timed_out'
+                            ? 'Last check TIMED OUT — no result received'
+                            : lastCheckedAt
+                              ? `Checked: ${new Date(lastCheckedAt).toLocaleString()}`
+                              : 'No recent check'}
                   </span>
+                  {collector.last_toolchain_check && !isChecking && !checkOutcome && (
+                    <span style={{ display: 'block', fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                      {collector.last_toolchain_check.status === 'completed'
+                        ? `Last completed check: ${collector.last_toolchain_check.finished_at ? new Date(collector.last_toolchain_check.finished_at).toLocaleString() : ''}`
+                        : collector.last_toolchain_check.status === 'failed'
+                          ? `Last check failed${collector.last_toolchain_check.finished_at ? `: ${new Date(collector.last_toolchain_check.finished_at).toLocaleString()}` : ''}`
+                          : collector.last_toolchain_check.status === 'timed_out'
+                            ? `Last check timed out${collector.last_toolchain_check.finished_at ? `: ${new Date(collector.last_toolchain_check.finished_at).toLocaleString()}` : ''}`
+                            : ''}
+                    </span>
+                  )}
                 </span>
               </div>
             </div>

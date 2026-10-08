@@ -15,7 +15,7 @@ vi.mock('../api', () => ({ api: {
   spectrum: {
     getQueue: vi.fn(), getExposureDetail: vi.fn(), getExposureHistory: vi.fn(),
     assignExposure: vi.fn(), unassignExposure: vi.fn(), setAnalysisState: vi.fn(),
-    addExposureNote: vi.fn(), requestStrike: vi.fn(), requestEdipHandoff: vi.fn(),
+    addExposureNote: vi.fn(), requestEdipHandoff: vi.fn(),
   },
   exposure: {
     getFindingTesSummary: vi.fn(), getScoringInputs: vi.fn(), setBusinessImpact: vi.fn(),
@@ -40,7 +40,7 @@ const queueItem: SpectrumQueueItem = {
   tes: {
     state: 'FINAL',
     value: { __decimal__: '7.2525' },
-    display_value: '7.25',
+    display_value: { __decimal__: '7.25' },
     formula_version: 'tes-1.0',
   },
   analysis_state: 'new',
@@ -96,7 +96,7 @@ const tes: TesCurrentPayload = {
   formula_version: 'tes-1.0',
   state: 'FINAL',
   value: { __decimal__: '7.2525' },
-  display_value: '7.25',
+  display_value: { __decimal__: '7.25' },
   known_axes: '5/5',
   known_weight: { __decimal__: '1.00' },
   missing_inputs: [],
@@ -229,6 +229,7 @@ const inputs: ScoringInputsSnapshot = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.sessionStorage.removeItem('tempris.strike.prefill');
   vi.mocked(api.spectrum.getQueue).mockResolvedValue({ total: 1, items: [queueItem] });
   vi.mocked(api.spectrum.getExposureDetail).mockResolvedValue(detail);
   vi.mocked(api.exposure.getFindingTesSummary).mockResolvedValue(summary);
@@ -297,6 +298,17 @@ describe('SPECTRUM exposure detail', () => {
     expect(screen.getAllByText('known', { selector: 'span' })).toHaveLength(5);
     expect(api.spectrum.getExposureDetail).toHaveBeenCalledWith(EXPOSURE_ID);
     expect(api.exposure.getFindingTesSummary).toHaveBeenCalledWith(FINDING_ID);
+  });
+
+  it('renders selection with the real DecimalWire display_value without a blank screen, and switches exposures', async () => {
+    render(<SpectrumWorkbench />);
+    fireEvent.click(await screen.findByRole('button', { name: /CVE-2026-0001/ }));
+    expect(await screen.findByText('Current TES — recomputed at read (never stored here)')).toBeInTheDocument();
+    expect(screen.getAllByText('7.25').length).toBeGreaterThan(0);
+    // Back to queue and re-select: navigation and re-selection stay alive
+    fireEvent.click(screen.getByRole('button', { name: 'Back to queue' }));
+    fireEvent.click(await screen.findByRole('button', { name: /CVE-2026-0001/ }));
+    expect(await screen.findByText('Current TES — recomputed at read (never stored here)')).toBeInTheDocument();
   });
 
   it('exposes exploit-reality rung detail on demand', async () => {
@@ -423,39 +435,40 @@ describe('SPECTRUM analyst-reviewed evidence', () => {
 });
 
 describe('SPECTRUM handoffs', () => {
-  it('queues a STRIKE engagement draft and confirms it is never silent', async () => {
-    vi.mocked(api.spectrum.requestStrike).mockResolvedValue({
-      exposure_id: EXPOSURE_ID,
-      strike_request: {
-        id: 'sr-1', state: 'draft', requested_by: 'analyst@example.test',
-        note: 'Controlled validation requested', created_at: '2026-09-20T12:00:00Z',
-      },
-    });
+  it('pre-fills an optional STRIKE run request without any engagement chain', async () => {
     await openDetail();
-    fireEvent.change(screen.getByLabelText('Justification'), { target: { value: 'Controlled validation requested' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Request STRIKE engagement draft' }));
-    expect(await screen.findByText(/STRIKE engagement draft queued/)).toBeInTheDocument();
-    expect(screen.getByText('sr-1')).toBeInTheDocument();
-    expect(screen.getByText('draft', { selector: 'strong' })).toBeInTheDocument();
-    expect(api.spectrum.requestStrike).toHaveBeenCalledWith(EXPOSURE_ID, 'Controlled validation requested');
+    // no legacy surface and no backend engagement call: the corrected Ch.7
+    // handoff is a client-side pre-fill of the STRIKE toolbox composer
+    expect(screen.queryByText(/engagement draft/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /engagement/i })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Target (exact hostname, IP, or URL)'), {
+      target: { value: '203.0.113.10' },
+    });
+    fireEvent.change(screen.getByLabelText('Context (optional)'), {
+      target: { value: 'validate RCE on staging twin' },
+    });
+    let navigated: unknown = null;
+    window.addEventListener('tempris:navigate', (e) => { navigated = (e as CustomEvent).detail; }, { once: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Pre-fill STRIKE run' }));
+
+    expect(await screen.findByText(/STRIKE console is open/)).toBeInTheDocument();
+    expect(navigated).toEqual({ tab: 'strike' });
+    const prefill = JSON.parse(window.sessionStorage.getItem('tempris.strike.prefill') || '{}');
+    expect(prefill.target).toBe('203.0.113.10');
+    expect(prefill.context).toContain(EXPOSURE_ID);
+    expect(prefill.context).toContain('validate RCE on staging twin');
+    expect(api.spectrum.requestEdipHandoff).not.toHaveBeenCalled();
   });
 
-  it('surfaces a failed STRIKE request with retry instead of silently dropping it', async () => {
-    vi.mocked(api.spectrum.requestStrike)
-      .mockRejectedValueOnce(new Error('STRIKE unavailable'))
-      .mockResolvedValue({
-        exposure_id: EXPOSURE_ID,
-        strike_request: {
-          id: 'sr-2', state: 'draft', requested_by: 'analyst@example.test',
-          note: null, created_at: '2026-09-20T12:00:00Z',
-        },
-      });
+  it('blocks the pre-fill without a target instead of handing off a blank run', async () => {
     await openDetail();
-    fireEvent.click(screen.getByRole('button', { name: 'Request STRIKE engagement draft' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('STRIKE unavailable');
-    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Retry' }));
-    expect(await screen.findByText(/STRIKE engagement draft queued/)).toBeInTheDocument();
-    expect(screen.getByText('sr-2')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Target (exact hostname, IP, or URL)'), {
+      target: { value: '   ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Pre-fill STRIKE run' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('target is required');
+    expect(window.sessionStorage.getItem('tempris.strike.prefill')).toBeNull();
   });
 
   it('creates the EDIP handoff in Needs-Decision state via manual handoff', async () => {

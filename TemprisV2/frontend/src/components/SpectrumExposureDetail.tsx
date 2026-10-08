@@ -9,11 +9,16 @@ import {
   SpectrumFindingSummary,
   SpectrumHistoryEntry,
   SpectrumQueueItem,
-  SpectrumStrikeRequestResult,
   TesCurrentPayload,
   TesDecompositionRow,
 } from '../types';
 import { ANALYSIS_STATES, ANALYSIS_STATE_LABELS, AXIS_LABELS, decimalText, stamp } from '../spectrumFormat';
+
+/** Presentation-only 2dp cap: stored precision is untouched; UI never prints long floats. */
+const tes2dp = (v: Parameters<typeof decimalText>[0]): string | null => {
+  const s = decimalText(v);
+  return s === null ? null : Number(s).toFixed(2);
+};
 
 interface Props {
   exposureId: string;
@@ -180,7 +185,12 @@ export const SpectrumExposureDetail: React.FC<Props> = ({ exposureId, context, o
         />
       </div>
 
-      <HandoffPanel exposureId={exposureId} analysisState={detail.workflow.analysis_state} onMutated={onChanged} />
+      <HandoffPanel
+        exposureId={exposureId}
+        analysisState={detail.workflow.analysis_state}
+        assetNormalizedTarget={context?.asset_normalized_target ?? null}
+        onMutated={onChanged}
+      />
     </section>
   );
 };
@@ -204,8 +214,8 @@ const FindingSummary: React.FC<{
     )}
     {summary && (
       <div className="spectrum-metrics" aria-label="Finding roll-up summary">
-        <article><strong>{decimalText(summary.max_final_tes) ?? '—'}</strong><span>Max FINAL TES</span></article>
-        <article><strong>{decimalText(summary.max_provisional_tes) ?? '—'}</strong><span>Max PROVISIONAL TES</span></article>
+        <article><strong>{tes2dp(summary.max_final_tes) ?? '—'}</strong><span>Max FINAL TES</span></article>
+        <article><strong>{tes2dp(summary.max_provisional_tes) ?? '—'}</strong><span>Max PROVISIONAL TES</span></article>
         <article><strong>{summary.final_count}</strong><span>FINAL exposures</span></article>
         <article><strong>{summary.provisional_count}</strong><span>PROVISIONAL exposures</span></article>
         <article><strong>{summary.unscoreable_count}</strong><span>UNSCOREABLE (counted)</span></article>
@@ -224,7 +234,7 @@ const TesPanel: React.FC<{ tes: TesCurrentPayload }> = ({ tes }) => (
     <h3 id="spectrum-tes-title">Current TES — recomputed at read (never stored here)</h3>
     <div className="spectrum-tes-head">
       <span className={`spectrum-tes-value spectrum-tes-${tes.state}`}>
-        {tes.state === 'UNSCOREABLE' ? 'UNSCOREABLE' : tes.display_value ?? decimalText(tes.value) ?? '—'}
+        {tes.state === 'UNSCOREABLE' ? 'UNSCOREABLE' : decimalText(tes.display_value) ?? decimalText(tes.value) ?? '—'}
       </span>
       <span className={`badge badge-spectrum-tes-${tes.state}`}>{tes.state}</span>
       <span className="spectrum-muted">
@@ -683,7 +693,7 @@ const EvidencePanel: React.FC<{
         <>
           {inputs.reachability ? (
             <p className="spectrum-muted">
-              Current reachability: <strong>{inputs.reachability.vantage}</strong> (score input {inputs.reachability.value}) —
+              Current reachability: <strong>{inputs.reachability.vantage}</strong> (score input {decimalText(inputs.reachability.value)}) —
               {' '}recorded by {inputs.reachability.record.recorded_by} at {stamp(inputs.reachability.record.observed_at)}
             </p>
           ) : (
@@ -807,37 +817,50 @@ const EvidencePanel: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
-// Downstream handoffs: STRIKE engagement draft + manual EDIP handoff
+// Downstream handoffs: optional pre-filled STRIKE run request (Ch.7, corrected
+// PRD v1.12 — no engagement/approval chain) + manual EDIP handoff
 // ---------------------------------------------------------------------------
 
 const HandoffPanel: React.FC<{
   exposureId: string;
   analysisState: SpectrumAnalysisState;
+  assetNormalizedTarget: string | null;
   onMutated: () => void;
-}> = ({ exposureId, analysisState, onMutated }) => {
-  const [strikeNote, setStrikeNote] = useState('');
-  const [strikeSaving, setStrikeSaving] = useState(false);
+}> = ({ exposureId, analysisState, assetNormalizedTarget, onMutated }) => {
+  const [strikeTarget, setStrikeTarget] = useState(assetNormalizedTarget ?? '');
+  const [strikeContext, setStrikeContext] = useState('');
+  const [strikeHandedOff, setStrikeHandedOff] = useState(false);
   const [strikeError, setStrikeError] = useState<string | null>(null);
-  const [strikeResult, setStrikeResult] = useState<SpectrumStrikeRequestResult | null>(null);
 
   const [edipNote, setEdipNote] = useState('');
   const [edipSaving, setEdipSaving] = useState(false);
   const [edipError, setEdipError] = useState<string | null>(null);
   const [edipResult, setEdipResult] = useState<SpectrumEdipHandoffResult | null>(null);
 
-  const requestStrike = async () => {
-    setStrikeSaving(true);
+  // The corrected Ch.7 handoff is OPTIONAL and purely a pre-fill: no backend
+  // engagement/approval chain is involved. The STRIKE console owns scope
+  // checks, pinning, and run creation; SPECTRUM only supplies target + context.
+  const prefillStrike = () => {
+    const target = strikeTarget.trim();
+    if (!target) {
+      setStrikeError('A target is required before pre-filling the STRIKE run.');
+      return;
+    }
     setStrikeError(null);
     try {
-      const result = await api.spectrum.requestStrike(exposureId, strikeNote.trim() || null);
-      setStrikeResult(result);
-      setStrikeNote('');
-      onMutated();
-    } catch (cause: any) {
-      // STRIKE unavailable ⇒ the request stays retryable here — never silent.
-      setStrikeError(cause.message || 'STRIKE request failed; it was not queued.');
-    } finally {
-      setStrikeSaving(false);
+      window.sessionStorage.setItem(
+        'tempris.strike.prefill',
+        JSON.stringify({
+          target,
+          context: strikeContext.trim()
+            ? `exposure ${exposureId} (${strikeContext.trim()})`
+            : `exposure ${exposureId}`,
+        }),
+      );
+      window.dispatchEvent(new CustomEvent('tempris:navigate', { detail: { tab: 'strike' } }));
+      setStrikeHandedOff(true);
+    } catch {
+      setStrikeError('Could not hand off to the STRIKE console (storage unavailable).');
     }
   };
 
@@ -862,37 +885,51 @@ const HandoffPanel: React.FC<{
       <h3 id="spectrum-handoff-title">Handoffs</h3>
       <div className="spectrum-columns">
         <div>
-          <h4>STRIKE engagement draft</h4>
-          <p className="spectrum-muted">Creates a STRIKE engagement draft pre-bound to this exposure (Chapter 4 owns everything after).</p>
+          <h4>STRIKE run request (optional pre-fill)</h4>
+          <p className="spectrum-muted">
+            Pre-fills the STRIKE toolbox run composer with a target and context. No engagement or
+            approval chain is created; the run is only ever created in the STRIKE console, where
+            scope and pinning are enforced.
+          </p>
           <div className="form-group">
-            <label htmlFor="spectrum-strike-note">Justification</label>
+            <label htmlFor="spectrum-strike-target">Target (exact hostname, IP, or URL)</label>
+            <input
+              id="spectrum-strike-target"
+              className="form-control"
+              type="text"
+              value={strikeTarget}
+              onChange={(event) => setStrikeTarget(event.target.value)}
+              placeholder="203.0.113.10 or https://host.example/status"
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="spectrum-strike-context">Context (optional)</label>
             <textarea
-              id="spectrum-strike-note"
+              id="spectrum-strike-context"
               className="form-control"
               rows={2}
-              value={strikeNote}
-              onChange={(event) => setStrikeNote(event.target.value)}
-              placeholder="Why controlled validation of this exposure is warranted"
+              value={strikeContext}
+              onChange={(event) => setStrikeContext(event.target.value)}
+              placeholder="Why validation of this exposure is warranted"
             />
           </div>
           <button
             type="button"
             className="btn btn-primary"
-            onClick={requestStrike}
-            disabled={strikeSaving}
+            onClick={prefillStrike}
+            disabled={strikeHandedOff}
           >
-            {strikeSaving ? 'Requesting…' : 'Request STRIKE engagement draft'}
+            {strikeHandedOff ? 'Handed off to STRIKE' : 'Pre-fill STRIKE run'}
           </button>
-          {strikeResult && (
+          {strikeHandedOff && (
             <div role="status" className="spectrum-notice">
-              STRIKE engagement draft queued — request <code>{strikeResult.strike_request.id}</code>, state{' '}
-              <strong>{strikeResult.strike_request.state}</strong>. Results return via the Chapter 3 evidence contract.
+              The STRIKE console is open with this run pre-filled. The run is NOT created until you
+              confirm it there.
             </div>
           )}
           {strikeError && (
             <div role="alert" className="scout-alert">
               {strikeError}
-              <button type="button" onClick={requestStrike}>Retry</button>
             </div>
           )}
         </div>

@@ -250,3 +250,185 @@ def test_reachable_by_scout_requires_compatible_verification_source(
     assert stats["total_assets"] == 3
     # Only the asset with compatible verification_source = 'tempris_cloud' is counted
     assert stats["reachable_by_scout"] == 1
+
+
+TENANT_A = "11111111-1111-1111-1111-111111111111"
+
+from app.collector_registry import collector_registry
+
+
+def _insert_collector(collector_id, tenant_id, enrollment_status="enrolled", operator_status="active"):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO collectors (id, tenant_id, name, description,
+                    enrollment_status, operator_status, public_key)
+                VALUES (%s, %s, %s, 'scanner-metric test collector', %s, %s, 'dGVzdC1rZXk=');
+                """,
+                (str(collector_id), str(tenant_id), f"collector-{collector_id.hex[:8]}",
+                 enrollment_status, operator_status),
+            )
+        conn.commit()
+
+
+def _delete_collector(collector_id):
+    collector_registry.unregister_session(collector_id, reason="test teardown")
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM collectors WHERE id = %s;", (str(collector_id),))
+        conn.commit()
+
+
+class _FakeSocket:
+    def send_text(self, payload):
+        pass
+
+    async def receive_text(self):
+        return ""
+
+
+def _connect_collector(collector_id, tenant_id, nmap_available=True):
+    session = collector_registry.register_session(
+        collector_id=collector_id,
+        tenant_id=tenant_id,
+        websocket=_FakeSocket(),
+        operator_status="active",
+    )
+    session.capabilities = {"nmap": {"available": nmap_available, "version": "7.99"}}
+    return session
+
+
+def _create_internal_asset(client, headers, collector_id=None, target="10.60.0.1"):
+    res = client.post(
+        "/api/assets",
+        json={
+            "name": f"Internal Asset {target}",
+            "asset_type": "server",
+            "target_type": "ip",
+            "target_value": target,
+            "network_scope": "internal",
+            "environment": "production",
+            "criticality": "high",
+            **({"collector_id": str(collector_id)} if collector_id else {}),
+        },
+        headers=headers,
+    )
+    assert res.status_code == 201, res.text
+    return res.json()["id"]
+
+
+def test_connected_capable_collector_satisfies_internal_asset(
+    client,
+    auth_headers_tenant_a_admin,
+):
+    collector_id = uuid.uuid4()
+    _insert_collector(collector_id, TENANT_A)
+    try:
+        _connect_collector(collector_id, uuid.UUID(TENANT_A), nmap_available=True)
+        _create_internal_asset(client, auth_headers_tenant_a_admin, collector_id=collector_id)
+        stats = client.get("/api/assets/stats", headers=auth_headers_tenant_a_admin).json()
+        assert stats["no_scanner_available"] == 0
+    finally:
+        _delete_collector(collector_id)
+
+
+def test_disconnected_collector_leaves_internal_asset_uncovered(
+    client,
+    auth_headers_tenant_a_admin,
+):
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+    collector_id = uuid.uuid4()
+    _insert_collector(collector_id, TENANT_A)
+    try:
+        session = _connect_collector(collector_id, uuid.UUID(TENANT_A))
+        session.last_heartbeat_at = _dt.now(_tz.utc) - _td(seconds=120)
+        _create_internal_asset(client, auth_headers_tenant_a_admin, collector_id=collector_id)
+        stats = client.get("/api/assets/stats", headers=auth_headers_tenant_a_admin).json()
+        assert stats["no_scanner_available"] == 1
+    finally:
+        _delete_collector(collector_id)
+
+
+def test_missing_collector_assignment_counts_as_no_scanner(
+    client,
+    auth_headers_tenant_a_admin,
+):
+    _create_internal_asset(client, auth_headers_tenant_a_admin)
+    stats = client.get("/api/assets/stats", headers=auth_headers_tenant_a_admin).json()
+    assert stats["no_scanner_available"] == 1
+
+
+def test_collector_without_nmap_capability_is_incompatible(
+    client,
+    auth_headers_tenant_a_admin,
+):
+    collector_id = uuid.uuid4()
+    _insert_collector(collector_id, TENANT_A)
+    try:
+        _connect_collector(collector_id, uuid.UUID(TENANT_A), nmap_available=False)
+        _create_internal_asset(client, auth_headers_tenant_a_admin, collector_id=collector_id)
+        stats = client.get("/api/assets/stats", headers=auth_headers_tenant_a_admin).json()
+        assert stats["no_scanner_available"] == 1
+    finally:
+        _delete_collector(collector_id)
+
+
+def test_paused_collector_does_not_satisfy_internal_asset(
+    client,
+    auth_headers_tenant_a_admin,
+):
+    collector_id = uuid.uuid4()
+    _insert_collector(collector_id, TENANT_A, operator_status="paused")
+    try:
+        _connect_collector(collector_id, uuid.UUID(TENANT_A))
+        _create_internal_asset(client, auth_headers_tenant_a_admin, collector_id=collector_id)
+        stats = client.get("/api/assets/stats", headers=auth_headers_tenant_a_admin).json()
+        assert stats["no_scanner_available"] == 1
+    finally:
+        _delete_collector(collector_id)
+
+
+def test_foreign_tenant_collector_never_satisfies_internal_asset(
+    client,
+    auth_headers_tenant_a_admin,
+    auth_headers_tenant_b_admin,
+):
+    # Cross-tenant routing must be refused at creation (existence disclosure guard)...
+    res = client.post(
+        "/api/assets",
+        json={
+            "name": "Internal Asset Cross Tenant",
+            "asset_type": "server",
+            "target_type": "ip",
+            "target_value": "10.70.0.1",
+            "network_scope": "internal",
+            "environment": "production",
+            "criticality": "high",
+            "collector_id": str(uuid.uuid4()),
+        },
+        headers=auth_headers_tenant_a_admin,
+    )
+    assert res.status_code == 404
+
+    # ...and even a hand-crafted cross-tenant assignment never satisfies the metric,
+    # even though that collector is connected and capable in tenant B.
+    foreign_collector_id = uuid.uuid4()
+    _insert_collector(foreign_collector_id, "22222222-2222-2222-2222-222222222222")
+    try:
+        _connect_collector(foreign_collector_id, uuid.UUID("22222222-2222-2222-2222-222222222222"))
+        asset_id = _create_internal_asset(
+            client, auth_headers_tenant_b_admin, collector_id=foreign_collector_id
+        )
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE assets SET collector_id = %s, tenant_id = %s WHERE id = %s;",
+                    (str(foreign_collector_id), TENANT_A, asset_id),
+                )
+            conn.commit()
+        stats = client.get("/api/assets/stats", headers=auth_headers_tenant_a_admin).json()
+        assert stats["no_scanner_available"] == 1
+    finally:
+        _delete_collector(foreign_collector_id)
