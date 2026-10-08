@@ -75,7 +75,7 @@ export interface ScoutSourceHealth extends ScoutEngineReadiness {
   completed_at: string | null;
   detail?: string | null;
   sanitized_output_excerpt?: string | null;
-  parse_stats?: { total_lines: number; parsed_lines: number; skipped_lines: number } | null;
+  parse_stats?: { total_lines: number; parsed_lines: number; repaired_lines?: number; skipped_lines: number } | null;
   observation_count?: number | null;
 }
 

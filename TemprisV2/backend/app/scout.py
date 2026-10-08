@@ -344,12 +344,33 @@ def parse_nuclei_jsonl(payload: bytes) -> list[tuple[str, dict]]:
     return parse_nuclei_jsonl_with_stats(payload)[0]
 
 
+_INVALID_UNICODE_ESCAPE = re.compile(r"\\u(?![0-9a-fA-F]{4})")
+_RAW_CONTROL_CHAR = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _repair_nuclei_line(raw_line: str) -> Optional[dict]:
+    """One-shot repair for real-world Nuclei JSONL lines whose string values
+    carry JSON-breaking content (invalid \\uXXXX escapes, raw control bytes
+    from scraped responses). Recovery keeps the event parseable; it never
+    invents fields. Returns None when the line is genuinely unparseable."""
+    candidate = raw_line.lstrip("﻿")
+    candidate = _INVALID_UNICODE_ESCAPE.sub(r"\\\\u", candidate)
+    candidate = _RAW_CONTROL_CHAR.sub(lambda m: "\\u%04x" % ord(m.group(0)), candidate)
+    try:
+        event = json.loads(candidate)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return event if isinstance(event, dict) else None
+
+
 def parse_nuclei_jsonl_with_stats(payload: bytes) -> tuple[list[tuple[str, dict]], dict]:
     """Identical parsing to parse_nuclei_jsonl plus line telemetry: counts over
-    nonblank lines only (skipped = malformed JSON or non-dict)."""
+    nonblank lines only (skipped = unrepairable malformed JSON or non-dict;
+    repaired = lines recovered by one-shot repair before observation)."""
     observations = []
     total_lines = 0
     parsed_lines = 0
+    repaired_lines = 0
     skipped_lines = 0
     for raw_line in payload.decode("utf-8", errors="replace").splitlines():
         if not raw_line.strip():
@@ -358,10 +379,16 @@ def parse_nuclei_jsonl_with_stats(payload: bytes) -> tuple[list[tuple[str, dict]
         try:
             event = json.loads(raw_line)
         except json.JSONDecodeError:
-            # One malformed Nuclei line (observed: invalid \uXXXX escape in a
-            # matched URL) must not discard the rest of the scan output.
-            skipped_lines += 1
-            continue
+            # Real Nuclei lines embedding scraped response bytes (invalid
+            # \uXXXX escapes, raw control chars) must be recovered rather than
+            # silently discarded — 0 parsed must never masquerade as a clean
+            # scan.
+            repaired = _repair_nuclei_line(raw_line)
+            if repaired is None:
+                skipped_lines += 1
+                continue
+            event = repaired
+            repaired_lines += 1
         if not isinstance(event, dict):
             skipped_lines += 1
             continue
@@ -375,6 +402,7 @@ def parse_nuclei_jsonl_with_stats(payload: bytes) -> tuple[list[tuple[str, dict]
     stats = {
         "total_lines": total_lines,
         "parsed_lines": parsed_lines,
+        "repaired_lines": repaired_lines,
         "skipped_lines": skipped_lines,
     }
     return observations, stats

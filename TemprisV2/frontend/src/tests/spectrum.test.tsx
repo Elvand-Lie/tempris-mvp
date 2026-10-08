@@ -293,7 +293,10 @@ describe('SPECTRUM exposure detail', () => {
     expect(screen.getByText(/Max FINAL TES/)).toBeInTheDocument();
     expect(screen.getByText(/UNSCOREABLE \(counted\)/)).toBeInTheDocument();
     expect(screen.getByText('Intrinsic (CVSS/SSS)')).toBeInTheDocument();
+    // Decomposition values render at exactly 2dp (raw mock: intrinsic 9.8, contribution 2.90)
+    expect(screen.getByText('9.80')).toBeInTheDocument();
     expect(screen.getByText('2.90')).toBeInTheDocument();
+    expect(screen.queryByText(/9\.8\d{3,}/)).not.toBeInTheDocument();
     expect(screen.getByText('Exploit reality')).toBeInTheDocument();
     expect(screen.getAllByText('known', { selector: 'span' })).toHaveLength(5);
     expect(api.spectrum.getExposureDetail).toHaveBeenCalledWith(EXPOSURE_ID);

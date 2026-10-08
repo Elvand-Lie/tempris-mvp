@@ -239,7 +239,7 @@ const TesPanel: React.FC<{ tes: TesCurrentPayload }> = ({ tes }) => (
       <span className={`badge badge-spectrum-tes-${tes.state}`}>{tes.state}</span>
       <span className="spectrum-muted">
         formula {tes.formula_version} · coverage {tes.known_axes}
-        {tes.known_weight && <> · known weight {decimalText(tes.known_weight)}</>} · as of {stamp(tes.source_view.as_of)}
+        {tes.known_weight && <> · known weight {tes2dp(tes.known_weight)}</>} · as of {stamp(tes.source_view.as_of)}
       </span>
     </div>
 
@@ -293,10 +293,10 @@ const DecompositionRow: React.FC<{ row: TesDecompositionRow }> = ({ row }) => (
   <>
     <tr>
       <th scope="row">{AXIS_LABELS[row.axis] ?? row.axis}</th>
-      <td>{decimalText(row.raw_value) ?? '—'}</td>
-      <td>{decimalText(row.base_weight)}</td>
-      <td>{decimalText(row.effective_weight) ?? <span className="spectrum-muted">not applied</span>}</td>
-      <td>{decimalText(row.contribution) ?? <span className="spectrum-muted">none</span>}</td>
+      <td>{tes2dp(row.raw_value) ?? '—'}</td>
+      <td>{tes2dp(row.base_weight)}</td>
+      <td>{tes2dp(row.effective_weight) ?? <span className="spectrum-muted">not applied</span>}</td>
+      <td>{tes2dp(row.contribution) ?? <span className="spectrum-muted">none</span>}</td>
       <td>
         <span className={`badge badge-spectrum-axis-${row.state}`}>{row.state}</span>
       </td>
@@ -321,7 +321,7 @@ const ExploitRealityExtras: React.FC<{ row: TesDecompositionRow }> = ({ row }) =
             <li><strong>Sources:</strong> {row.selected_sources.join(', ')}</li>
           )}
           {row.epss_freshness && (
-            <li><strong>EPSS:</strong> {decimalText(row.epss_value ?? null) ?? 'no value'} · {row.epss_freshness}</li>
+            <li><strong>EPSS:</strong> {tes2dp(row.epss_value ?? null) ?? 'no value'} · {row.epss_freshness}</li>
           )}
           {row.kev_state && (
             <li>

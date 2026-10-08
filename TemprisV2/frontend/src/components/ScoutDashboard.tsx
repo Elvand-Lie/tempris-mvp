@@ -400,7 +400,14 @@ export const ScoutDashboard: React.FC<Props> = ({ assets, authorizations, onOpen
                 {health.detail && <small className="scout-error">{health.detail}</small>}
                 {health.engine === 'nuclei' && health.parse_stats && (
                   <small data-testid="nuclei-parse-stats">
-                    Parsed {health.parse_stats.parsed_lines}/{health.parse_stats.total_lines} lines · {health.parse_stats.skipped_lines} skipped · {health.observation_count ?? 0} persisted observations
+                    Parsed {health.parse_stats.parsed_lines}/{health.parse_stats.total_lines} lines{health.parse_stats.repaired_lines ? ` · ${health.parse_stats.repaired_lines} repaired` : ''} · {health.parse_stats.skipped_lines} skipped · {health.observation_count ?? 0} persisted observations
+                  </small>
+                )}
+                {health.engine === 'nuclei' && health.parse_stats
+                  && health.parse_stats.total_lines > 0
+                  && health.parse_stats.parsed_lines === 0 && (
+                  <small className="scout-error" data-testid="nuclei-ingestion-failure">
+                    Ingestion failure — all {health.parse_stats.total_lines} result lines were unparseable, so 0 observations were recorded. Scan execution success does not imply ingestion success; treat this result as incomplete.
                   </small>
                 )}
                 {health.engine === 'nuclei' && health.sanitized_output_excerpt && (
