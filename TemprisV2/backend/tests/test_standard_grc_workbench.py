@@ -494,6 +494,39 @@ class TestEvidenceLifecycle:
         )
         assert dl.status_code == 200
 
+    def test_restore_returns_a_withdrawn_attachment_to_current(self, client, analyst_headers):
+        control = _controls(client, analyst_headers)[5]
+        evidence = _attach_evidence(client, analyst_headers, control["control_id"])
+        wd = client.post(
+            f"/api/standard/evidence/{evidence['id']}/withdraw",
+            json={"reason": "mistake"},
+            headers=analyst_headers,
+        )
+        assert wd.status_code == 200
+        current = client.get(
+            f"/api/standard/evidence?control_id={control['control_id']}",
+            headers=analyst_headers,
+        ).json()["evidence"]
+        assert current == []
+
+        rs = client.post(
+            f"/api/standard/evidence/{evidence['id']}/restore",
+            headers=analyst_headers,
+        )
+        assert rs.status_code == 200, rs.text
+        current = client.get(
+            f"/api/standard/evidence?control_id={control['control_id']}",
+            headers=analyst_headers,
+        ).json()["evidence"]
+        assert [e["id"] for e in current] == [evidence["id"]]
+        assert current[0]["withdrawn_at"] is None
+
+        rs_again = client.post(
+            f"/api/standard/evidence/{evidence['id']}/restore",
+            headers=analyst_headers,
+        )
+        assert rs_again.status_code == 409
+
     def test_tenant_isolation_on_withdraw(self, client, analyst_headers,
                                           auth_headers_tenant_b_admin):
         control = _controls(client, analyst_headers)[5]

@@ -398,6 +398,12 @@ export const standardApi = {
       { method: 'POST', body: JSON.stringify({ reason }) },
     ),
 
+  restoreEvidence: (evidenceId: string) =>
+    domainRequest<{ evidence: Record<string, unknown> }>(
+      `${BASE}/evidence/${evidenceId}/restore`,
+      { method: 'POST' },
+    ),
+
   replaceEvidence: (
     evidenceId: string,
     body: { title: string; media_type: string; content_base64: string; reason?: string },

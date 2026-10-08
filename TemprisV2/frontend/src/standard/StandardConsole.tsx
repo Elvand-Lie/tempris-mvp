@@ -366,6 +366,19 @@ export const StandardConsole: React.FC = () => {
     } catch (cause) { fail(cause); }
   }, [fail]);
 
+  const restoreEvidenceById = useCallback(async (control: FlatControl, evidenceId: string) => {
+    setError(null); setMessage(null);
+    try {
+      await standardApi.restoreEvidence(evidenceId);
+      setMessage('Withdrawn evidence restored — it is current evidence again.');
+      const data = await standardApi.listEvidence(control.control_id);
+      setEvidence((prior) => [
+        ...prior.filter((e) => e.control_id !== control.control_id),
+        ...data.evidence,
+      ]);
+    } catch (cause) { fail(cause); }
+  }, [fail]);
+
   const replaceEvidenceById = useCallback(async (control: FlatControl, evidenceId: string, file: File, title: string, mediaType: string, reason: string) => {
     setError(null); setMessage(null);
     try {
@@ -608,6 +621,7 @@ export const StandardConsole: React.FC = () => {
             onSignOff={(capacity, label) => control.assessment_id && void signOff(control.assessment_id, capacity, label)}
             onAttachEvidence={(file, title, mediaType) => void attachEvidence(control, file, title, mediaType)}
             onWithdrawEvidence={(evidenceId, reason) => void withdrawEvidenceById(control, evidenceId, reason)}
+            onRestoreEvidence={(evidenceId) => void restoreEvidenceById(control, evidenceId)}
             onReplaceEvidence={(evidenceId, file, title, mediaType, reason) => void replaceEvidenceById(control, evidenceId, file, title, mediaType, reason)}
             onRequestException={() => setDrawer({ kind: 'exceptionNew', controlId: control.control_id })}
             onOpenException={(id) => setDrawer({ kind: 'exception', exceptionId: id })}
@@ -922,10 +936,11 @@ const ControlDrawer: React.FC<{
   onSignOff: (capacity: 'end_user' | 'pic', label: string) => void;
   onAttachEvidence: (file: File, title: string, mediaType: string) => void;
   onWithdrawEvidence: (evidenceId: string, reason: string) => void;
+  onRestoreEvidence: (evidenceId: string) => void;
   onReplaceEvidence: (evidenceId: string, file: File, title: string, mediaType: string, reason: string) => void;
   onRequestException: () => void;
   onOpenException: (id: string) => void;
-}> = ({ control, evidence, exceptions, onClose, onRecordAssessment, onSignOff, onAttachEvidence, onWithdrawEvidence, onReplaceEvidence, onRequestException, onOpenException }) => {
+}> = ({ control, evidence, exceptions, onClose, onRecordAssessment, onSignOff, onAttachEvidence, onWithdrawEvidence, onRestoreEvidence, onReplaceEvidence, onRequestException, onOpenException }) => {
   // Prefill from the persisted assessment: the saved draft truth (saved_status/
   // saved_notes), never a default that pretends the control is compliant.
   const [status, setStatus] = useState(
@@ -938,6 +953,17 @@ const ControlDrawer: React.FC<{
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [replaceFile, setReplaceFile] = useState<File | null>(null);
+  // Withdrawn tombstones for this control (audit-retained; restorable while draft).
+  const [withdrawnRows, setWithdrawnRows] = useState<StandardEvidence[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (control.assessment_state === 'signed') return;
+    standardApi.listEvidence(control.control_id, true).then((data) => {
+      if (!cancelled) setWithdrawnRows(data.evidence.filter((e) => e.withdrawn_at));
+    }).catch(() => { /* audit view is optional */ });
+    return () => { cancelled = true; };
+  }, [control.control_id, control.assessment_state, evidence]);
 
   const wrap = (fn: () => Promise<void> | void) => {
     setBusy(true);
@@ -1040,9 +1066,12 @@ const ControlDrawer: React.FC<{
                     type="button"
                     className="btn btn-secondary btn-sm"
                     disabled={busy}
-                    title="Withdraw with a mandatory reason (audit trail retained)"
+                    title="Withdraw with a mandatory reason (audit trail retained; restorable while the assessment is a draft)"
                     onClick={() => {
-                      const reason = window.prompt(`Withdraw "${e.title}" — reason (mandatory):`);
+                      const reason = window.prompt(
+                        `Withdraw "${e.title}" — reason (mandatory).\n`
+                        + 'Note: the control will have NO current evidence until you upload or restore one. The row is tombstoned (never deleted) and can be restored while the assessment is a draft.',
+                      );
                       if (reason && reason.trim()) wrap(() => onWithdrawEvidence(e.id, reason));
                     }}
                   >
@@ -1053,6 +1082,26 @@ const ControlDrawer: React.FC<{
             </span>
           </div>
         ))}
+        {evidenceEditable && withdrawnRows.length > 0 && (
+          <div className="std-line">
+            <span className="std-muted">
+              Withdrawn ({withdrawnRows.length}) — retained for audit; restore to make one current again:
+            </span>
+            {withdrawnRows.map((e) => (
+              <div className="std-line" key={e.id}>
+                <span className="std-muted">{e.title} · withdrawn {e.withdrawn_reason ? `— ${e.withdrawn_reason}` : ''}</span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={busy}
+                  onClick={() => wrap(() => onRestoreEvidence(e.id))}
+                >
+                  Restore
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         {evidenceEditable && evidence.length > 0 && (
           <div className="form-group">
             <label htmlFor="std-evidence-replace-file">Replacement file (choose, then press Replace on an evidence row)</label>

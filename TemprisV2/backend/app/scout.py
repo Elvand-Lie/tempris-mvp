@@ -961,7 +961,13 @@ def _execute_central_job(job: dict) -> None:
             _fail_job(job, "authorization_invalid", str(exc))
             return
         if result.state != "succeeded":
-            _finish_tool_run(job, tool_runs[engine], result)
+            # A failed engine run must be diagnosable: persist its sanitized
+            # stdout (e.g. a nuclei startup error) as the excerpt.
+            failure_excerpt = (
+                _sanitize_nuclei_stdout(result.stdout.decode("utf-8", errors="replace"))
+                if engine == "nuclei" and result.stdout else None
+            )
+            _finish_tool_run(job, tool_runs[engine], result, sanitized_excerpt=failure_excerpt)
             _fail_job(job, f"tool_{result.state}", f"{engine} scan: {result.state}")
             return
         parse_stats = None

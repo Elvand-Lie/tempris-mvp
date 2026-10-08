@@ -782,6 +782,40 @@ def withdraw_evidence(
         return dict(row)
 
 
+def restore_evidence(
+    conn: psycopg.Connection,
+    tenant_id: uuid.UUID,
+    evidence_id: uuid.UUID,
+    *,
+    actor_id: str,
+    actor_role: str,
+) -> dict:
+    """Clear a withdrawal tombstone (draft-controlled evidence only). The row
+    was never deleted, so restoring just drops the tombstone; the audit trail
+    keeps both the withdrawal and the restoration."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        evidence = _get_editable_evidence(cur, tenant_id, evidence_id)
+        cur.execute(
+            """
+            UPDATE standard_control_evidence
+            SET withdrawn_at = NULL, withdrawn_by = NULL, withdrawn_reason = NULL
+            WHERE tenant_id = %s AND id = %s AND withdrawn_at IS NOT NULL
+            RETURNING id, control_id;
+            """,
+            (str(tenant_id), str(evidence_id)),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise StandardConflictError(f"Evidence {evidence_id} is not withdrawn")
+        record_audit_event(
+            conn=conn, tenant_id=tenant_id, actor_id=actor_id,
+            actor_role=actor_role, event_name="standard.evidence_restored",
+            asset_id=None,
+            details={"evidence_id": str(evidence_id), "sha256": evidence["sha256"]},
+        )
+        return dict(row)
+
+
 def replace_evidence(
     conn: psycopg.Connection,
     tenant_id: uuid.UUID,

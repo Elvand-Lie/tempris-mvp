@@ -447,6 +447,27 @@ def withdraw_evidence(
 
 
 @router.post(
+    "/evidence/{evidence_id}/restore",
+    status_code=status.HTTP_200_OK,
+    summary="Restore a withdrawn evidence attachment (draft-controlled only; audited)",
+)
+def restore_evidence(
+    evidence_id: uuid.UUID,
+    auth: AuthContext = Depends(_require_analyst),
+):
+    try:
+        with get_db_connection() as conn:
+            row = service.restore_evidence(
+                conn, auth.tenant_id, evidence_id,
+                actor_id=auth.actor_id, actor_role=auth.role,
+            )
+            conn.commit()
+            return _jsonify({"evidence": row})
+    except Exception as e:
+        _raise_domain_error(e)
+
+
+@router.post(
     "/evidence/{evidence_id}/replace",
     status_code=status.HTTP_201_CREATED,
     summary="Replace evidence with a newly versioned attachment (old row tombstoned, links inherited)",
