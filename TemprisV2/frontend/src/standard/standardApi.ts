@@ -14,6 +14,15 @@ export interface StandardControl {
   status: string;
   assessment_id: string | null;
   assessment_state: string | null;
+  /** The saved draft truth — a pending draft is NOT signed compliance. */
+  saved_status?: string | null;
+  saved_notes?: string | null;
+  assessment_updated_at?: string | null;
+  assessment_signed_at?: string | null;
+  signoffs?: {
+    end_user: { by: string | null; at: string | null };
+    pic: { by: string | null; at: string | null };
+  } | null;
 }
 
 export interface StandardCompliance {
@@ -120,6 +129,10 @@ export interface StandardEvidence {
   sha256: string;
   uploaded_by: string;
   created_at: string;
+  withdrawn_at?: string | null;
+  withdrawn_by?: string | null;
+  withdrawn_reason?: string | null;
+  replaces_evidence_id?: string | null;
 }
 
 export interface StandardEvidenceBlob {
@@ -363,9 +376,35 @@ export const standardApi = {
       { method: 'POST', body: JSON.stringify({ decision }) },
     ),
 
-  listEvidence: (controlId?: string) =>
+  listEvidence: (controlId?: string, includeWithdrawn?: boolean) =>
     domainRequest<{ evidence: StandardEvidence[] }>(
-      `${BASE}/evidence${controlId ? `?control_id=${encodeURIComponent(controlId)}` : ''}`,
+      `${BASE}/evidence${controlId || includeWithdrawn
+        ? `?${[
+            controlId ? `control_id=${encodeURIComponent(controlId)}` : '',
+            includeWithdrawn ? 'include_withdrawn=true' : '',
+          ].filter(Boolean).join('&')}`
+        : ''}`,
+    ),
+
+  reassessAssessment: (controlId: string, status: string, notes?: string) =>
+    domainRequest<{ assessment: Record<string, unknown> }>(`${BASE}/assessments/reassess`, {
+      method: 'POST',
+      body: JSON.stringify({ control_id: controlId, status, notes: notes || null }),
+    }),
+
+  withdrawEvidence: (evidenceId: string, reason: string) =>
+    domainRequest<{ evidence: Record<string, unknown> }>(
+      `${BASE}/evidence/${evidenceId}/withdraw`,
+      { method: 'POST', body: JSON.stringify({ reason }) },
+    ),
+
+  replaceEvidence: (
+    evidenceId: string,
+    body: { title: string; media_type: string; content_base64: string; reason?: string },
+  ) =>
+    domainRequest<{ evidence: StandardEvidence }>(
+      `${BASE}/evidence/${evidenceId}/replace`,
+      { method: 'POST', body: JSON.stringify(body) },
     ),
 
   /** base64 JSON upload — the backend's existing evidence shape (typed

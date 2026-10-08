@@ -342,13 +342,51 @@ export const StandardConsole: React.FC = () => {
     setError(null); setMessage(null);
     try {
       if (control.assessment_id) {
-        await standardApi.archiveAssessment(control.assessment_id);
+        // Atomic reassessment: archive + create commit together or not at all.
+        await standardApi.reassessAssessment(control.control_id, status, notes.trim() || undefined);
+        setMessage(`Reassessment recorded for ${control.control_code} (previous cycle archived atomically; draft — completed by dual sign-off).`);
+      } else {
+        await standardApi.createAssessment(control.control_id, status, notes.trim() || undefined);
+        setMessage(`Assessment recorded for ${control.control_code} (draft — completed by dual sign-off).`);
       }
-      await standardApi.createAssessment(control.control_id, status, notes.trim() || undefined);
-      setMessage(`Assessment recorded for ${control.control_code} (draft — completed by dual sign-off).`);
       await reloadCore();
     } catch (cause) { fail(cause); }
   }, [reloadCore, fail]);
+
+  const withdrawEvidenceById = useCallback(async (control: FlatControl, evidenceId: string, reason: string) => {
+    setError(null); setMessage(null);
+    try {
+      await standardApi.withdrawEvidence(evidenceId, reason);
+      setMessage('Evidence withdrawn (tombstoned with reason; retained for audit — never deleted).');
+      const data = await standardApi.listEvidence(control.control_id);
+      setEvidence((prior) => [
+        ...prior.filter((e) => e.control_id !== control.control_id),
+        ...data.evidence,
+      ]);
+    } catch (cause) { fail(cause); }
+  }, [fail]);
+
+  const replaceEvidenceById = useCallback(async (control: FlatControl, evidenceId: string, file: File, title: string, mediaType: string, reason: string) => {
+    setError(null); setMessage(null);
+    try {
+      const buffer = await file.arrayBuffer();
+      let binary = '';
+      const bytes = new Uint8Array(buffer);
+      for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+      await standardApi.replaceEvidence(evidenceId, {
+        title: title.trim() || file.name,
+        media_type: mediaType,
+        content_base64: btoa(binary),
+        reason: reason.trim() || undefined,
+      });
+      setMessage('Evidence replaced with a new version (old attachment tombstoned, links inherited).');
+      const data = await standardApi.listEvidence(control.control_id);
+      setEvidence((prior) => [
+        ...prior.filter((e) => e.control_id !== control.control_id),
+        ...data.evidence,
+      ]);
+    } catch (cause) { fail(cause); }
+  }, [fail]);
 
   const signOff = useCallback(async (assessmentId: string, capacity: 'end_user' | 'pic', label: string) => {
     setError(null); setMessage(null);
@@ -569,6 +607,8 @@ export const StandardConsole: React.FC = () => {
             onRecordAssessment={(status, notes) => void recordAssessment(control, status, notes)}
             onSignOff={(capacity, label) => control.assessment_id && void signOff(control.assessment_id, capacity, label)}
             onAttachEvidence={(file, title, mediaType) => void attachEvidence(control, file, title, mediaType)}
+            onWithdrawEvidence={(evidenceId, reason) => void withdrawEvidenceById(control, evidenceId, reason)}
+            onReplaceEvidence={(evidenceId, file, title, mediaType, reason) => void replaceEvidenceById(control, evidenceId, file, title, mediaType, reason)}
             onRequestException={() => setDrawer({ kind: 'exceptionNew', controlId: control.control_id })}
             onOpenException={(id) => setDrawer({ kind: 'exception', exceptionId: id })}
           />
@@ -881,19 +921,50 @@ const ControlDrawer: React.FC<{
   onRecordAssessment: (status: string, notes: string) => void;
   onSignOff: (capacity: 'end_user' | 'pic', label: string) => void;
   onAttachEvidence: (file: File, title: string, mediaType: string) => void;
+  onWithdrawEvidence: (evidenceId: string, reason: string) => void;
+  onReplaceEvidence: (evidenceId: string, file: File, title: string, mediaType: string, reason: string) => void;
   onRequestException: () => void;
   onOpenException: (id: string) => void;
-}> = ({ control, evidence, exceptions, onClose, onRecordAssessment, onSignOff, onAttachEvidence, onRequestException, onOpenException }) => {
-  const [status, setStatus] = useState(control.status === 'not_assessed' ? 'compliant' : control.status);
-  const [notes, setNotes] = useState('');
+}> = ({ control, evidence, exceptions, onClose, onRecordAssessment, onSignOff, onAttachEvidence, onWithdrawEvidence, onReplaceEvidence, onRequestException, onOpenException }) => {
+  // Prefill from the persisted assessment: the saved draft truth (saved_status/
+  // saved_notes), never a default that pretends the control is compliant.
+  const [status, setStatus] = useState(
+    control.saved_status || (control.status !== 'not_assessed' ? control.status : 'compliant'),
+  );
+  const [notes, setNotes] = useState(control.saved_notes || '');
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [evidenceTitle, setEvidenceTitle] = useState('');
   const [mediaType, setMediaType] = useState(EVIDENCE_MEDIA_TYPES[0]);
   const [busy, setBusy] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [replaceFile, setReplaceFile] = useState<File | null>(null);
 
   const wrap = (fn: () => Promise<void> | void) => {
     setBusy(true);
     Promise.resolve(fn()).finally(() => setBusy(false));
+  };
+
+  const evidenceEditable = control.assessment_state !== 'signed';
+
+  const openEvidence = async (evidenceId: string, kind: 'preview' | 'download') => {
+    setLocalError(null);
+    try {
+      const blob = kind === 'preview'
+        ? await standardApi.previewEvidence(evidenceId)
+        : await standardApi.downloadEvidence(evidenceId);
+      if (kind === 'preview' && blob.inline) {
+        window.open(blob.url, '_blank', 'noopener');
+      } else {
+        const a = document.createElement('a');
+        a.href = blob.url;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+    } catch (cause) {
+      setLocalError(humanizeStandardError(cause instanceof Error ? cause.message : String(cause)));
+    }
   };
 
   return (
@@ -931,7 +1002,7 @@ const ControlDrawer: React.FC<{
             disabled={busy}
             onClick={() => wrap(() => onRecordAssessment(status, notes))}
           >
-            {control.assessment_id ? 'Re-assess (archives current)' : 'Record assessment'}
+            {control.assessment_id ? 'Re-assess (replaces current atomically)' : 'Create assessment'}
           </button>
         </div>
       </DrawerSection>
@@ -940,12 +1011,59 @@ const ControlDrawer: React.FC<{
         {evidence.length === 0 && (
           <p className="std-muted">No evidence attached. Upload a file that shows this control is met.</p>
         )}
+        {localError && <p className="std-error" role="alert">{localError}</p>}
         {evidence.map((e) => (
           <div className="std-line" key={e.id}>
             <span className="std-strong">{e.title}</span>
-            <span className="std-muted">{e.media_type} · {e.size_bytes} bytes · {shortTime(e.created_at)}</span>
+            <span className="std-muted">
+              {e.media_type} · {e.size_bytes} bytes · {shortTime(e.created_at)}
+              {e.replaces_evidence_id ? ' · replaced version' : ''}
+            </span>
+            <span className="std-actions">
+              <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void openEvidence(e.id, 'preview')}>Preview</button>
+              <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void openEvidence(e.id, 'download')}>Download</button>
+              {evidenceEditable && (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    disabled={busy || !replaceFile}
+                    title={replaceFile ? 'Upload a new version; the old attachment is tombstoned with its history kept' : 'Choose a replacement file below the evidence list first'}
+                    onClick={() => {
+                      if (!replaceFile) return;
+                      wrap(() => onReplaceEvidence(e.id, replaceFile, e.title, e.media_type, ''));
+                    }}
+                  >
+                    Replace
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    disabled={busy}
+                    title="Withdraw with a mandatory reason (audit trail retained)"
+                    onClick={() => {
+                      const reason = window.prompt(`Withdraw "${e.title}" — reason (mandatory):`);
+                      if (reason && reason.trim()) wrap(() => onWithdrawEvidence(e.id, reason));
+                    }}
+                  >
+                    Withdraw
+                  </button>
+                </>
+              )}
+            </span>
           </div>
         ))}
+        {evidenceEditable && evidence.length > 0 && (
+          <div className="form-group">
+            <label htmlFor="std-evidence-replace-file">Replacement file (choose, then press Replace on an evidence row)</label>
+            <input
+              id="std-evidence-replace-file"
+              type="file"
+              className="form-control"
+              onChange={(e) => setReplaceFile(e.target.files?.[0] || null)}
+            />
+          </div>
+        )}
         <div className="form-group">
           <label htmlFor="std-evidence-file">File</label>
           <input
@@ -981,8 +1099,18 @@ const ControlDrawer: React.FC<{
               ? <Chip label="Signed" chipClass="std-chip-success" />
               : <Chip label="Pending" chipClass="std-chip-warning" />}
           </dd>
-          <dt>Who signed</dt>
-          <dd className="std-muted">{UNAVAILABLE}</dd>
+          <dt>End-user capacity</dt>
+          <dd>
+            {control.signoffs?.end_user?.by
+              ? <span>{control.signoffs.end_user.by}{control.signoffs.end_user.at ? ` · ${shortTime(control.signoffs.end_user.at)}` : ''} <Chip label="Complete" chipClass="std-chip-success" /></span>
+              : <span className="std-muted">Pending — no signature yet</span>}
+          </dd>
+          <dt>PIC capacity</dt>
+          <dd>
+            {control.signoffs?.pic?.by
+              ? <span>{control.signoffs.pic.by}{control.signoffs.pic.at ? ` · ${shortTime(control.signoffs.pic.at)}` : ''} <Chip label="Complete" chipClass="std-chip-success" /></span>
+              : <span className="std-muted">Pending — no signature yet</span>}
+          </dd>
         </dl>
         <div className="std-actions">
           <button type="button" className="btn btn-secondary" disabled={!control.assessment_id || busy} title={control.assessment_id ? undefined : 'Record an assessment first'} onClick={() => wrap(() => onSignOff('end_user', 'End-user sign-off'))}>
@@ -992,7 +1120,7 @@ const ControlDrawer: React.FC<{
             Sign off as PIC
           </button>
         </div>
-        <p className="std-muted std-note">Dual sign-off: two DIFFERENT people must hold end-user and PIC capacity — the backend refuses the same actor twice.</p>
+        <p className="std-muted std-note">Dual sign-off: two DIFFERENT people must hold end-user and PIC capacity — the backend refuses the same actor twice; obtain the second signature from a different actor to complete the sign-off.</p>
       </DrawerSection>
 
       <DrawerSection title="Exceptions">
@@ -1013,7 +1141,16 @@ const ControlDrawer: React.FC<{
       </DrawerSection>
 
       <DrawerSection title="History">
-        <p className="std-muted">{UNAVAILABLE}</p>
+        {control.assessment_id ? (
+          <dl className="std-kv">
+            <dt>Last saved</dt>
+            <dd>{control.assessment_updated_at ? shortTime(control.assessment_updated_at) : UNAVAILABLE}</dd>
+            <dt>Signed at</dt>
+            <dd>{control.assessment_signed_at ? shortTime(control.assessment_signed_at) : <span className="std-muted">Not signed yet</span>}</dd>
+          </dl>
+        ) : (
+          <p className="std-muted">No assessment recorded for this control yet.</p>
+        )}
       </DrawerSection>
     </DrawerShell>
   );

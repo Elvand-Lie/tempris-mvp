@@ -288,3 +288,219 @@ class TestIncidentReportDraft:
             headers=analyst_headers,
         )
         assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# STANDARD-01/02/04: draft prefill, evidence lifecycle, atomic reassessment
+# ---------------------------------------------------------------------------
+
+def _attach_evidence(client, headers, control_id, *, title="ev1", assessment_id=None):
+    body = {
+        "control_id": control_id,
+        "assessment_id": assessment_id,
+        "title": title,
+        "media_type": "text/plain",
+        "content_base64": base64.b64encode(b"evidence-bytes").decode(),
+    }
+    r = client.post("/api/standard/evidence", json=body, headers=headers)
+    assert r.status_code == 201, r.text
+    return r.json()["evidence"]
+
+
+def _find_control(controls, control_id):
+    return next(c for c in controls if c["control_id"] == control_id)
+
+
+class TestDraftPrefill:
+    def test_saved_draft_status_and_notes_are_exposed(self, client, analyst_headers):
+        control = _controls(client, analyst_headers)[2]
+        r = client.post(
+            "/api/standard/assessments",
+            json={"control_id": control["control_id"], "status": "partial", "notes": "Test"},
+            headers=analyst_headers,
+        )
+        assert r.status_code == 201, r.text
+
+        saved = _find_control(_controls(client, analyst_headers), control["control_id"])
+        assert saved["assessment_state"] == "draft"
+        assert saved["saved_status"] == "partial"
+        assert saved["saved_notes"] == "Test"
+        # A pending draft is NOT signed compliance.
+        assert saved["status"] == "not_assessed"
+        assert saved["signoffs"]["end_user"]["by"] is None
+        assert saved["signoffs"]["pic"]["by"] is None
+
+
+class TestAtomicReassess:
+    def test_reassess_replaces_the_live_assessment(self, client, analyst_headers):
+        control = _controls(client, analyst_headers)[3]
+        r = client.post(
+            "/api/standard/assessments",
+            json={"control_id": control["control_id"], "status": "partial", "notes": "v1"},
+            headers=analyst_headers,
+        )
+        assert r.status_code == 201, r.text
+        original_id = r.json()["assessment"]["id"]
+
+        r2 = client.post(
+            "/api/standard/assessments/reassess",
+            json={"control_id": control["control_id"], "status": "compliant", "notes": "v2"},
+            headers=analyst_headers,
+        )
+        assert r2.status_code == 201, r2.text
+
+        saved = _find_control(_controls(client, analyst_headers), control["control_id"])
+        assert saved["assessment_state"] == "draft"
+        assert saved["saved_status"] == "compliant"
+        assert saved["saved_notes"] == "v2"
+        assert saved["assessment_id"] != original_id
+
+    def test_failed_reassess_keeps_the_previous_assessment(self, client, analyst_headers):
+        control = _controls(client, analyst_headers)[3]
+        r = client.post(
+            "/api/standard/assessments",
+            json={"control_id": control["control_id"], "status": "partial", "notes": "keep-me"},
+            headers=analyst_headers,
+        )
+        assert r.status_code == 201, r.text
+        original_id = r.json()["assessment"]["id"]
+
+        bad = client.post(
+            "/api/standard/assessments/reassess",
+            json={"control_id": control["control_id"], "status": "excellent"},
+            headers=analyst_headers,
+        )
+        assert bad.status_code == 422
+
+        saved = _find_control(_controls(client, analyst_headers), control["control_id"])
+        assert saved["assessment_id"] == original_id
+        assert saved["saved_status"] == "partial"
+        assert saved["saved_notes"] == "keep-me"
+
+    def test_reassess_without_live_assessment_is_404(self, client, analyst_headers):
+        control = _controls(client, analyst_headers)[4]
+        r = client.post(
+            "/api/standard/assessments/reassess",
+            json={"control_id": control["control_id"], "status": "compliant"},
+            headers=analyst_headers,
+        )
+        assert r.status_code == 404
+
+
+class TestEvidenceLifecycle:
+    def test_withdraw_requires_reason_and_tombstones(self, client, analyst_headers):
+        control = _controls(client, analyst_headers)[5]
+        evidence = _attach_evidence(client, analyst_headers, control["control_id"])
+
+        no_reason = client.post(
+            f"/api/standard/evidence/{evidence['id']}/withdraw",
+            json={"reason": "  "},
+            headers=analyst_headers,
+        )
+        assert no_reason.status_code == 422
+
+        ok = client.post(
+            f"/api/standard/evidence/{evidence['id']}/withdraw",
+            json={"reason": "wrong file attached"},
+            headers=analyst_headers,
+        )
+        assert ok.status_code == 200, ok.text
+
+        current = client.get(
+            f"/api/standard/evidence?control_id={control['control_id']}",
+            headers=analyst_headers,
+        ).json()["evidence"]
+        assert all(e["id"] != evidence["id"] for e in current)
+
+        audit = client.get(
+            f"/api/standard/evidence?control_id={control['control_id']}&include_withdrawn=true",
+            headers=analyst_headers,
+        ).json()["evidence"]
+        row = next(e for e in audit if e["id"] == evidence["id"])
+        assert row["withdrawn_by"] is not None
+        assert row["withdrawn_reason"] == "wrong file attached"
+
+    def test_replace_creates_versioned_attachment_and_tombstones_old(
+        self, client, analyst_headers
+    ):
+        control = _controls(client, analyst_headers)[5]
+        old = _attach_evidence(client, analyst_headers, control["control_id"], title="old")
+        r = client.post(
+            f"/api/standard/evidence/{old['id']}/replace",
+            json={
+                "title": "new",
+                "media_type": "text/plain",
+                "content_base64": base64.b64encode(b"evidence-v2").decode(),
+                "reason": "corrected file",
+            },
+            headers=analyst_headers,
+        )
+        assert r.status_code == 201, r.text
+        new = r.json()["evidence"]
+        assert new["replaces_evidence_id"] == old["id"]
+        assert new["control_id"] == old["control_id"]
+
+        current = client.get(
+            f"/api/standard/evidence?control_id={control['control_id']}",
+            headers=analyst_headers,
+        ).json()["evidence"]
+        assert [e["id"] for e in current] == [new["id"]]
+
+    def test_signed_assessment_evidence_is_immutable(self, client, analyst_headers,
+                                                     admin_headers):
+        control = _controls(client, analyst_headers)[6]
+        r = client.post(
+            "/api/standard/assessments",
+            json={"control_id": control["control_id"], "status": "compliant"},
+            headers=analyst_headers,
+        )
+        assert r.status_code == 201, r.text
+        assessment_id = r.json()["assessment"]["id"]
+        evidence = _attach_evidence(
+            client, analyst_headers, control["control_id"],
+            title="signed-proof", assessment_id=assessment_id,
+        )
+        s1 = client.post(
+            f"/api/standard/assessments/{assessment_id}/signoff",
+            json={"capacity": "end_user"}, headers=analyst_headers,
+        )
+        assert s1.status_code == 200, s1.text
+        s2 = client.post(
+            f"/api/standard/assessments/{assessment_id}/signoff",
+            json={"capacity": "pic"}, headers=admin_headers,
+        )
+        assert s2.status_code == 200, s2.text
+
+        withdraw = client.post(
+            f"/api/standard/evidence/{evidence['id']}/withdraw",
+            json={"reason": "attempted after sign-off"},
+            headers=analyst_headers,
+        )
+        assert withdraw.status_code == 409
+        replace = client.post(
+            f"/api/standard/evidence/{evidence['id']}/replace",
+            json={
+                "title": "try",
+                "media_type": "text/plain",
+                "content_base64": base64.b64encode(b"x").decode(),
+            },
+            headers=analyst_headers,
+        )
+        assert replace.status_code == 409
+        # Signed evidence remains downloadable (audited historical proof).
+        dl = client.get(
+            f"/api/standard/evidence/{evidence['id']}/download",
+            headers=analyst_headers,
+        )
+        assert dl.status_code == 200
+
+    def test_tenant_isolation_on_withdraw(self, client, analyst_headers,
+                                          auth_headers_tenant_b_admin):
+        control = _controls(client, analyst_headers)[5]
+        evidence = _attach_evidence(client, analyst_headers, control["control_id"])
+        foreign = client.post(
+            f"/api/standard/evidence/{evidence['id']}/withdraw",
+            json={"reason": "cross-tenant attempt"},
+            headers=auth_headers_tenant_b_admin,
+        )
+        assert foreign.status_code == 404

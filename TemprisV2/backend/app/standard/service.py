@@ -62,7 +62,11 @@ def list_frameworks(conn: psycopg.Connection, tenant_id: uuid.UUID) -> list[dict
                    c.id AS control_id, c.control_code, c.title AS control_title,
                    c.description AS control_description,
                    a.id AS assessment_id, a.state AS assessment_state,
-                   a.status AS assessment_status
+                   a.status AS assessment_status, a.notes AS assessment_notes,
+                   a.end_user_signoff_by, a.end_user_signoff_at,
+                   a.pic_signoff_by, a.pic_signoff_at,
+                   a.signed_at AS assessment_signed_at,
+                   a.updated_at AS assessment_updated_at
             FROM standard_frameworks f
             JOIN standard_controls c
               ON c.framework_code = f.framework_code
@@ -83,6 +87,7 @@ def list_frameworks(conn: psycopg.Connection, tenant_id: uuid.UUID) -> list[dict
             "controls": [],
         })
         assessed = row["assessment_state"] == "signed" and row["assessment_status"] is not None
+        has_live = row["assessment_id"] is not None
         fw["controls"].append({
             "control_id": row["control_id"],
             "control_code": row["control_code"],
@@ -91,6 +96,21 @@ def list_frameworks(conn: psycopg.Connection, tenant_id: uuid.UUID) -> list[dict
             "assessment_id": row["assessment_id"],
             "assessment_state": row["assessment_state"],
             "status": row["assessment_status"] if assessed else "not_assessed",
+            # The saved draft truth: a pending draft is NOT signed compliance.
+            "saved_status": row["assessment_status"] if has_live else None,
+            "saved_notes": row["assessment_notes"] if has_live else None,
+            "assessment_updated_at": row["assessment_updated_at"] if has_live else None,
+            "assessment_signed_at": row["assessment_signed_at"] if has_live else None,
+            "signoffs": {
+                "end_user": {
+                    "by": row["end_user_signoff_by"],
+                    "at": row["end_user_signoff_at"],
+                },
+                "pic": {
+                    "by": row["pic_signoff_by"],
+                    "at": row["pic_signoff_at"],
+                },
+            } if has_live else None,
         })
 
     for fw in frameworks.values():
@@ -302,6 +322,84 @@ def archive_assessment(
             asset_id=None, details={"assessment_id": str(assessment_id)},
         )
         return dict(row)
+
+
+def reassess_control(
+    conn: psycopg.Connection,
+    tenant_id: uuid.UUID,
+    *,
+    control_id: uuid.UUID,
+    status: str,
+    notes: Optional[str],
+    actor_id: str,
+    actor_role: str,
+) -> dict:
+    """ATOMIC reassessment: validate → archive the live assessment → create
+    the replacement, all in the caller's transaction. Any failure raises
+    before the route commits, so the previous assessment (with its sign-off
+    and evidence history) survives untouched."""
+    if status not in ASSESSMENT_STATUSES:
+        raise StandardWorkflowError(
+            f"unknown assessment status {status!r} — expected one of "
+            f"{list(ASSESSMENT_STATUSES)}"
+        )
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT id, framework_code FROM standard_controls WHERE id = %s;",
+            (str(control_id),),
+        )
+        control = cur.fetchone()
+        if control is None:
+            raise StandardNotFoundError(f"Control {control_id} not found")
+        cur.execute(
+            """
+            SELECT id FROM standard_control_assessments
+            WHERE tenant_id = %s AND control_id = %s AND state <> 'archived'
+            FOR UPDATE;
+            """,
+            (str(tenant_id), str(control_id)),
+        )
+        standing = cur.fetchone()
+        if standing is None:
+            raise StandardNotFoundError(
+                f"Control {control_id} has no live assessment to reassess — "
+                "create one instead"
+            )
+        cur.execute(
+            """
+            UPDATE standard_control_assessments
+            SET state = 'archived', archived_at = now(), updated_at = now()
+            WHERE tenant_id = %s AND id = %s AND state <> 'archived'
+            RETURNING id;
+            """,
+            (str(tenant_id), str(standing["id"])),
+        )
+        archived = cur.fetchone()
+        cur.execute(
+            """
+            INSERT INTO standard_control_assessments (
+                tenant_id, control_id, status, notes, created_by
+            ) VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, tenant_id, control_id, state, status, notes,
+                      end_user_signoff_by, end_user_signoff_at,
+                      pic_signoff_by, pic_signoff_at, signed_at, archived_at,
+                      created_by, created_at;
+            """,
+            (str(tenant_id), str(control_id), status, notes, actor_id),
+        )
+        row = dict(cur.fetchone())
+        record_audit_event(
+            conn=conn, tenant_id=tenant_id, actor_id=actor_id,
+            actor_role=actor_role, event_name="standard.assessment_reassessed",
+            asset_id=None,
+            details={
+                "assessment_id": str(row["id"]),
+                "archived_assessment_id": str(archived["id"]),
+                "control_id": str(control_id),
+                "status": status,
+            },
+        )
+        return row
 
 
 # ---------------------------------------------------------------------------
@@ -590,23 +688,175 @@ def download_evidence(
 
 
 def list_evidence(
-    conn: psycopg.Connection, tenant_id: uuid.UUID, control_id: Optional[uuid.UUID]
+    conn: psycopg.Connection,
+    tenant_id: uuid.UUID,
+    control_id: Optional[uuid.UUID],
+    include_withdrawn: bool = False,
 ) -> list[dict]:
+    """Withdrawn attachments are tombstoned, not deleted: excluded from the
+    default (current-evidence) view, retained for authorized audit access via
+    include_withdrawn=true."""
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             """
             SELECT id, control_id, assessment_id, edip_verification_id, title,
-                   media_type, size_bytes, sha256, uploaded_by, created_at
+                   media_type, size_bytes, sha256, uploaded_by, created_at,
+                   withdrawn_at, withdrawn_by, withdrawn_reason,
+                   replaces_evidence_id
             FROM standard_control_evidence
             WHERE tenant_id = %s
               AND (%s::uuid IS NULL OR control_id = %s::uuid)
+              AND (%s OR withdrawn_at IS NULL)
             ORDER BY created_at DESC;
             """,
             (str(tenant_id),
              str(control_id) if control_id else None,
-             str(control_id) if control_id else None),
+             str(control_id) if control_id else None,
+             include_withdrawn),
         )
         return [dict(r) for r in cur.fetchall()]
+
+
+def _get_editable_evidence(cur, tenant_id: uuid.UUID, evidence_id: uuid.UUID) -> dict:
+    """Fetch evidence with its assessment state; evidence linked to a signed
+    (or archived) assessment is immutable historical proof."""
+    cur.execute(
+        """
+        SELECT e.id, e.control_id, e.assessment_id, e.edip_verification_id,
+               e.title, e.sha256, a.state AS assessment_state
+        FROM standard_control_evidence e
+        LEFT JOIN standard_control_assessments a
+          ON a.id = e.assessment_id AND a.tenant_id = e.tenant_id
+        WHERE e.tenant_id = %s AND e.id = %s
+        FOR UPDATE OF e;
+        """,
+        (str(tenant_id), str(evidence_id)),
+    )
+    row = cur.fetchone()
+    if row is None:
+        raise StandardNotFoundError(f"Evidence {evidence_id} not found")
+    if row["assessment_state"] in ("signed", "archived"):
+        raise StandardConflictError(
+            f"Evidence {evidence_id} belongs to a {row['assessment_state']} "
+            "assessment and is immutable historical proof — record a new "
+            "assessment cycle to supersede it"
+        )
+    return dict(row)
+
+
+def withdraw_evidence(
+    conn: psycopg.Connection,
+    tenant_id: uuid.UUID,
+    evidence_id: uuid.UUID,
+    *,
+    reason: str,
+    actor_id: str,
+    actor_role: str,
+) -> dict:
+    if not reason.strip():
+        raise StandardWorkflowError("a withdrawal reason is mandatory")
+    with conn.cursor(row_factory=dict_row) as cur:
+        evidence = _get_editable_evidence(cur, tenant_id, evidence_id)
+        cur.execute(
+            """
+            UPDATE standard_control_evidence
+            SET withdrawn_at = now(), withdrawn_by = %s, withdrawn_reason = %s
+            WHERE tenant_id = %s AND id = %s AND withdrawn_at IS NULL
+            RETURNING id, control_id, withdrawn_at, withdrawn_by;
+            """,
+            (actor_id, reason.strip(), str(tenant_id), str(evidence_id)),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise StandardConflictError(f"Evidence {evidence_id} is already withdrawn")
+        record_audit_event(
+            conn=conn, tenant_id=tenant_id, actor_id=actor_id,
+            actor_role=actor_role, event_name="standard.evidence_withdrawn",
+            asset_id=None,
+            details={
+                "evidence_id": str(evidence_id),
+                "reason": reason.strip(),
+                "sha256": evidence["sha256"],
+            },
+        )
+        return dict(row)
+
+
+def replace_evidence(
+    conn: psycopg.Connection,
+    tenant_id: uuid.UUID,
+    evidence_id: uuid.UUID,
+    *,
+    title: str,
+    media_type: str,
+    content: bytes,
+    reason: Optional[str],
+    actor_id: str,
+    actor_role: str,
+) -> dict:
+    """Versioned replacement: the new attachment records replaces_evidence_id,
+    the old one is tombstoned (never deleted). Control/assessment/EDIP links
+    are inherited from the replaced row so EDIP references stay valid."""
+    if media_type not in EVIDENCE_MEDIA_TYPES:
+        raise StandardWorkflowError(
+            f"media_type {media_type!r} is not in the allowlist "
+            f"{list(EVIDENCE_MEDIA_TYPES)}"
+        )
+    if not content or len(content) > EVIDENCE_MAX_BYTES:
+        raise StandardWorkflowError(
+            f"evidence content must be 1 byte to {EVIDENCE_MAX_BYTES} bytes"
+        )
+    if not title.strip():
+        raise StandardWorkflowError("evidence title is mandatory")
+    with conn.cursor(row_factory=dict_row) as cur:
+        old = _get_editable_evidence(cur, tenant_id, evidence_id)
+        if old["assessment_state"] is not None and old["assessment_state"] != "draft":
+            raise StandardConflictError(
+                f"Evidence {evidence_id} belongs to a {old['assessment_state']} "
+                "assessment and is immutable historical proof"
+            )
+        sha256 = hashlib.sha256(content).hexdigest()
+        cur.execute(
+            """
+            INSERT INTO standard_control_evidence (
+                tenant_id, control_id, assessment_id, edip_verification_id,
+                title, media_type, content, size_bytes, sha256, uploaded_by,
+                replaces_evidence_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id, tenant_id, control_id, assessment_id,
+                      edip_verification_id, title, media_type, size_bytes,
+                      sha256, uploaded_by, created_at, replaces_evidence_id;
+            """,
+            (
+                str(tenant_id), str(old["control_id"]), old["assessment_id"],
+                old["edip_verification_id"], title.strip(), media_type,
+                psycopg.Binary(content), len(content), sha256, actor_id,
+                str(evidence_id),
+            ),
+        )
+        new_row = dict(cur.fetchone())
+        cur.execute(
+            """
+            UPDATE standard_control_evidence
+            SET withdrawn_at = now(), withdrawn_by = %s, withdrawn_reason = %s
+            WHERE tenant_id = %s AND id = %s AND withdrawn_at IS NULL;
+            """,
+            (actor_id, (reason or "replaced by a newer version").strip(),
+             str(tenant_id), str(evidence_id)),
+        )
+        record_audit_event(
+            conn=conn, tenant_id=tenant_id, actor_id=actor_id,
+            actor_role=actor_role, event_name="standard.evidence_replaced",
+            asset_id=None,
+            details={
+                "new_evidence_id": str(new_row["id"]),
+                "replaced_evidence_id": str(evidence_id),
+                "new_sha256": sha256,
+                "old_sha256": old["sha256"],
+                "reason": (reason or "").strip() or None,
+            },
+        )
+        return new_row
 
 
 # ---------------------------------------------------------------------------

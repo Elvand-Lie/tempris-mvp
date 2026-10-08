@@ -24,7 +24,10 @@ from app.exposure.service import allocate_finding_for_cve, confirm_exposure
 OUTPUT_LIMIT = 4 * 1024 * 1024
 PROBE_TIMEOUT = 10
 NMAP_TIMEOUT = 180
-NUCLEI_TIMEOUT = 1200
+# Central plane runs on a 1-vCPU VPS: loading the pinned ~6.7k-template library
+# alone takes several minutes before execution starts, so the deadline must
+# cover load+scan (the collector plane, on bigger hosts, keeps its own bound).
+NUCLEI_TIMEOUT = 3600
 _PARTIAL_OUTPUT_CHARS = 4000
 _STORED_TIMEOUT_CHARS = 8192
 

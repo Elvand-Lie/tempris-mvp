@@ -77,10 +77,33 @@ class AssessmentCreate(BaseModel):
     notes: Optional[str] = None
 
 
+class AssessmentReassess(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    control_id: uuid.UUID
+    status: str
+    notes: Optional[str] = None
+
+
 class SignoffIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     capacity: str
+
+
+class EvidenceWithdraw(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(..., min_length=1)
+
+
+class EvidenceReplace(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(..., min_length=1)
+    media_type: str
+    content_base64: str
+    reason: Optional[str] = None
 
 
 class PolicyCreate(BaseModel):
@@ -183,6 +206,29 @@ def create_assessment(
     try:
         with get_db_connection() as conn:
             row = service.create_assessment(
+                conn, auth.tenant_id,
+                control_id=payload.control_id, status=payload.status,
+                notes=payload.notes,
+                actor_id=auth.actor_id, actor_role=auth.role,
+            )
+            conn.commit()
+            return _jsonify({"assessment": row})
+    except Exception as e:
+        _raise_domain_error(e)
+
+
+@router.post(
+    "/assessments/reassess",
+    status_code=status.HTTP_201_CREATED,
+    summary="ATOMIC reassessment: validate, archive the live assessment, and create the replacement in one transaction",
+)
+def reassess_assessment(
+    payload: AssessmentReassess,
+    auth: AuthContext = Depends(_require_analyst),
+):
+    try:
+        with get_db_connection() as conn:
+            row = service.reassess_control(
                 conn, auth.tenant_id,
                 control_id=payload.control_id, status=payload.status,
                 notes=payload.notes,
@@ -358,17 +404,78 @@ def attach_evidence(
 @router.get(
     "/evidence",
     status_code=status.HTTP_200_OK,
-    summary="List control evidence (metadata)",
+    summary="List control evidence (metadata; withdrawn excluded unless include_withdrawn)",
 )
 def list_evidence(
     control_id: Optional[uuid.UUID] = Query(None),
+    include_withdrawn: bool = Query(False),
     auth: AuthContext = Depends(_require_analyst),
 ):
     try:
         with get_db_connection() as conn:
-            rows = service.list_evidence(conn, auth.tenant_id, control_id)
+            rows = service.list_evidence(
+                conn, auth.tenant_id, control_id,
+                include_withdrawn=include_withdrawn,
+            )
             conn.commit()
             return _jsonify({"evidence": rows})
+    except Exception as e:
+        _raise_domain_error(e)
+
+
+@router.post(
+    "/evidence/{evidence_id}/withdraw",
+    status_code=status.HTTP_200_OK,
+    summary="Withdraw evidence with a mandatory reason (tombstone; signed evidence is immutable)",
+)
+def withdraw_evidence(
+    evidence_id: uuid.UUID,
+    payload: EvidenceWithdraw,
+    auth: AuthContext = Depends(_require_analyst),
+):
+    try:
+        with get_db_connection() as conn:
+            row = service.withdraw_evidence(
+                conn, auth.tenant_id, evidence_id,
+                reason=payload.reason,
+                actor_id=auth.actor_id, actor_role=auth.role,
+            )
+            conn.commit()
+            return _jsonify({"evidence": row})
+    except Exception as e:
+        _raise_domain_error(e)
+
+
+@router.post(
+    "/evidence/{evidence_id}/replace",
+    status_code=status.HTTP_201_CREATED,
+    summary="Replace evidence with a newly versioned attachment (old row tombstoned, links inherited)",
+)
+def replace_evidence(
+    evidence_id: uuid.UUID,
+    payload: EvidenceReplace,
+    auth: AuthContext = Depends(_require_analyst),
+):
+    import base64
+    import binascii
+
+    try:
+        content = base64.b64decode(payload.content_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="content_base64 is not valid base64",
+        )
+    try:
+        with get_db_connection() as conn:
+            row = service.replace_evidence(
+                conn, auth.tenant_id, evidence_id,
+                title=payload.title, media_type=payload.media_type,
+                content=content, reason=payload.reason,
+                actor_id=auth.actor_id, actor_role=auth.role,
+            )
+            conn.commit()
+            return _jsonify({"evidence": row})
     except Exception as e:
         _raise_domain_error(e)
 

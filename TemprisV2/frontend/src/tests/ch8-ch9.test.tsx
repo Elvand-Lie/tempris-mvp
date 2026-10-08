@@ -30,6 +30,9 @@ vi.mock('../standard/standardApi', () => ({
     createAssessment: vi.fn(),
     signoffAssessment: vi.fn(),
     archiveAssessment: vi.fn(),
+    reassessAssessment: vi.fn(),
+    withdrawEvidence: vi.fn(),
+    replaceEvidence: vi.fn(),
     createIncident: vi.fn(),
     getIncident: vi.fn(),
     listIncidents: vi.fn(),
@@ -190,7 +193,7 @@ describe('StandardConsole', () => {
     await waitFor(() => expect(screen.getByLabelText('Status')).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'non_compliant' } });
     fireEvent.change(screen.getByLabelText('Notes (rationale)'), { target: { value: 'Control gap found in audit' } });
-    fireEvent.click(screen.getByText('Record assessment'));
+    fireEvent.click(screen.getByText('Create assessment'));
     await waitFor(() =>
       expect(standardApi.createAssessment).toHaveBeenCalledWith(
         'c1111111-1111-1111-1111-111111111111',
@@ -198,7 +201,49 @@ describe('StandardConsole', () => {
         'Control gap found in audit',
       ),
     );
-    expect(screen.getAllByText('Not available: the backend does not expose this yet.').length).toBeGreaterThan(0);
+  });
+
+  it('controls drawer: reassessment goes through the atomic endpoint and sign-off identities render', async () => {
+    window.sessionStorage.setItem('tempris_bearer_token', adminToken);
+    const draftControl = {
+      ...control,
+      status: 'not_assessed' as const,
+      assessment_id: 'a1',
+      assessment_state: 'draft',
+      saved_status: 'partial',
+      saved_notes: 'Test',
+      assessment_updated_at: '2026-10-09T00:00:00Z',
+      signoffs: {
+        end_user: { by: 'analyst-a@tempris.test', at: '2026-10-09T00:00:00Z' },
+        pic: { by: null, at: null },
+      },
+    };
+    (standardApi.getFrameworks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      frameworks: [{ ...framework, controls: [draftControl] }],
+    });
+    (standardApi.listEvidence as ReturnType<typeof vi.fn>).mockResolvedValue({ evidence: [] });
+    (standardApi.listObligations as ReturnType<typeof vi.fn>).mockResolvedValue({ total: 0, items: [] });
+    (standardApi.listExceptions as ReturnType<typeof vi.fn>).mockResolvedValue({ exceptions: [] });
+    (standardApi.reassessAssessment as ReturnType<typeof vi.fn>).mockResolvedValue({
+      assessment: { id: 'a3', state: 'draft' },
+    });
+    render(<StandardConsole />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Controls' }));
+    await waitFor(() => expect(screen.getByText('MAS-TRM-12.1.5')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('MAS-TRM-12.1.5'));
+    await waitFor(() => expect(screen.getByText('Re-assess (replaces current atomically)')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Re-assess (replaces current atomically)'));
+    await waitFor(() =>
+      expect(standardApi.reassessAssessment).toHaveBeenCalledWith(
+        'c1111111-1111-1111-1111-111111111111',
+        'partial',
+        'Test',
+      ),
+    );
+    // Sign-off identity visibility: per-capacity actor + state from the frameworks payload.
+    await waitFor(() => expect(screen.getByText(/analyst-a@tempris\.test/)).toBeInTheDocument());
+    expect(screen.getByText('Pending — no signature yet')).toBeInTheDocument();
+    expect(screen.queryByText('Not available: the backend does not expose this yet.')).not.toBeInTheDocument();
   });
 
   it('controls drawer: dual sign-off conflict renders a human-readable message, never raw JSON', async () => {
