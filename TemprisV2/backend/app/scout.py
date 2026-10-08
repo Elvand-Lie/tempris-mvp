@@ -245,6 +245,23 @@ def probe_tool(
                 stderr=templates_result.stderr.decode("utf-8", errors="replace"),
             )
         templates_version = _version_text(templates_result, "nuclei-templates version")
+        # Readiness must verify usable managed templates, not just a working
+        # binary: a pinned library that fails the fail-closed resolver (unset,
+        # missing, or template-less) means Nuclei cannot actually run here.
+        try:
+            templates_dir = resolve_scout_nuclei_templates_dir()
+        except ScoutTemplatesUnavailable as exc:
+            return ToolProbe(
+                engine=engine,
+                state="unavailable",
+                executable=executable,
+                engine_version=_version_text(version_result, "Nuclei Engine Version"),
+                stderr=str(exc),
+            )
+        if not templates_version:
+            version_file = Path(templates_dir) / ".version"
+            if version_file.exists():
+                templates_version = version_file.read_text(encoding="utf-8", errors="replace").strip() or None
 
     return ToolProbe(
         engine=engine,
@@ -418,7 +435,7 @@ _WINDOWS_PATH_PATTERN = re.compile(
     r"(?i)[a-z]:\\(?:[^\\\r\n]+\\)*[^\\\r\n]*|\\\\[^\\\r\n]+\\[^\\\r\n]*|\\Users\\[^\r\n\s\"']*"
 )
 _UNIX_PATH_PATTERN = re.compile(
-    r"(?<![\w-])/(?:home|tmp|var|usr|etc|opt)(?:/[^\r\n\s\"']*)+"
+    r"(?<![\w\-./])/(?:home|tmp|var|usr|etc|opt)(?:/[^\r\n\s\"']*)+"
 )
 
 

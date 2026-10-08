@@ -488,6 +488,18 @@ fn test_s02_i1_i2_path_redaction_comprehensive() {
     assert!(!redacted.contains(r"\\server\share"));
 }
 
+#[test]
+fn test_s02_i5_url_schemes_survive_path_redaction() {
+    // Nuclei match URLs contain "<letter>:/ — the drive-letter redaction must
+    // not eat them (drive letters require a non-alphanumeric boundary).
+    let sample = r#"{"template-id":"weak-csp-detect","matched-at":"http://192.168.18.1/login.css?c804c4d","url":"https://host.example.test/a/b?x=1","template-path":"C:\\tools\\nuclei-templates\\ssl\\weak-csp.yaml"}"#;
+    let redacted = redact_paths(sample, None);
+    assert!(redacted.contains("http://192.168.18.1/login.css?c804c4d"), "http URL must survive: {redacted}");
+    assert!(redacted.contains("https://host.example.test/a/b?x=1"), "https URL must survive: {redacted}");
+    assert!(redacted.contains(REDACTED_LOCAL_PATH_TOKEN), "windows path must still be redacted");
+    assert!(!redacted.contains(r"C:\tools\nuclei-templates"));
+}
+
 #[tokio::test]
 async fn test_s02_i3_non_blocking_capability_probing() {
     let dir = tempdir().unwrap();

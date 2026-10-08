@@ -287,6 +287,7 @@ pub async fn probe_scout_capabilities_with_storage(
         channel: Some("stable".to_string()),
         update_status,
         last_checked_at: last_check,
+        update_check: None,
     }
 }
 

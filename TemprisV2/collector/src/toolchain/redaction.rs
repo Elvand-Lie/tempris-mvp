@@ -20,8 +20,13 @@ static USER_PROFILE_REGEX: OnceLock<Regex> = OnceLock::new();
 
 fn get_windows_drive_regex() -> &'static Regex {
     WINDOWS_DRIVE_REGEX.get_or_init(|| {
-        // Matches drive letter followed by :\ or :/ and path characters
-        RegexBuilder::new(r#"[a-zA-Z]:[\\/][a-zA-Z0-9_\.\-\\/\s]+"#)
+        // Matches drive letter followed by :\ or :/ and path characters.
+        // The drive letter must NOT be preceded by an alphanumeric (Rust regex
+        // has no lookbehind, so the boundary char is captured and restored via
+        // ${1}) — otherwise the "p:/" inside "http://" URLs gets redacted.
+        // Space/tab stay in the class for "C:\Program Files\..." but \r\n do
+        // not, so a match cannot crawl across line boundaries in JSONL output.
+        RegexBuilder::new(r#"(?:^|([^A-Za-z0-9]))[a-zA-Z]:[\\/][a-zA-Z0-9_\.\-\\/ \t]+"#)
             .case_insensitive(true)
             .build()
             .expect("valid regex")
@@ -93,8 +98,10 @@ pub fn redact_paths(text: &str, known: Option<&KnownPaths>) -> String {
     // Step 2: Redact UNC paths
     result = get_unc_path_regex().replace_all(&result, REDACTED_LOCAL_PATH_TOKEN).to_string();
 
-    // Step 3: Redact Windows drive paths
-    result = get_windows_drive_regex().replace_all(&result, REDACTED_LOCAL_PATH_TOKEN).to_string();
+    // Step 3: Redact Windows drive paths (${1} restores the captured boundary char)
+    result = get_windows_drive_regex()
+        .replace_all(&result, format!("${{1}}{REDACTED_LOCAL_PATH_TOKEN}").as_str())
+        .to_string();
 
     // Step 4: Redact Unix system paths
     result = get_unix_path_regex().replace_all(&result, REDACTED_LOCAL_PATH_TOKEN).to_string();

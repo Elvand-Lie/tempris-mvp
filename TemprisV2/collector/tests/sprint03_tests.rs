@@ -135,6 +135,10 @@ fn test_s03_a4_capabilities_serialization_roundtrip() {
         channel: Some("stable".to_string()),
         update_status: Some("up_to_date".to_string()),
         last_checked_at: Some("2026-09-06T00:00:00Z".to_string()),
+        update_check: None,
+        curl: None,
+        ffuf: None,
+        dig: None,
     };
 
     let frame = ClientFrame::SCOUT_CAPABILITIES {
@@ -304,6 +308,7 @@ async fn test_s03_d1_subsecond_heartbeat_preservation() {
     let start = std::time::Instant::now();
     let hb_frame = ClientFrame::HEARTBEAT {
         timestamp: chrono::Utc::now().to_rfc3339(),
+        network_state: None,
     };
     let _ = serde_json::to_string(&hb_frame).unwrap();
     let elapsed = start.elapsed();
