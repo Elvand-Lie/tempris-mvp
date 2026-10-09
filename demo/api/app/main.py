@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
+import re
 from pathlib import Path
 
+import qrcode
+import qrcode.image.svg
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -82,6 +86,34 @@ def demo_login(payload: LoginIn):
         "role": "presenter",
         "tenant": auth.DEMO_TENANT,
     }
+
+
+class RegisterIn(BaseModel):
+    username: str
+    password: str
+
+
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{3,40}$")
+
+
+@app.post("/demo/register")
+def demo_register(payload: RegisterIn):
+    """In-app presenter provisioning: create the account, return the one-time
+    TOTP QR so the presenter can link their authenticator immediately."""
+    username = payload.username.strip()
+    if not _USERNAME_RE.fullmatch(username):
+        raise HTTPException(422, "username must be 3-40 characters: letters, digits, dot, dash, underscore")
+    if len(payload.password) < 12:
+        raise HTTPException(422, "password must be at least 12 characters")
+    info = auth.seed_user(username, payload.password)
+    img = qrcode.make(
+        info["totp_provisioning_uri"], image_factory=qrcode.image.svg.SvgPathImage
+    )
+    buf = io.BytesIO()
+    img.save(buf)
+    auth.audit(auth.DEMO_TENANT, username, "demo.register", {})
+    # The provisioning URI/QR is shown exactly once, at enrollment.
+    return {"username": username, "qr_svg": buf.getvalue().decode(), "expires_at": info["expires_at"]}
 
 
 @app.post("/demo/logout")

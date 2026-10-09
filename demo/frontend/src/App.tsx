@@ -2,26 +2,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { demoApi, setToken, type DemoPack, type Journey } from './api';
 import {
   Overview, AssetInventory, AssetDetail, FindingDetail, EvidenceView,
-  DecisionView, Coverage, AttackPath, ReportView,
+  DecisionView, Coverage, AttackPath, ReportView, RemediationView,
 } from './screens';
 
-const WATERMARK = 'DEMO / SYNTHETIC — NOT A REAL ESTATE';
-
-function Watermark() {
-  return (
-    <>
-      <div className="watermark"><span>{WATERMARK}</span></div>
-      <div className="watermark-badge">{WATERMARK}</div>
-    </>
-  );
-}
-
 function Login({ onDone }: { onDone: () => void }) {
+  const [mode, setMode] = useState<'signin' | 'create'>('signin');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [enrollQr, setEnrollQr] = useState<string | null>(null);
 
   const submit = async () => {
     setBusy(true); setError(null);
@@ -36,25 +27,73 @@ function Login({ onDone }: { onDone: () => void }) {
     }
   };
 
+  const create = async () => {
+    setBusy(true); setError(null);
+    try {
+      const res = await demoApi.register(username.trim(), password);
+      setEnrollQr(res.qr_svg);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (enrollQr) {
+    return (
+      <div className="login-wrap">
+        <div className="card login-card">
+          <div className="brand" style={{ fontSize: 20, marginBottom: 4 }}>TEMPRIS<span>.</span></div>
+          <p style={{ color: 'var(--muted)', marginTop: 0 }}>Account created, link your authenticator</p>
+          <div className="qr-box" dangerouslySetInnerHTML={{ __html: enrollQr }} />
+          <p style={{ color: 'var(--muted)', fontSize: 13 }}>
+            Scan this with your authenticator app (Google / Microsoft Authenticator, 1Password…).
+            The QR is shown only once. Then sign in with your password and a 6-digit code.
+          </p>
+          <button className="primary" onClick={() => { setEnrollQr(null); setMode('signin'); setTotp(''); }}>
+            Go to sign in
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="login-wrap">
       <div className="card login-card">
         <div className="brand" style={{ fontSize: 20, marginBottom: 4 }}>TEMPRIS<span>.</span></div>
-        <p style={{ color: 'var(--muted)', marginTop: 0 }}>Partner demo — presenter access</p>
-        <form onSubmit={(e) => { e.preventDefault(); if (!busy) void submit(); }}>
+        <p style={{ color: 'var(--muted)', marginTop: 0 }}>
+          Continuous exposure management
+        </p>
+        <form onSubmit={(e) => { e.preventDefault(); if (!busy) void (mode === 'signin' ? submit() : create()); }}>
           <label htmlFor="l-user">Username</label>
           <input id="l-user" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" />
           <label htmlFor="l-pass">Password</label>
-          <input id="l-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
-          <label htmlFor="l-totp">6-digit authenticator code</label>
-          <input id="l-totp" value={totp} onChange={(e) => setTotp(e.target.value)} inputMode="numeric" maxLength={6} />
+          <input id="l-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === 'create' ? 'new-password' : 'current-password'} />
+          {mode === 'signin' && (
+            <>
+              <label htmlFor="l-totp">6-digit authenticator code</label>
+              <input id="l-totp" value={totp} onChange={(e) => setTotp(e.target.value)} inputMode="numeric" maxLength={6} />
+            </>
+          )}
           <div style={{ marginTop: 18 }}>
-            <button className="primary" type="submit" disabled={busy || !username || !password || totp.trim().length !== 6}>
-              {busy ? 'Signing in…' : 'Sign in'}
+            <button
+              className="primary"
+              type="submit"
+              disabled={busy || !username || !password || (mode === 'signin' && totp.trim().length !== 6)}
+            >
+              {busy ? (mode === 'create' ? 'Creating…' : 'Signing in…') : mode === 'create' ? 'Create account' : 'Sign in'}
             </button>
           </div>
         </form>
         {error && <div className="error-banner" role="alert">{error}</div>}
+        <p style={{ marginTop: 14, fontSize: 13 }}>
+          {mode === 'signin' ? (
+            <a href="#" onClick={(e) => { e.preventDefault(); setMode('create'); setError(null); }}>Create a presenter account</a>
+          ) : (
+            <a href="#" onClick={(e) => { e.preventDefault(); setMode('signin'); setError(null); }}>Back to sign in</a>
+          )}
+        </p>
       </div>
     </div>
   );
@@ -75,7 +114,7 @@ function screenNode(pack: DemoPack, screen: string, focus: string[]) {
     }
     case 'evidence_view': return <EvidenceView pack={pack} evidenceIds={focus} />;
     case 'decision_view': return <DecisionView pack={pack} decisionIds={focus.filter((id) => id.startsWith('dec-'))} />;
-    case 'remediation_view': return <FindingDetail pack={pack} finding={byId(pack.findings, focus[0])!} />;
+    case 'remediation_view': return <RemediationView pack={pack} remediationIds={focus.filter((id) => id.startsWith('rem-'))} />;
     case 'coverage': return <Coverage pack={pack} />;
     case 'attack_path': return <AttackPath pack={pack} pathIds={focus.length ? focus : undefined} />;
     case 'report': return <ReportView pack={pack} onExport={() => window.print()} />;
@@ -259,38 +298,30 @@ export default function App() {
     await load();
   }, [load]);
 
-  if (!authed) return <><Login onDone={() => setAuthed(true)} /><Watermark /></>;
+  if (!authed) return <Login onDone={() => setAuthed(true)} />;
 
   if (error || !pack || !meta) {
     return (
-      <>
-        <div className="login-wrap">
-          <div className="card login-card">
-            <h3>Demo unavailable</h3>
-            <p style={{ color: 'var(--muted)' }}>{error || 'Loading demo pack…'}</p>
-            <button onClick={() => void load()}>Retry</button>
-            <button onClick={() => { setToken(''); setAuthed(false); }} style={{ marginLeft: 8 }}>Log out</button>
-          </div>
+      <div className="login-wrap">
+        <div className="card login-card">
+          <h3>Demo unavailable</h3>
+          <p style={{ color: 'var(--muted)' }}>{error || 'Loading demo pack…'}</p>
+          <button onClick={() => void load()}>Retry</button>
+          <button onClick={() => { setToken(''); setAuthed(false); }} style={{ marginLeft: 8 }}>Log out</button>
         </div>
-        <Watermark />
-      </>
+      </div>
     );
   }
 
-  return (
-    <>
-      {journey ? (
-        <JourneyPlayer pack={pack} journey={journey} onExit={() => setJourney(null)} onReset={doReset} />
-      ) : (
-        <Launcher
-          pack={pack}
-          username={username}
-          onOpen={setJourney}
-          onReset={doReset}
-          onLogout={async () => { await demoApi.logout().catch(() => undefined); setToken(''); setAuthed(false); setJourney(null); }}
-        />
-      )}
-      <Watermark />
-    </>
+  return journey ? (
+    <JourneyPlayer pack={pack} journey={journey} onExit={() => setJourney(null)} onReset={doReset} />
+  ) : (
+    <Launcher
+      pack={pack}
+      username={username}
+      onOpen={setJourney}
+      onReset={doReset}
+      onLogout={async () => { await demoApi.logout().catch(() => undefined); setToken(''); setAuthed(false); setJourney(null); }}
+    />
   );
 }

@@ -86,6 +86,11 @@ export const demoApi = {
       body: JSON.stringify({ username, password, totp_code }),
     }),
   logout: () => call('/demo/logout', { method: 'POST' }),
+  register: (username: string, password: string) =>
+    call<{ username: string; qr_svg: string; expires_at: string }>('/demo/register', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }),
   bootstrap: () =>
     call<{ pack_id: string; version: number; sha256: string; estate: Estate; user: { username: string }; watermark: string }>('/demo/bootstrap'),
   pack: () => call<DemoPack>('/demo/pack'),

@@ -157,3 +157,22 @@ tr.clickable:hover { background: rgba(44, 194, 180, 0.06); cursor: pointer; }
   .print-report .card { background: #fff; border-color: #ccc; }
   .print-report .chip { color: #111; }
 }
+
+.qr-box {
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+  background: #fff;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+.qr-box svg { width: 200px; height: 200px; }
+
+.login-card a {
+  color: var(--teal, #4fb3a9);
+  text-decoration: none;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.login-card a:hover { text-decoration: underline; }
+.login-card button.primary { min-width: 120px; }

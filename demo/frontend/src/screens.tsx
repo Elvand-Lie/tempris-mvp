@@ -235,6 +235,39 @@ export function DecisionView({ pack, decisionIds }: { pack: DemoPack; decisionId
   );
 }
 
+export function RemediationView({ pack, remediationIds }: { pack: DemoPack; remediationIds: string[] }) {
+  const rows = pack.remediations.filter((r) => remediationIds.includes(r.id));
+  if (!rows.length) return <p>No remediation records found for this step.</p>;
+  return (
+    <div>
+      <h2>Remediation</h2>
+      {rows.map((r) => {
+        const finding = pack.findings.find((f) => f.id === r.finding_id);
+        const evidence = pack.evidence.find((e) => e.id === r.verified_by_evidence_id);
+        return (
+          <div className="card" key={r.id} style={{ marginBottom: 12 }}>
+            <h3 style={{ marginTop: 0 }}>{finding?.title || r.finding_id}</h3>
+            <dl className="kv">
+              <dt>Action</dt><dd>{r.action}</dd>
+              <dt>Status</dt><dd><span className={r.status === 'completed' ? 'chip ok' : 'chip medium'}>{r.status}</span></dd>
+              <dt>Completed</dt><dd>{r.completed_at?.slice(0, 10) || '—'}</dd>
+              <dt>Verified by</dt>
+              <dd>
+                {evidence
+                  ? <>{evidence.kind} · captured {evidence.captured_at.slice(0, 10)} · SHA-256 <code>{evidence.sha256.slice(0, 24)}…</code></>
+                  : 'pending evidence'}
+              </dd>
+            </dl>
+            {evidence && (
+              <pre style={{ background: 'var(--bg-panel)', padding: 10, borderRadius: 6, fontSize: 12, overflow: 'auto' }}>{evidence.payload_excerpt}</pre>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Coverage({ pack }: { pack: DemoPack }) {
   const counts = pack.estate.summary_counts;
   return (
@@ -366,7 +399,6 @@ export function ReportView({ pack, onExport }: { pack: DemoPack; onExport: () =>
           </tbody>
         </table>
       </div>
-      <p className="watermark-badge" style={{ position: 'static', display: 'inline-block', marginTop: 12 }}>{r.watermark}</p>
     </div>
   );
 }
