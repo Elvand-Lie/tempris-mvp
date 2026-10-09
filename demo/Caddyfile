@@ -1,0 +1,16 @@
+demo.tempris.com.sg {
+	tls internal
+	encode gzip
+
+	handle /demo/* {
+		reverse_proxy api:8000
+	}
+
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy web:80
+	}
+}

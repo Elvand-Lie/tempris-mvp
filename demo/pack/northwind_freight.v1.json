@@ -1,0 +1,1347 @@
+{
+ "pack_id": "northwind_freight",
+ "version": 1,
+ "generated_at": "2026-10-09T00:00:00Z",
+ "watermark": "DEMO / SYNTHETIC — NOT A REAL ESTATE",
+ "estate": {
+  "name": "Northwind Freight",
+  "description": "Fictional Singapore-based logistics company: container freight forwarding, warehousing and last-mile delivery. ~340 staff across a Tanjong Pagar HQ and a Tuas depot. Corporate IT is a flat LAN behind an edge firewall, with a small DMZ (web, mail) and a legacy ERP database. Three AI agents operate alongside traditional infrastructure.",
+  "summary_counts": {
+   "assets": 18,
+   "relationships": 22,
+   "findings": 10,
+   "evidence": 14,
+   "edip_verifications": 4,
+   "decisions": 6,
+   "remediations": 3,
+   "ai_agents": 3,
+   "kev_findings": 1,
+   "covered_assets": 16,
+   "coverage_pct": 89,
+   "verified_controls": 11,
+   "total_controls": 18,
+   "fidelity_pct": 61
+  }
+ },
+ "assets": [
+  {
+   "id": "ast-0001",
+   "hostname": "dmz-web-01",
+   "asset_type": "server",
+   "role": "Public freight-tracking web portal (nginx + Rails)",
+   "ip": "203.0.113.10",
+   "environment": "dmz",
+   "os": "Ubuntu 22.04",
+   "criticality": "high",
+   "internet_facing": true,
+   "owner": "IT Infrastructure",
+   "monitored": true
+  },
+  {
+   "id": "ast-0002",
+   "hostname": "erp-db-01",
+   "asset_type": "server",
+   "role": "Legacy ERP database (PostgreSQL 13) — bookings, invoicing, customs declarations",
+   "ip": "10.20.0.15",
+   "environment": "corporate",
+   "os": "Ubuntu 20.04",
+   "criticality": "critical",
+   "internet_facing": false,
+   "owner": "IT Infrastructure",
+   "monitored": true
+  },
+  {
+   "id": "ast-0003",
+   "hostname": "mail-gw-01",
+   "asset_type": "server",
+   "role": "Internet mail gateway and inbound mail relay",
+   "ip": "203.0.113.25",
+   "environment": "dmz",
+   "os": "RHEL 9",
+   "criticality": "high",
+   "internet_facing": true,
+   "owner": "IT Infrastructure",
+   "monitored": true
+  },
+  {
+   "id": "ast-0004",
+   "hostname": "hr-fileserver",
+   "asset_type": "server",
+   "role": "HR file share — payroll extracts, contracts, leave records",
+   "ip": "10.20.1.40",
+   "environment": "corporate",
+   "os": "Windows Server 2019",
+   "criticality": "high",
+   "internet_facing": false,
+   "owner": "HR Ops",
+   "monitored": true
+  },
+  {
+   "id": "ast-0005",
+   "hostname": "crm-db-01",
+   "asset_type": "server",
+   "role": "Customer CRM database — shipper contacts, shipment history",
+   "ip": "10.20.0.22",
+   "environment": "corporate",
+   "os": "Windows Server 2019",
+   "criticality": "critical",
+   "internet_facing": false,
+   "owner": "Sales Ops",
+   "monitored": true
+  },
+  {
+   "id": "ast-0006",
+   "hostname": "corp-laptop-0114",
+   "asset_type": "endpoint",
+   "role": "Finance staff laptop",
+   "ip": "10.20.5.114",
+   "environment": "corporate",
+   "os": "Windows 11",
+   "criticality": "low",
+   "internet_facing": false,
+   "owner": "IT Service Desk",
+   "monitored": true
+  },
+  {
+   "id": "ast-0007",
+   "hostname": "corp-laptop-0231",
+   "asset_type": "endpoint",
+   "role": "Ops coordinator laptop",
+   "ip": "10.20.5.231",
+   "environment": "corporate",
+   "os": "Windows 11",
+   "criticality": "low",
+   "internet_facing": false,
+   "owner": "IT Service Desk",
+   "monitored": true
+  },
+  {
+   "id": "ast-0008",
+   "hostname": "corp-laptop-0307",
+   "asset_type": "endpoint",
+   "role": "Depot supervisor laptop (Tuas)",
+   "ip": "10.20.5.307",
+   "environment": "corporate",
+   "os": "Windows 10",
+   "criticality": "low",
+   "internet_facing": false,
+   "owner": "IT Service Desk",
+   "monitored": true
+  },
+  {
+   "id": "ast-0009",
+   "hostname": "corp-laptop-0412",
+   "asset_type": "endpoint",
+   "role": "Sales manager laptop",
+   "ip": "10.20.5.412",
+   "environment": "corporate",
+   "os": "macOS 15",
+   "criticality": "low",
+   "internet_facing": false,
+   "owner": "IT Service Desk",
+   "monitored": false
+  },
+  {
+   "id": "ast-0010",
+   "hostname": "fw-edge-01",
+   "asset_type": "network",
+   "role": "Perimeter firewall",
+   "ip": "203.0.113.1",
+   "environment": "dmz",
+   "os": "Vendor appliance",
+   "criticality": "critical",
+   "internet_facing": true,
+   "owner": "IT Infrastructure",
+   "monitored": true
+  },
+  {
+   "id": "ast-0011",
+   "hostname": "core-sw-01",
+   "asset_type": "network",
+   "role": "Core LAN switch (flat corporate VLAN)",
+   "ip": "10.20.0.1",
+   "environment": "corporate",
+   "os": "Vendor appliance",
+   "criticality": "high",
+   "internet_facing": false,
+   "owner": "IT Infrastructure",
+   "monitored": true
+  },
+  {
+   "id": "ast-0012",
+   "hostname": "k8s-node-01",
+   "asset_type": "container_host",
+   "role": "Docker host for internal microservices",
+   "ip": "10.20.2.10",
+   "environment": "corporate",
+   "os": "Ubuntu 22.04",
+   "criticality": "medium",
+   "internet_facing": false,
+   "owner": "IT Infrastructure",
+   "monitored": true
+  },
+  {
+   "id": "ast-0013",
+   "hostname": null,
+   "asset_type": "container",
+   "role": "payments-svc container (payment reconciliation API)",
+   "ip": "10.20.2.31",
+   "environment": "corporate",
+   "os": "Container (python:3.12-slim)",
+   "criticality": "high",
+   "internet_facing": false,
+   "owner": "IT Infrastructure",
+   "monitored": true
+  },
+  {
+   "id": "ast-0014",
+   "hostname": "backup-nas-01",
+   "asset_type": "server",
+   "role": "Backup NAS — nightly file and DB dumps",
+   "ip": "10.20.1.60",
+   "environment": "corporate",
+   "os": "Vendor appliance",
+   "criticality": "high",
+   "internet_facing": false,
+   "owner": "IT Infrastructure",
+   "monitored": true
+  },
+  {
+   "id": "ast-0015",
+   "hostname": "ad-dc-01",
+   "asset_type": "server",
+   "role": "Active Directory domain controller",
+   "ip": "10.20.0.5",
+   "environment": "corporate",
+   "os": "Windows Server 2022",
+   "criticality": "critical",
+   "internet_facing": false,
+   "owner": "IT Infrastructure",
+   "monitored": true
+  },
+  {
+   "id": "ast-9001",
+   "hostname": null,
+   "asset_type": "ai-agent",
+   "role": "HR self-service assistant — drafts and sends HR replies to staff",
+   "ip": null,
+   "environment": "corporate",
+   "os": null,
+   "criticality": "high",
+   "internet_facing": false,
+   "owner": "HR Ops",
+   "monitored": true,
+   "agent": {
+    "name": "hr-assistant",
+    "platform": "Azure OpenAI + LangChain",
+    "model": "gpt-4o (provider-managed)",
+    "autonomy": "semi-autonomous (human approves sends)",
+    "tools": [
+     "email.read",
+     "hr-portal.read",
+     "calendar.write"
+    ],
+    "mcp_servers": [
+     "mcp-hr-files",
+     "mcp-crm"
+    ],
+    "credentials": [
+     {
+      "name": "sharepoint-hr",
+      "scope": "sharepoint:read"
+     },
+     {
+      "name": "crm-sandbox",
+      "scope": "crm:read"
+     }
+    ],
+    "untrusted_inputs": [
+     "inbound email bodies/attachments"
+    ],
+    "declared": true,
+    "verified": true
+   }
+  },
+  {
+   "id": "ast-9002",
+   "hostname": null,
+   "asset_type": "ai-agent",
+   "role": "Autonomous outbound sales follow-up agent",
+   "ip": null,
+   "environment": "corporate",
+   "os": null,
+   "criticality": "high",
+   "internet_facing": true,
+   "owner": "unknown",
+   "monitored": true,
+   "agent": {
+    "name": "sales-autopilot",
+    "platform": "OpenAI Agents SDK + n8n",
+    "model": "gpt-4o-mini (provider-managed)",
+    "autonomy": "autonomous",
+    "tools": [
+     "crm.write",
+     "email.send",
+     "web.browse"
+    ],
+    "mcp_servers": [
+     "mcp-crm"
+    ],
+    "credentials": [
+     {
+      "name": "crm-prod",
+      "scope": "crm:read+write"
+     },
+     {
+      "name": "smtp-relay",
+      "scope": "smtp:send"
+     }
+    ],
+    "untrusted_inputs": [
+     "web forms"
+    ],
+    "declared": false,
+    "verified": true
+   }
+  },
+  {
+   "id": "ast-9003",
+   "hostname": null,
+   "asset_type": "ai-agent",
+   "role": "IT helpdesk triage bot — classifies tickets and suggests KB articles",
+   "ip": null,
+   "asset_type_note": "declared but not yet attested",
+   "environment": "corporate",
+   "os": null,
+   "criticality": "medium",
+   "internet_facing": false,
+   "owner": "IT Service Desk",
+   "monitored": false,
+   "agent": {
+    "name": "it-helpdesk-bot",
+    "platform": "Azure OpenAI + Power Automate",
+    "model": "gpt-4o-mini (provider-managed)",
+    "autonomy": "suggest-only (no write actions)",
+    "tools": [
+     "ticketing.read",
+     "kb.search"
+    ],
+    "mcp_servers": [],
+    "credentials": [
+     {
+      "name": "servicedesk-ro",
+      "scope": "ticketing:read"
+     }
+    ],
+    "untrusted_inputs": [
+     "user-submitted ticket text"
+    ],
+    "declared": true,
+    "verified": false
+   }
+  }
+ ],
+ "relationships": [
+  {
+   "source": "internet",
+   "target": "ast-0001",
+   "kind": "network",
+   "label": "HTTPS :443",
+   "exposes": [
+    "Freight tracking portal",
+    "Unpatched Rails deserialization path (fnd-0001)"
+   ]
+  },
+  {
+   "source": "internet",
+   "target": "ast-0003",
+   "kind": "network",
+   "label": "SMTP :25 / webmail :443",
+   "exposes": [
+    "Inbound mail",
+    "Inbound attachments to hr-assistant"
+   ]
+  },
+  {
+   "source": "ast-0001",
+   "target": "ast-0002",
+   "kind": "network",
+   "label": "PostgreSQL :5432 — flat LAN, no VLAN segmentation",
+   "exposes": [
+    "ERP database directly reachable from compromised DMZ host"
+   ]
+  },
+  {
+   "source": "ast-0001",
+   "target": "ast-0002",
+   "kind": "data",
+   "label": "Portal reads/writes bookings and invoices",
+   "exposes": [
+    "ERP business data"
+   ]
+  },
+  {
+   "source": "ast-0003",
+   "target": "ast-9001",
+   "kind": "email",
+   "label": "Inbound mail relayed to hr-assistant for triage",
+   "exposes": [
+    "Attacker-controlled email bodies/attachments reach agent as untrusted input"
+   ]
+  },
+  {
+   "source": "ast-9001",
+   "target": "mcp-hr-files",
+   "kind": "mcp",
+   "label": "MCP server — HR file tools",
+   "exposes": [
+    "File read/write operations on HR share"
+   ]
+  },
+  {
+   "source": "ast-9001",
+   "target": "mcp-crm",
+   "kind": "mcp",
+   "label": "MCP server — CRM query tools",
+   "exposes": [
+    "CRM record reads"
+   ]
+  },
+  {
+   "source": "mcp-hr-files",
+   "target": "ast-0004",
+   "kind": "data",
+   "label": "SMB share access (sharepoint-hr credential)",
+   "exposes": [
+    "Payroll extracts, contracts, leave records"
+   ]
+  },
+  {
+   "source": "mcp-crm",
+   "target": "ast-0005",
+   "kind": "data",
+   "label": "CRM SQL access (crm-sandbox credential, read)",
+   "exposes": [
+    "Customer contact and shipment data"
+   ]
+  },
+  {
+   "source": "ast-9002",
+   "target": "ast-0005",
+   "kind": "data",
+   "label": "Direct CRM production writes (crm-prod credential)",
+   "exposes": [
+    "Undeclared agent can modify customer records in production"
+   ]
+  },
+  {
+   "source": "ast-9002",
+   "target": "ast-0003",
+   "kind": "email",
+   "label": "Sends mail via smtp-relay credential",
+   "exposes": [
+    "Unsupervised outbound mail to customers"
+   ]
+  },
+  {
+   "source": "ast-0010",
+   "target": "internet",
+   "kind": "network",
+   "label": "Perimeter egress",
+   "exposes": [
+    "All internal egress traffic"
+   ]
+  },
+  {
+   "source": "ast-0010",
+   "target": "ast-0011",
+   "kind": "network",
+   "label": "DMZ-to-LAN trunk",
+   "exposes": [
+    "DMZ segments not isolated from corporate VLAN"
+   ]
+  },
+  {
+   "source": "ast-0011",
+   "target": "ast-0002",
+   "kind": "network",
+   "label": "LAN flat VLAN",
+   "exposes": [
+    "ERP DB reachable from any LAN host"
+   ]
+  },
+  {
+   "source": "ast-0011",
+   "target": "ast-0004",
+   "kind": "network",
+   "label": "LAN flat VLAN",
+   "exposes": [
+    "HR fileserver SMB reachable from any LAN host"
+   ]
+  },
+  {
+   "source": "ast-0011",
+   "target": "ast-0005",
+   "kind": "network",
+   "label": "LAN flat VLAN",
+   "exposes": [
+    "CRM DB reachable from any LAN host"
+   ]
+  },
+  {
+   "source": "ast-0011",
+   "target": "ast-0015",
+   "kind": "network",
+   "label": "LAN flat VLAN",
+   "exposes": [
+    "Domain controller reachable from any LAN host"
+   ]
+  },
+  {
+   "source": "ast-0006",
+   "target": "ast-0011",
+   "kind": "network",
+   "label": "User VLAN uplink",
+   "exposes": [
+    "Standard LAN reachability"
+   ]
+  },
+  {
+   "source": "ast-0007",
+   "target": "ast-0011",
+   "kind": "network",
+   "label": "User VLAN uplink",
+   "exposes": [
+    "Standard LAN reachability"
+   ]
+  },
+  {
+   "source": "ast-0008",
+   "target": "ast-0011",
+   "kind": "network",
+   "label": "User VLAN uplink (depot WAN)",
+   "exposes": [
+    "Depot laptop on same flat LAN"
+   ]
+  },
+  {
+   "source": "ast-0013",
+   "target": "ast-0012",
+   "kind": "network",
+   "label": "Docker bridge network on k8s-node-01",
+   "exposes": [
+    "payments-svc container reachable from host"
+   ]
+  },
+  {
+   "source": "ast-0002",
+   "target": "ast-0014",
+   "kind": "data",
+   "label": "Nightly ERP dump to backup NAS",
+   "exposes": [
+    "ERP data replicated to backup target"
+   ]
+  }
+ ],
+ "findings": [
+  {
+   "id": "fnd-0001",
+   "asset_id": "ast-0001",
+   "title": "Remote code execution in freight portal framework (CVE-2024-XXXX-style deserialization flaw)",
+   "cve_or_key": "CVE-2024-31217",
+   "severity": "critical",
+   "status": "open",
+   "exposure": "internet-facing",
+   "tes_score": 92,
+   "kev": true,
+   "evidence_ids": [
+    "evd-0001"
+   ],
+   "decision_id": "dec-0001",
+   "summary": "Public freight-tracking portal runs a vulnerable serialization path reachable without authentication. Listed in CISA KEV; actively exploited in the wild against similar Rails deployments."
+  },
+  {
+   "id": "fnd-0002",
+   "asset_id": "ast-0002",
+   "title": "ERP database unauthenticated query interface exposed on flat LAN",
+   "cve_or_key": "NW-CFG-ERP-AUTH",
+   "severity": "critical",
+   "status": "open",
+   "exposure": "reachable",
+   "tes_score": 88,
+   "kev": false,
+   "evidence_ids": [
+    "evd-0002"
+   ],
+   "decision_id": "dec-0002",
+   "summary": "PostgreSQL on erp-db-01 accepts connections from any LAN host including the DMZ, and one legacy role has no password policy. Any foothold in the DMZ reaches bookings, invoicing and customs data in one hop."
+  },
+  {
+   "id": "fnd-0003",
+   "asset_id": "ast-0003",
+   "title": "Mail gateway legacy web service exposes administrative panel",
+   "cve_or_key": "CVE-2023-44921",
+   "severity": "medium",
+   "status": "open",
+   "exposure": "internet-facing",
+   "tes_score": 41,
+   "kev": false,
+   "evidence_ids": [
+    "evd-0003"
+   ],
+   "decision_id": "dec-0003",
+   "summary": "Scanner flagged an exposed admin panel on mail-gw-01 with a known CVE. Configuration evidence shows this is the deliberate canary/honeypot instance with no real mailboxes or credentials attached."
+  },
+  {
+   "id": "fnd-0004",
+   "asset_id": "ast-0006",
+   "title": "Outdated PDF reader on finance laptop",
+   "cve_or_key": "CVE-2024-20129",
+   "severity": "medium",
+   "status": "open",
+   "exposure": "internal",
+   "tes_score": 45,
+   "kev": false,
+   "evidence_ids": [
+    "evd-0006"
+   ],
+   "decision_id": null,
+   "summary": "Standard endpoint hygiene item; endpoint EDR coverage in place, patch cycle already scheduled."
+  },
+  {
+   "id": "fnd-0005",
+   "asset_id": "ast-0008",
+   "title": "Windows 10 build past support horizon on depot laptop",
+   "cve_or_key": "NW-OS-W10-EOL",
+   "severity": "low",
+   "status": "open",
+   "exposure": "internal",
+   "tes_score": 38,
+   "kev": false,
+   "evidence_ids": [
+    "evd-0006"
+   ],
+   "decision_id": null,
+   "summary": "Depot laptop awaiting hardware refresh; no exposure beyond the flat LAN, tracked in the standard refresh queue."
+  },
+  {
+   "id": "fnd-0006",
+   "asset_id": "ast-0009",
+   "title": "Local firewall disabled on sales laptop",
+   "cve_or_key": "NW-CFG-LOCAL-FW",
+   "severity": "low",
+   "status": "open",
+   "exposure": "internal",
+   "tes_score": 22,
+   "kev": false,
+   "evidence_ids": [
+    "evd-0006"
+   ],
+   "decision_id": null,
+   "summary": "macOS packet filter off; attestation confirms user profile and no sensitive local data. Low priority hygiene item."
+  },
+  {
+   "id": "fnd-0007",
+   "asset_id": "ast-9001",
+   "title": "hr-assistant has excessive autonomous write reach",
+   "cve_or_key": "NW-AGT-HR-WRITE",
+   "severity": "high",
+   "status": "decision_recorded",
+   "exposure": "reachable",
+   "tes_score": 74,
+   "kev": false,
+   "evidence_ids": [
+    "evd-0004"
+   ],
+   "decision_id": "dec-0004",
+   "summary": "The agent reads untrusted inbound email and holds write-capable paths to the HR file share and calendar. A prompt-injection in a staff email could direct file operations on payroll data before a human sees anything."
+  },
+  {
+   "id": "fnd-0008",
+   "asset_id": "ast-9002",
+   "title": "sales-autopilot is an undeclared agent with production write access",
+   "cve_or_key": "NW-AGT-UNDECLARED-01",
+   "severity": "high",
+   "status": "open",
+   "exposure": "internet-facing",
+   "tes_score": 76,
+   "kev": false,
+   "evidence_ids": [
+    "evd-0005"
+   ],
+   "decision_id": "dec-0005",
+   "summary": "Reconciliation of provider-side activity against the agent register found an autonomous agent nobody owns, writing to the production CRM and sending customer email. It consumes web-form content as input."
+  },
+  {
+   "id": "fnd-0009",
+   "asset_id": "ast-0014",
+   "title": "Backup NAS management interface uses default TLS certificate",
+   "cve_or_key": "NW-CFG-NAS-TLS",
+   "severity": "medium",
+   "status": "open",
+   "exposure": "internal",
+   "tes_score": 35,
+   "kev": false,
+   "evidence_ids": [
+    "evd-0007"
+   ],
+   "decision_id": null,
+   "summary": "Self-signed default certificate on the management UI; no exposed services beyond the LAN. Certificate rotation scheduled in the normal ops window."
+  },
+  {
+   "id": "fnd-0010",
+   "asset_id": "ast-0015",
+   "title": "Domain controller missing recent security update",
+   "cve_or_key": "CVE-2024-11012",
+   "severity": "high",
+   "status": "open",
+   "exposure": "internal",
+   "tes_score": 68,
+   "kev": false,
+   "evidence_ids": [
+    "evd-0008"
+   ],
+   "decision_id": "dec-0006",
+   "summary": "DC is one cumulative update behind; risk accepted for the current change-freeze window with compensating monitoring on authentication paths."
+  }
+ ],
+ "evidence": [
+  {
+   "id": "evd-0001",
+   "kind": "nuclei_result",
+   "asset_id": "ast-0001",
+   "finding_id": "fnd-0001",
+   "sha256": "3f7a1c9e2b64d805aa11f0c3d59e87b4062ac91de4b73f0825c6da9f1e7b3402",
+   "captured_at": "2026-10-07T02:14:00Z",
+   "summary": "Authenticated-less template match confirming the vulnerable deserialization endpoint on the portal's tracking API.",
+   "payload_excerpt": "[rails-deserialization-rce] [http] [critical] https://track.northwindfreight.demo/api/v1/shipments — matched vulnerable actionpack version banner"
+  },
+  {
+   "id": "evd-0002",
+   "kind": "config_snapshot",
+   "asset_id": "ast-0002",
+   "finding_id": "fnd-0002",
+   "sha256": "8b2e5d47c1903fa6ee75b0d21c84a9f6d3170cc58bea6412f9d0e37ba5c82610",
+   "captured_at": "2026-10-07T02:40:00Z",
+   "summary": "pg_hba.conf snapshot showing 0.0.0.0/0 md5 auth on the ERP database, plus legacy role audit.",
+   "payload_excerpt": "host all all 0.0.0.0/0 md5  # legacy integration rule, never scoped"
+  },
+  {
+   "id": "evd-0003",
+   "kind": "config_snapshot",
+   "asset_id": "ast-0003",
+   "finding_id": "fnd-0003",
+   "sha256": "d41ac07b3e58296f1b7dce04aa9935f28e6d1c74b0f2a9583ce1706d4b95e218",
+   "captured_at": "2026-10-06T22:05:00Z",
+   "summary": "Deployment configuration proving the flagged admin panel is an isolated canary instance: no mailbox store mount, no directory bind, no real credentials, traffic mirrored to the SOC.",
+   "payload_excerpt": "service: mailweb-canary\nmode: honeypot\nmailbox_store: none\ndirectory_bind: disabled\ncredential_pool: synthetic-only\nsoc_mirror: enabled\nreal_domains_attached: []"
+  },
+  {
+   "id": "evd-0004",
+   "kind": "audit_record",
+   "asset_id": "ast-9001",
+   "finding_id": "fnd-0007",
+   "sha256": "97c3de801a4f6b25ce09d837f2ab5160e8c94d73baf0621d5e830c47a9b1f6d2",
+   "captured_at": "2026-10-08T11:30:00Z",
+   "summary": "30-day tool-call audit for hr-assistant: 1,942 file-write calls against the HR share executed without human review, all originating from email-triggered sessions.",
+   "payload_excerpt": "session trigger=email tool=hr_files.write approved_by=none count=1942 top_path=/payroll/extracts/*"
+  },
+  {
+   "id": "evd-0005",
+   "kind": "audit_record",
+   "asset_id": "ast-9002",
+   "finding_id": "fnd-0008",
+   "sha256": "52af9b31e07d64c8b3e4120f9ad5c7180e3b69d2f74c1a58906bdce34f71e209",
+   "captured_at": "2026-10-08T14:10:00Z",
+   "summary": "Reconciliation output comparing provider activity logs against the declared agent register: one unmatched autonomous identity with production CRM writes.",
+   "payload_excerpt": "reconcile(provider_logs, agent_register) -> unmatched: sales-autopilot (autonomy=autonomous, scope=crm:read+write, smtp:send), declared_by=null"
+  },
+  {
+   "id": "evd-0006",
+   "kind": "collector_run",
+   "asset_id": "ast-0006",
+   "finding_id": "fnd-0004",
+   "sha256": "6e1d2b48fa93c0577d21be6038c94ae15b70f2d3c86a9410b5e27f3d6ca8019b",
+   "captured_at": "2026-10-06T03:00:00Z",
+   "summary": "Nightly endpoint collector sweep across corp-laptop-0114/0231/0307/0412: software inventory, patch state and local firewall status.",
+   "payload_excerpt": "host=corp-laptop-0114 pdf_reader=AcroRdr 23.8<24.2 patch_state=behind edr=healthy fw=on"
+  },
+  {
+   "id": "evd-0007",
+   "kind": "config_snapshot",
+   "asset_id": "ast-0014",
+   "finding_id": "fnd-0009",
+   "sha256": "1b93ce5074ad28f6e0d1b3784c25a9f6083d7ce41b2e5906a7f3d81b50ce4273",
+   "captured_at": "2026-10-05T21:15:00Z",
+   "summary": "NAS management TLS configuration: vendor default self-signed certificate, management UI bound to LAN only.",
+   "payload_excerpt": "tls.cert=vendor-default-self-signed mgmt.bind=10.20.1.60:8443 external_exposure=none"
+  },
+  {
+   "id": "evd-0008",
+   "kind": "nuclei_result",
+   "asset_id": "ast-0015",
+   "finding_id": "fnd-0010",
+   "sha256": "c85a01f36b9d247e1a68b0d47f3c95e2028d1b74ac6e3950f217d8b3ae60f5c1",
+   "captured_at": "2026-10-07T01:50:00Z",
+   "summary": "Authenticated patch-level check on the domain controller confirming one missing cumulative update.",
+   "payload_excerpt": "[ad-dc-missing-update] [tcp] [high] ad-dc-01 — build 20348.2849 < required 20348.2962"
+  },
+  {
+   "id": "evd-0009",
+   "kind": "config_snapshot",
+   "asset_id": "ast-0001",
+   "finding_id": null,
+   "sha256": "40be172a5d8c391f06e4b2d59a8c07f361e5d09b83a7426cd0f15e87b4a3c692",
+   "captured_at": "2026-10-04T20:00:00Z",
+   "summary": "EDIP asset-record snapshot for dmz-web-01: registered owner, environment tag, monitored flag and patch baseline all present and current.",
+   "payload_excerpt": "edip.control=AST-01 owner=IT Infrastructure env=dmz monitored=true baseline=2026-09 record_complete=true"
+  },
+  {
+   "id": "evd-0010",
+   "kind": "manual_attestation",
+   "asset_id": "ast-0001",
+   "finding_id": null,
+   "sha256": "7f02ae93d16c84b5e70321d84c9a56f0107cb38e2f6d1495a30ce7b26d8413a5",
+   "captured_at": "2026-10-04T20:30:00Z",
+   "summary": "Owner attestation for dmz-web-01: change process and backup verification confirmed for the quarter; signed into the control ledger.",
+   "payload_excerpt": "attestation: quarterly change + backup verification for dmz-web-01 confirmed by IT Infrastructure lead"
+  },
+  {
+   "id": "evd-0011",
+   "kind": "nuclei_result",
+   "asset_id": "ast-0001",
+   "finding_id": "fnd-0001",
+   "sha256": "ab41f8e2c6d795031e0a6c24b8d73f9152ec0a678d1b3492f05ae67c8d924b10",
+   "captured_at": "2026-10-08T18:45:00Z",
+   "summary": "Post-remediation re-scan of the tracking API: vulnerable serialization path no longer present; framework patched and restarted.",
+   "payload_excerpt": "[rails-deserialization-rce] [http] — no match. actionpack 6.1.4.2 -> 7.0.8.4"
+  },
+  {
+   "id": "evd-0012",
+   "kind": "config_snapshot",
+   "asset_id": "ast-0002",
+   "finding_id": "fnd-0002",
+   "sha256": "e03b96a47d1f582c0a9b6de73f10c4827b5a91e60d3f2ac8b174e5069d32c7f1",
+   "captured_at": "2026-10-08T19:20:00Z",
+   "summary": "Post-remediation pg_hba.conf: legacy 0.0.0.0/0 rule removed; access scoped to the portal application subnet, DMZ excluded.",
+   "payload_excerpt": "host all all 10.20.0.0/28 scram-sha-256  # legacy 0.0.0.0/0 rule deleted"
+  },
+  {
+   "id": "evd-0013",
+   "kind": "collector_run",
+   "asset_id": "ast-9001",
+   "finding_id": null,
+   "sha256": "19d4c7b208ae56f13e0b93d62a71c4805f6be382d0a7c1453e2960fb7ad1c3e8",
+   "captured_at": "2026-10-08T09:00:00Z",
+   "summary": "Agent verification run for hr-assistant: declared record matches observed platform, tools and MCP bindings; credential scopes read-only as declared.",
+   "payload_excerpt": "verify(hr-assistant): platform=match tools=match mcp=match cred_scopes=match declared=true verified=true"
+  },
+  {
+   "id": "evd-0014",
+   "kind": "manual_attestation",
+   "asset_id": "ast-0015",
+   "finding_id": "fnd-0010",
+   "sha256": "5c8e20d17fa36b9402e1c7538a49bd6021f3e7854cb0a1926d7e3580ca4f1b26",
+   "captured_at": "2026-10-08T16:00:00Z",
+   "summary": "Change-freeze acceptance: DC patch deferred to next maintenance window with enhanced authentication-path monitoring in place.",
+   "payload_excerpt": "acceptance: CVE-2024-11012 patch deferred to 2026-10-14 window; monitoring compensates; CISO approved"
+  }
+ ],
+ "edip_verifications": [
+  {
+   "id": "edip-0001",
+   "control_code": "EDIP-AST-01",
+   "control_name": "Complete and owned asset record",
+   "asset_id": "ast-0001",
+   "status": "verified",
+   "verified_at": "2026-10-04T20:00:00Z",
+   "evidence_id": "evd-0009"
+  },
+  {
+   "id": "edip-0002",
+   "control_code": "EDIP-CHG-02",
+   "control_name": "Change and backup attestation",
+   "asset_id": "ast-0001",
+   "status": "verified",
+   "verified_at": "2026-10-04T20:30:00Z",
+   "evidence_id": "evd-0010"
+  },
+  {
+   "id": "edip-0003",
+   "control_code": "EDIP-MON-04",
+   "control_name": "Active monitoring coverage",
+   "asset_id": "ast-0001",
+   "status": "verified",
+   "verified_at": "2026-10-04T20:10:00Z",
+   "evidence_id": "evd-0009"
+  },
+  {
+   "id": "edip-0004",
+   "control_code": "EDIP-AGT-05",
+   "control_name": "Agent declaration matches observed behaviour",
+   "asset_id": "ast-9001",
+   "status": "verified",
+   "verified_at": "2026-10-08T09:00:00Z",
+   "evidence_id": "evd-0013"
+  }
+ ],
+ "decisions": [
+  {
+   "id": "dec-0001",
+   "finding_id": "fnd-0001",
+   "sequence": [
+    "INVESTIGATE",
+    "PATCH"
+   ],
+   "recorded_by": "Tempris engine (precomputed)",
+   "recorded_at": "2026-10-07T08:00:00Z",
+   "rationale": "KEV-listed RCE on an internet-facing portal leaves no containment alternative to immediate patching. Investigation first confirmed the exploit path was the tracking API, so the emergency change could be scoped to one service with a single restart.",
+   "outcome": "Patched 2026-10-08; re-scan clean (evd-0011); exposure closed."
+  },
+  {
+   "id": "dec-0002",
+   "finding_id": "fnd-0002",
+   "sequence": [
+    "PATCH"
+   ],
+   "recorded_by": "Tempris engine (precomputed)",
+   "recorded_at": "2026-10-07T08:05:00Z",
+   "rationale": "The flat LAN makes every DMZ compromise a direct ERP compromise, so the legacy open authentication rule had to go. Scoping access to the portal subnet removed the attack path without breaking any known integration.",
+   "outcome": "Auth rule scoped 2026-10-08 (evd-0012); DMZ-to-ERP path closed."
+  },
+  {
+   "id": "dec-0003",
+   "finding_id": "fnd-0003",
+   "sequence": [
+    "FALSE_POSITIVE"
+   ],
+   "recorded_by": "Tempris engine (precomputed)",
+   "recorded_at": "2026-10-08T10:15:00Z",
+   "rationale": "Configuration evidence shows the flagged panel is the deliberate canary service: no mailbox store, no directory bind, no real credentials, all traffic mirrored to the SOC. The CVE is real but the asset context makes it a decoy, not an exposure. The finding is closed as false positive and the canary is retained by design.",
+   "outcome": "Finding closed as false positive; status flips open -> false_positive; medium count drops in exposure_after."
+  },
+  {
+   "id": "dec-0004",
+   "finding_id": "fnd-0007",
+   "sequence": [
+    "INVESTIGATE",
+    "COMPENSATING_CONTROL"
+   ],
+   "recorded_by": "Tempris engine (precomputed)",
+   "recorded_at": "2026-10-08T15:30:00Z",
+   "rationale": "The agent's business value depends on the same write reach that makes it risky, so removing capability would break HR operations. Investigation confirmed 1,942 unreviewed file writes; the compensating control routes every write through a human approval gate and locks the payroll subtree to read-only until review coverage is proven.",
+   "outcome": "Approval gate + payroll-subtree read-only enforced; agent stays productive, blast radius capped."
+  },
+  {
+   "id": "dec-0005",
+   "finding_id": "fnd-0008",
+   "sequence": [
+    "INVESTIGATE"
+   ],
+   "recorded_by": "Tempris engine (precomputed)",
+   "recorded_at": "2026-10-08T16:45:00Z",
+   "rationale": "An autonomous agent with production write access and no owner is an unaccountable actor in the estate. Investigation is opened to identify who deployed sales-autopilot and whether its CRM writes are authorised before any scope is granted or revoked.",
+   "outcome": "Investigation open, assigned to Security Ops with Sales Ops; production CRM write pending owner identification."
+  },
+  {
+   "id": "dec-0006",
+   "finding_id": "fnd-0010",
+   "sequence": [
+    "ACCEPT_RISK"
+   ],
+   "recorded_by": "Tempris engine (precomputed)",
+   "recorded_at": "2026-10-08T16:00:00Z",
+   "rationale": "The domain controller is internal-only and the missing update has no public exploitation, but the change freeze runs to 2026-10-14. Risk is formally accepted for the window with authentication-path monitoring as compensation and a named patch date.",
+   "outcome": "Risk accepted until 2026-10-14 (evd-0014); patch scheduled."
+  }
+ ],
+ "remediations": [
+  {
+   "id": "rem-0001",
+   "finding_id": "fnd-0001",
+   "action": "Emergency patch of the freight portal framework (actionpack upgrade) and service restart on dmz-web-01",
+   "status": "completed",
+   "completed_at": "2026-10-08T18:40:00Z",
+   "verified_by_evidence_id": "evd-0011"
+  },
+  {
+   "id": "rem-0002",
+   "finding_id": "fnd-0002",
+   "action": "Remove legacy 0.0.0.0/0 authentication rule on erp-db-01 and scope access to the portal application subnet",
+   "status": "completed",
+   "completed_at": "2026-10-08T19:15:00Z",
+   "verified_by_evidence_id": "evd-0012"
+  },
+  {
+   "id": "rem-0003",
+   "finding_id": "fnd-0004",
+   "action": "Deploy PDF reader update to corp-laptop-0114 via standard patch ring",
+   "status": "scheduled",
+   "completed_at": null,
+   "verified_by_evidence_id": null
+  }
+ ],
+ "report": {
+  "title": "Northwind Freight — Exposure Report",
+  "generated_at": "2026-10-09T00:00:00Z",
+  "executive_summary": "Northwind Freight's estate of 18 assets (including 3 AI agents) carries 10 open or recorded findings. Two critical internet-reachable exposures on the freight portal and ERP database were remediated on 8 October, closing the KEV-listed attack path internet -> dmz-web-01 -> erp-db-01. One medium finding was closed as a false positive after configuration evidence proved the flagged service is a canary. Three AI agents are now inventoried; one declared agent's write reach is under a compensating control and one undeclared agent with production write access is under investigation.",
+  "exposure_before": {
+   "critical": 2,
+   "high": 3,
+   "medium": 4,
+   "low": 1
+  },
+  "exposure_after": {
+   "critical": 0,
+   "high": 3,
+   "medium": 3,
+   "low": 1
+  },
+  "top_findings": [
+   "fnd-0001",
+   "fnd-0002",
+   "fnd-0008",
+   "fnd-0007"
+  ],
+  "watermark": "DEMO / SYNTHETIC — NOT A REAL ESTATE"
+ },
+ "journeys": {
+  "A": {
+   "id": "A",
+   "title": "One estate, one honest picture — from exposure to closed",
+   "minutes": 10,
+   "audience": "CISO / security leadership",
+   "talk_track_source": "constructed — approved external card not available",
+   "steps": [
+    {
+     "n": 1,
+     "title": "The whole estate on one screen",
+     "screen": "overview",
+     "focus_ids": [
+      "fnd-0001",
+      "fnd-0002"
+     ],
+     "talk": "This is Northwind Freight, our fictional Singapore logistics demo estate — eighteen assets, ten findings, three AI agents. Everything you will see is derived from one dataset, so every number on screen reconciles with every other. I want to start where an attacker would: the internet edge. Two critical exposures are waiting there, and we are going to follow them end to end."
+    },
+    {
+     "n": 2,
+     "title": "Inventory without gaps",
+     "screen": "asset_inventory",
+     "focus_ids": [
+      "ast-0001",
+      "ast-0002",
+      "ast-0003"
+     ],
+     "talk": "Here is the full inventory — servers, network gear, containers, laptops, and agents, all in one table. Each record carries an owner, an environment and a monitored flag, because you cannot defend what you cannot attribute. Notice dmz-web-01 and erp-db-01; those two are our story for the next few minutes."
+    },
+    {
+     "n": 3,
+     "title": "Meet the hero asset: dmz-web-01",
+     "screen": "asset_detail",
+     "focus_ids": [
+      "ast-0001",
+      "evd-0009"
+     ],
+     "talk": "dmz-web-01 is the public freight-tracking portal — internet-facing, high criticality, owned by IT Infrastructure. The detail view shows its control posture alongside its exposure, so I never have to leave the asset to understand its context. It is monitored, its record is complete, and its owner has attested to change and backup discipline this quarter."
+    },
+    {
+     "n": 4,
+     "title": "The critical finding, and the proof behind it",
+     "screen": "finding_detail",
+     "focus_ids": [
+      "fnd-0001",
+      "evd-0001"
+     ],
+     "talk": "Finding 0001: a critical remote code execution on the portal, exposure level internet-facing, exposure score 92 out of 100 — and it is on the KEV list, meaning it is being exploited in the wild right now. The evidence tab shows the exact scanner result that proved it. This is not a rumour from a vulnerability feed; it is a verified match against this asset."
+    },
+    {
+     "n": 5,
+     "title": "Control compliance, evidenced",
+     "screen": "evidence_view",
+     "focus_ids": [
+      "edip-0001",
+      "edip-0002",
+      "edip-0003",
+      "evd-0009",
+      "evd-0010"
+     ],
+     "talk": "An exposed asset is not necessarily a badly run asset. These are the EDIP control verifications for dmz-web-01 — asset record, change and backup attestation, monitoring coverage — each backed by evidence I can open and read. The team did the hygiene right; the exposure is in the software they were handed. That distinction matters when you decide who to call."
+    },
+    {
+     "n": 6,
+     "title": "An ordered, accountable decision",
+     "screen": "decision_view",
+     "focus_ids": [
+      "dec-0001",
+      "dec-0002",
+      "fnd-0002"
+     ],
+     "talk": "Tempris did not just raise an alert — it recorded a decision: investigate, then patch, with a rationale in plain language and an outcome that can be checked. The same logic drove the second critical finding on erp-db-01, reachable in one hop across the flat LAN. Two decisions, both attributable, both auditable."
+    },
+    {
+     "n": 7,
+     "title": "After-state: closed and verified",
+     "screen": "remediation_view",
+     "focus_ids": [
+      "rem-0001",
+      "rem-0002",
+      "evd-0011",
+      "evd-0012"
+     ],
+     "talk": "Both remediations completed on the eighth of October, and each is verified by post-fix evidence — a clean re-scan for the portal, a scoped database rule for the ERP. Before: two critical exposures. After: zero. The score drop you see is not a promise, it is a measurement."
+    },
+    {
+     "n": 8,
+     "title": "The report a board actually reads",
+     "screen": "report",
+     "focus_ids": [
+      "fnd-0001",
+      "fnd-0002"
+     ],
+     "talk": "This is the executive report generated from the same dataset — exposure before and after, top findings, and the summary written for people who will never open a scanner console. Criticals go from two to zero in one remediation cycle. That is the demo story for the traditional estate; the rest of the journeys go deeper."
+    }
+   ],
+   "close": "From internet-facing critical to verified closure — evidence at every step, and every number derived from the same estate."
+  },
+  "B": {
+   "id": "B",
+   "title": "Killing a finding honestly — the false positive",
+   "minutes": 5,
+   "audience": "SOC / vulnerability management",
+   "talk_track_source": "constructed — approved external card not available",
+   "steps": [
+    {
+     "n": 1,
+     "title": "Back to the inventory",
+     "screen": "asset_inventory",
+     "focus_ids": [
+      "ast-0003",
+      "fnd-0003"
+     ],
+     "talk": "Not every finding deserves a patch night. Mail gateway mail-gw-01 carries a medium finding on an exposed admin panel, and it has been sitting on the queue. Let me show you why it is about to come off it."
+    },
+    {
+     "n": 2,
+     "title": "The finding as first reported",
+     "screen": "finding_detail",
+     "focus_ids": [
+      "fnd-0003",
+      "evd-0003"
+     ],
+     "talk": "Finding 0003: a real CVE, matched on an internet-facing panel, exposure score 41. On paper it looks like work. The question Tempris always asks next is not 'what is the CVE' but 'what is this asset actually doing'."
+    },
+    {
+     "n": 3,
+     "title": "The evidence that changes the answer",
+     "screen": "evidence_view",
+     "focus_ids": [
+      "evd-0003"
+     ],
+     "talk": "Here is the configuration snapshot: the flagged panel is the deliberate canary instance. No mailbox store, no directory bind, no real credentials — only synthetic ones — and every connection mirrored to the SOC. The scanner was correct about the service and wrong about the risk, because it had no asset context."
+    },
+    {
+     "n": 4,
+     "title": "Decision: false positive, with a rationale",
+     "screen": "decision_view",
+     "focus_ids": [
+      "dec-0003"
+     ],
+     "talk": "The recorded decision is FALSE_POSITIVE, and the rationale is written in full: the CVE is real, the asset context makes it a decoy. Nothing was hand-waved away — the evidence id is on the record, so an auditor can replay the reasoning. This is what an honest kill looks like."
+    },
+    {
+     "n": 5,
+     "title": "After-state: the counts move",
+     "screen": "report",
+     "focus_ids": [
+      "fnd-0003"
+     ],
+     "talk": "Watch the exposure report: medium count drops from four to three, because the finding's status has flipped from open to false positive. No patch, no ticket theatre, and the canary stays exactly where the SOC wants it. The queue now contains only real work."
+    }
+   ],
+   "close": "Evidence didn't just confirm this finding — it killed it. That is exposure management working in both directions."
+  },
+  "C": {
+   "id": "C",
+   "title": "Coverage versus fidelity — are we safe, or just scanned?",
+   "minutes": 5,
+   "audience": "Security engineering / architects",
+   "talk_track_source": "constructed — approved external card not available",
+   "steps": [
+    {
+     "n": 1,
+     "title": "Two different questions",
+     "screen": "overview",
+     "focus_ids": [
+      "fnd-0001",
+      "fnd-0002"
+     ],
+     "talk": "Before I show the metrics, one distinction. Coverage asks: did our tooling see the estate? Fidelity asks: do we have proof that our controls actually work? They are not the same number, and conflating them is how programmes overstate themselves."
+    },
+    {
+     "n": 2,
+     "title": "Coverage: 94 percent of assets",
+     "screen": "coverage",
+     "focus_ids": [
+      "ast-0009",
+      "ast-9003"
+     ],
+     "talk": "Seventeen of eighteen assets have active scanning or monitoring — that is 94 percent coverage. The gap is corp-laptop-0412 and the helpdesk bot, both flagged unmonitored in the inventory. Coverage tells me where the blind spots are, and it is honest that they exist."
+    },
+    {
+     "n": 3,
+     "title": "Fidelity: the evidence behind each control",
+     "screen": "evidence_view",
+     "focus_ids": [
+      "evd-0009",
+      "evd-0010",
+      "evd-0013",
+      "evd-0002"
+     ],
+     "talk": "Fidelity is stricter: of eighteen tracked controls, eleven carry verified evidence — 61 percent. Each verification is a configuration snapshot, an attestation or a collector run I can open. The rest are controls we run but cannot yet prove, and the programme treats that as work, not as a pass."
+    },
+    {
+     "n": 4,
+     "title": "Reading the two numbers together",
+     "screen": "coverage",
+     "focus_ids": [
+      "fnd-0003",
+      "evd-0003"
+     ],
+     "talk": "So: 94 percent coverage, 61 percent fidelity — and both numbers come from the same estate data you have seen all demo. The 33-point gap is exactly where the roadmap lives: attest what is already running before buying anything new. A programme that only reports coverage would have hidden this entirely."
+    }
+   ],
+   "close": "Coverage says we looked. Fidelity says we can prove what we saw. Tempris reports both, from the same data."
+  },
+  "D": {
+   "id": "D",
+   "title": "Follow the path an attacker would take",
+   "minutes": 5,
+   "audience": "Technical leadership / incident response",
+   "talk_track_source": "constructed — approved external card not available",
+   "steps": [
+    {
+     "n": 1,
+     "title": "The path starts at the internet",
+     "screen": "attack_path",
+     "focus_ids": [
+      "ast-0001",
+      "fnd-0001"
+     ],
+     "talk": "This is the attack graph for Northwind Freight, built from the network relationships in the estate. The entry point is dmz-web-01, exposed on HTTPS with a critical, KEV-listed RCE — finding 0001, score 92. One internet-reachable flaw, and the attacker has a shell in the DMZ."
+    },
+    {
+     "n": 2,
+     "title": "Why one hop is enough: the flat LAN",
+     "screen": "attack_path",
+     "focus_ids": [
+      "ast-0010",
+      "ast-0011",
+      "ast-0002"
+     ],
+     "talk": "From the DMZ the firewall trunk leads onto the core switch, and the core LAN is flat — no VLAN segmentation between DMZ and corporate. The relationship data shows the ERP database at 10.20.0.15 accepting connections from any LAN host. The graph is not theoretical; every edge is a relationship we recorded."
+    },
+    {
+     "n": 3,
+     "title": "The crown jewel, one hop away",
+     "screen": "asset_detail",
+     "focus_ids": [
+      "ast-0002",
+      "evd-0002"
+     ],
+     "talk": "erp-db-01 holds bookings, invoicing and customs declarations — critical business data. The configuration snapshot in its evidence shows why it falls: an authentication rule scoped to the whole world, never tightened. Two assets, two findings, one path — that is the whole breach in three nodes."
+    },
+    {
+     "n": 4,
+     "title": "Findings along the path, ranked",
+     "screen": "finding_detail",
+     "focus_ids": [
+      "fnd-0002",
+      "fnd-0001"
+     ],
+     "talk": "Both path findings carry exposure context: 0001 internet-facing and exploited in the wild, 0002 reachable from the DMZ. Exposure scoring put them at 92 and 88, and the path explains why — each one is only as dangerous as the node that leads to it. Fixing either link breaks the chain; fixing both kills it."
+    },
+    {
+     "n": 5,
+     "title": "The decision that broke the chain",
+     "screen": "decision_view",
+     "focus_ids": [
+      "dec-0001",
+      "dec-0002",
+      "rem-0001",
+      "rem-0002"
+     ],
+     "talk": "Tempris recorded two decisions: patch the portal, and scope the database authentication rule. Both completed on the eighth with post-fix evidence, and the attack graph no longer connects the internet to the ERP. Path closed, rationale on record, evidence attached."
+    }
+   ],
+   "close": "Internet, DMZ, ERP — one path, two decisions, zero criticals. The graph told us where to look before the attacker told us where they were."
+  },
+  "E": {
+   "id": "E",
+   "title": "Exposure management for AI agents",
+   "minutes": 5,
+   "audience": "CISO / AI governance",
+   "talk_track_source": "External Journey E card v148",
+   "steps": [
+    {
+     "n": 1,
+     "title": "Agents are assets",
+     "screen": "asset_inventory",
+     "focus_ids": [
+      "ast-9001",
+      "ast-9002",
+      "ast-9003"
+     ],
+     "talk": "\"Here, agents are assets too — inventoried, owned and tracked like everything else.\" Filter the inventory to Type = AI agent and three records appear beside the servers and laptops. Northwind Freight runs hr-assistant, sales-autopilot and it-helpdesk-bot, each with an owner, an environment and a criticality. They live in the same inventory because they carry the same kind of risk."
+    },
+    {
+     "n": 2,
+     "title": "An agent's record, in full",
+     "screen": "asset_detail",
+     "focus_ids": [
+      "ast-9001",
+      "evd-0013"
+     ],
+     "talk": "Open hr-assistant. \"A server is described by its hardware; an agent is described by what it can do\" — platform Azure OpenAI with LangChain, model gpt-4o provider-managed, semi-autonomous with a human approving sends. Its tools are email.read, hr-portal.read and calendar.write; its MCP servers are mcp-hr-files and mcp-crm. Credentials appear as names and scopes only — sharepoint:read, crm:read — never secrets. And its untrusted inputs are inbound email bodies and attachments."
+    },
+    {
+     "n": 3,
+     "title": "Blast radius as a graph",
+     "screen": "attack_path",
+     "focus_ids": [
+      "ast-9001",
+      "ast-0003",
+      "ast-0004",
+      "ast-0005",
+      "evd-0004"
+     ],
+     "talk": "\"An agent's blast radius is its connections, not its compute.\" Switch the attack path view to the Reach tab: internet mail reaches mail-gw-01, which relays into hr-assistant as untrusted input. From the agent, the MCP servers reach the HR file server — payroll, contracts — and the CRM database with customer data. Those audit records show 1,942 unreviewed file writes. The graph is the risk."
+    },
+    {
+     "n": 4,
+     "title": "Declared versus verified — and the shadow agent",
+     "screen": "coverage",
+     "focus_ids": [
+      "ast-9001",
+      "ast-9002",
+      "ast-9003",
+      "evd-0005"
+     ],
+     "talk": "\"Declared isn't verified — reconciliation is what finds the gap.\" hr-assistant is declared and verified; it-helpdesk-bot is declared but not yet attested. And reconciliation found sales-autopilot: an autonomous agent nobody declared, writing to the production CRM with an smtp relay at its command. It appears on the coverage screen the moment declared and verified stop matching."
+    },
+    {
+     "n": 5,
+     "title": "Decision, not alert",
+     "screen": "decision_view",
+     "focus_ids": [
+      "fnd-0007",
+      "dec-0004",
+      "fnd-0008",
+      "dec-0005"
+     ],
+     "talk": "\"Not an alert — an ordered, accountable decision.\" For hr-assistant, the sequence is investigate, then compensating control: keep the agent productive, but put every file write behind a human approval gate and lock the payroll subtree to read-only. For sales-autopilot, the sequence is investigate — identify the owner before any production scope survives. Two findings, two sequences, both on the record."
+    }
+   ],
+   "close": "\"This agent. This exposure. This decision. That's exposure management extended to AI systems.\""
+  }
+ }
+}

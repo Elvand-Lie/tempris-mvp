@@ -1,0 +1,180 @@
+# demo/api/app/main.py — Terra partner demo (WO-10). Replay, not engine:
+# this service only loads, serves, resets and audits a checksum-pinned pack.
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from . import auth
+from .db import PACK_TABLES, init_schema, tenant_conn
+
+PACK_PATH = Path(
+    os.environ.get("DEMO_PACK_PATH", Path(__file__).resolve().parent.parent / "pack" / "northwind_freight.v1.json")
+)
+PACK_SHA256 = os.environ.get("DEMO_PACK_SHA256", "")  # pinned at release
+
+app = FastAPI(title="Tempris Partner Demo", version="1.0.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=os.environ.get("DEMO_ALLOWED_ORIGIN", ".*"),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def load_pack() -> dict:
+    raw = PACK_PATH.read_bytes()
+    if PACK_SHA256 and hashlib.sha256(raw).hexdigest() != PACK_SHA256:
+        raise RuntimeError("demo pack integrity check failed")
+    return json.loads(raw)
+
+
+def read_pack_pinned() -> dict:
+    """Every reset/serve re-verifies the pinned checksum (WO-10 10d)."""
+    raw = PACK_PATH.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != PACK_SHA256:
+        raise HTTPException(500, "demo pack integrity check failed")
+    return json.loads(raw)
+
+
+@app.on_event("startup")
+def startup() -> None:
+    init_schema()
+    if not PACK_SHA256:
+        raw = PACK_PATH.read_bytes()
+        raise RuntimeError(
+            "DEMO_PACK_SHA256 must be pinned at release "
+            f"(pack sha256 = {hashlib.sha256(raw).hexdigest()})"
+        )
+
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+    totp_code: str
+
+
+class StepIn(BaseModel):
+    journey: str
+    step: int
+    title: str | None = None
+
+
+@app.get("/api/health")
+def health():
+    return {"ok": True, "service": "tempris-partner-demo"}
+
+
+@app.post("/demo/login")
+def demo_login(payload: LoginIn):
+    token = auth.login(payload.username, payload.password, payload.totp_code)
+    auth.audit(auth.DEMO_TENANT, payload.username, "demo.login", {})
+    return {
+        "token": token,
+        "user": payload.username,
+        "role": "presenter",
+        "tenant": auth.DEMO_TENANT,
+    }
+
+
+@app.post("/demo/logout")
+def demo_logout(request: Request, user=Depends(auth.current_user)):
+    token = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if token:
+        auth.revoke_session(token)
+    auth.audit(user["tenant_id"], user["username"], "demo.logout", {})
+    return {"status": "logged_out"}
+
+
+@app.get("/demo/bootstrap")
+def bootstrap(user=Depends(auth.current_user)):
+    pack = load_pack()
+    raw = PACK_PATH.read_bytes()
+    return {
+        "pack_id": pack["pack_id"],
+        "version": pack["version"],
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "estate": pack["estate"],
+        "watermark": "DEMO / SYNTHETIC — NOT A REAL ESTATE",
+        "user": user,
+    }
+
+
+@app.get("/demo/pack")
+def get_pack(user=Depends(auth.current_user)):
+    """Serve the pack from the tenant-scoped tables (RLS in effect)."""
+    out: dict = {}
+    with tenant_conn(user["tenant_id"]) as conn:
+        with conn.cursor() as cur:
+            for table, key in PACK_TABLES.items():
+                cur.execute(
+                    f"SELECT payload FROM {table} ORDER BY ord"
+                )
+                out[key] = [r[0] for r in cur.fetchall()]
+            for blob_key in ("journeys", "report", "estate"):
+                cur.execute(
+                    "SELECT payload FROM pack_blobs WHERE tenant_id = %s AND key = %s",
+                    (user["tenant_id"], blob_key),
+                )
+                row = cur.fetchone()
+                out[blob_key] = row[0] if row else ({} if blob_key != "estate" else None)
+    if not out.get("assets"):
+        raise HTTPException(409, "demo pack not loaded — reset the demo first")
+    if not out.get("assets"):
+        raise HTTPException(409, "demo pack not loaded — reset the demo first")
+    return out
+
+
+@app.post("/demo/reset")
+def reset(user=Depends(auth.current_user)):
+    """One-click baseline restore: verify checksum, wipe tenant rows, reload.
+    Deterministic; well under the 60s budget for a pack this size."""
+    pack = read_pack_pinned()
+    with tenant_conn(user["tenant_id"]) as conn:
+        with conn.cursor() as cur:
+            for table in PACK_TABLES:
+                cur.execute(f"DELETE FROM {table}")
+            cur.execute("DELETE FROM pack_blobs WHERE tenant_id = %s", (user["tenant_id"],))
+            for table, key in PACK_TABLES.items():
+                for ord_, item in enumerate(pack.get(key, [])):
+                    cur.execute(
+                        f"INSERT INTO {table} (tenant_id, ord, payload) VALUES (%s, %s, %s)",
+                        (user["tenant_id"], ord_, json.dumps(item)),
+                    )
+            for key in ("journeys", "report", "estate"):
+                cur.execute(
+                    "INSERT INTO pack_blobs (tenant_id, key, payload) VALUES (%s, %s, %s)",
+                    (user["tenant_id"], key, json.dumps(pack.get(key, {}))),
+                )
+    auth.audit(user["tenant_id"], user["username"], "demo.reset", {"pack": PACK_PATH.name})
+    return {"status": "reset", "pack": PACK_PATH.name}
+
+
+@app.post("/demo/journey-event")
+def journey_event(payload: StepIn, user=Depends(auth.current_user)):
+    auth.audit(
+        user["tenant_id"], user["username"], "demo.journey_step",
+        {"journey": payload.journey, "step": payload.step, "title": payload.title},
+    )
+    return {"status": "recorded"}
+
+
+@app.get("/demo/audit")
+def audit_log(user=Depends(auth.current_user)):
+    with tenant_conn(user["tenant_id"]) as conn:
+        with conn.cursor() as conn_cur:
+            conn_cur.execute(
+                "SELECT event, detail, at FROM audit_events ORDER BY at DESC LIMIT 200"
+            )
+            rows = [
+                {"event": e, "detail": d, "at": a.isoformat()}
+                for e, d, a in conn_cur.fetchall()
+            ]
+    return {"events": rows}
