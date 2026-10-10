@@ -19,8 +19,8 @@ export function CoverageView({ focus }: { focus: string[] }) {
               {pack.edip_verifications.map((c) => (
                 <tr key={c.id} className={focus.includes(c.id) || focus.includes(c.evidence_id) ? 'is-focus' : ''}>
                   <td className="mono strong">{c.control_code}</td>
-                  <td>{c.control_name || '—'}</td>
-                  <td className="mono">{c.asset_id ? ix.name(c.asset_id) : '—'}</td>
+                  <td>{c.control_name || '-'}</td>
+                  <td className="mono">{c.asset_id ? ix.name(c.asset_id) : '-'}</td>
                   <td><Chip tone="teal" icon="check">{c.status}</Chip></td>
                   <td className="mono small">{fmtDate(c.verified_at)}</td>
                   <td className="mono small">{c.evidence_id}</td>

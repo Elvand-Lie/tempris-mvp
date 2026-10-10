@@ -41,7 +41,7 @@
       "id": "ast-0002",
       "hostname": "erp-db-01",
       "asset_type": "server",
-      "role": "Legacy ERP database (PostgreSQL 13) — bookings, invoicing, customs declarations",
+      "role": "Legacy ERP database (PostgreSQL 13): bookings, invoicing, customs declarations",
       "ip": "10.20.0.15",
       "environment": "corporate",
       "os": "Ubuntu 20.04",
@@ -67,7 +67,7 @@
       "id": "ast-0004",
       "hostname": "hr-fileserver",
       "asset_type": "server",
-      "role": "HR file share — payroll extracts, contracts, leave records",
+      "role": "HR file share: payroll extracts, contracts, leave records",
       "ip": "10.20.1.40",
       "environment": "corporate",
       "os": "Windows Server 2019",
@@ -80,7 +80,7 @@
       "id": "ast-0005",
       "hostname": "crm-db-01",
       "asset_type": "server",
-      "role": "Customer CRM database — shipper contacts, shipment history",
+      "role": "Customer CRM database: shipper contacts, shipment history",
       "ip": "10.20.0.22",
       "environment": "corporate",
       "os": "Windows Server 2019",
@@ -197,7 +197,7 @@
       "id": "ast-0014",
       "hostname": "backup-nas-01",
       "asset_type": "server",
-      "role": "Backup NAS — nightly file and DB dumps",
+      "role": "Backup NAS: nightly file and DB dumps",
       "ip": "10.20.1.60",
       "environment": "corporate",
       "os": "Vendor appliance",
@@ -223,7 +223,7 @@
       "id": "ast-9001",
       "hostname": null,
       "asset_type": "ai-agent",
-      "role": "HR self-service assistant — drafts and sends HR replies to staff",
+      "role": "HR self-service assistant: drafts and sends HR replies to staff",
       "ip": null,
       "environment": "corporate",
       "os": null,
@@ -312,7 +312,7 @@
       "id": "ast-9003",
       "hostname": null,
       "asset_type": "ai-agent",
-      "role": "IT helpdesk triage bot — classifies tickets and suggests KB articles",
+      "role": "IT helpdesk triage bot: classifies tickets and suggests KB articles",
       "ip": null,
       "asset_type_note": "declared but not yet attested",
       "environment": "corporate",
@@ -372,7 +372,7 @@
       "source": "ast-0001",
       "target": "ast-0002",
       "kind": "network",
-      "label": "PostgreSQL :5432 — flat LAN, no VLAN segmentation",
+      "label": "PostgreSQL :5432: flat LAN, no VLAN segmentation",
       "exposes": [
         "ERP database directly reachable from compromised DMZ host"
       ]
@@ -399,7 +399,7 @@
       "source": "ast-9001",
       "target": "mcp-hr-files",
       "kind": "mcp",
-      "label": "MCP server — HR file tools",
+      "label": "MCP server: HR file tools",
       "exposes": [
         "File read/write operations on HR share"
       ]
@@ -408,7 +408,7 @@
       "source": "ast-9001",
       "target": "mcp-crm",
       "kind": "mcp",
-      "label": "MCP server — CRM query tools",
+      "label": "MCP server: CRM query tools",
       "exposes": [
         "CRM record reads"
       ]
@@ -720,7 +720,7 @@
       "sha256": "3f7a1c9e2b64d805aa11f0c3d59e87b4062ac91de4b73f0825c6da9f1e7b3402",
       "captured_at": "2026-10-07T02:14:00Z",
       "summary": "Authenticated-less template match confirming the vulnerable deserialization endpoint on the portal's tracking API.",
-      "payload_excerpt": "[rails-deserialization-rce] [http] [critical] https://track.northwindfreight.demo/api/v1/shipments — matched vulnerable actionpack version banner"
+      "payload_excerpt": "[rails-deserialization-rce] [http] [critical] https://track.northwindfreight.demo/api/v1/shipments: matched vulnerable actionpack version banner"
     },
     {
       "id": "evd-0002",
@@ -790,7 +790,7 @@
       "sha256": "c85a01f36b9d247e1a68b0d47f3c95e2028d1b74ac6e3950f217d8b3ae60f5c1",
       "captured_at": "2026-10-07T01:50:00Z",
       "summary": "Authenticated patch-level check on the domain controller confirming one missing cumulative update.",
-      "payload_excerpt": "[ad-dc-missing-update] [tcp] [high] ad-dc-01 — build 20348.2849 < required 20348.2962"
+      "payload_excerpt": "[ad-dc-missing-update] [tcp] [high] ad-dc-01: build 20348.2849 < required 20348.2962"
     },
     {
       "id": "evd-0009",
@@ -820,7 +820,7 @@
       "sha256": "ab41f8e2c6d795031e0a6c24b8d73f9152ec0a678d1b3492f05ae67c8d924b10",
       "captured_at": "2026-10-08T18:45:00Z",
       "summary": "Post-remediation re-scan of the tracking API: vulnerable serialization path no longer present; framework patched and restarted.",
-      "payload_excerpt": "[rails-deserialization-rce] [http] — no match. actionpack 6.1.4.2 -> 7.0.8.4"
+      "payload_excerpt": "[rails-deserialization-rce] [http]: no match. actionpack 6.1.4.2 -> 7.0.8.4"
     },
     {
       "id": "evd-0012",
@@ -988,7 +988,7 @@
     }
   ],
   "report": {
-    "title": "Northwind Freight — Exposure Report",
+    "title": "Northwind Freight: Exposure Report",
     "generated_at": "2026-10-09T00:00:00Z",
     "executive_summary": "Northwind Freight's estate of 18 assets (including 3 AI agents) carries 10 open or recorded findings. Two critical internet-reachable exposures on the freight portal and ERP database were remediated on 8 October, closing the KEV-listed attack path internet -> dmz-web-01 -> erp-db-01. One medium finding was closed as a false positive after configuration evidence proved the flagged service is a canary. Three AI agents are now inventoried; one declared agent's write reach is under a compensating control and one undeclared agent with production write access is under investigation.",
     "exposure_before": {
@@ -1014,10 +1014,10 @@
   "journeys": {
     "A": {
       "id": "A",
-      "title": "One estate, one honest picture — from exposure to closed",
+      "title": "One estate, one honest picture: from exposure to closed",
       "minutes": 10,
       "audience": "CISO / security leadership",
-      "talk_track_source": "constructed — approved external card not available",
+      "talk_track_source": "constructed: approved external card not available",
       "steps": [
         {
           "n": 1,
@@ -1027,7 +1027,7 @@
             "fnd-0001",
             "fnd-0002"
           ],
-          "talk": "This is Northwind Freight, our fictional Singapore logistics demo estate — eighteen assets, ten findings, three AI agents. Everything you will see is derived from one dataset, so every number on screen reconciles with every other. I want to start where an attacker would: the internet edge. Two critical exposures are waiting there, and we are going to follow them end to end."
+          "talk": "This is Northwind Freight, our fictional Singapore logistics demo estate: eighteen assets, ten findings, three AI agents. Everything you will see is derived from one dataset, so every number on screen reconciles with every other. I want to start where an attacker would: the internet edge. Two critical exposures are waiting there, and we are going to follow them end to end."
         },
         {
           "n": 2,
@@ -1038,7 +1038,7 @@
             "ast-0002",
             "ast-0003"
           ],
-          "talk": "Here is the full inventory — servers, network gear, containers, laptops, and agents, all in one table. Each record carries an owner, an environment and a monitored flag, because you cannot defend what you cannot attribute. Notice dmz-web-01 and erp-db-01; those two are our story for the next few minutes."
+          "talk": "Here is the full inventory: servers, network gear, containers, laptops, and agents, all in one table. Each record carries an owner, an environment and a monitored flag, because you cannot defend what you cannot attribute. Notice dmz-web-01 and erp-db-01; those two are our story for the next few minutes."
         },
         {
           "n": 3,
@@ -1048,7 +1048,7 @@
             "ast-0001",
             "evd-0009"
           ],
-          "talk": "dmz-web-01 is the public freight-tracking portal — internet-facing, high criticality, owned by IT Infrastructure. The detail view shows its control posture alongside its exposure, so I never have to leave the asset to understand its context. It is monitored, its record is complete, and its owner has attested to change and backup discipline this quarter."
+          "talk": "dmz-web-01 is the public freight-tracking portal: internet-facing, high criticality, owned by IT Infrastructure. The detail view shows its control posture alongside its exposure, so I never have to leave the asset to understand its context. It is monitored, its record is complete, and its owner has attested to change and backup discipline this quarter."
         },
         {
           "n": 4,
@@ -1058,7 +1058,7 @@
             "fnd-0001",
             "evd-0001"
           ],
-          "talk": "Finding 0001: a critical remote code execution on the portal, exposure level internet-facing, a TES of 9.2 out of 10 — and it is on the KEV list, meaning it is being exploited in the wild right now. The evidence tab shows the exact scanner result that proved it. This is not a rumour from a vulnerability feed; it is a verified match against this asset."
+          "talk": "Finding 0001: a critical remote code execution on the portal, exposure level internet-facing, a TES of 9.2 out of 10, and it is on the KEV list, meaning it is being exploited in the wild right now. The evidence tab shows the exact scanner result that proved it. This is not a rumour from a vulnerability feed; it is a verified match against this asset."
         },
         {
           "n": 5,
@@ -1071,7 +1071,7 @@
             "evd-0009",
             "evd-0010"
           ],
-          "talk": "An exposed asset is not necessarily a badly run asset. These are the EDIP control verifications for dmz-web-01 — asset record, change and backup attestation, monitoring coverage — each backed by evidence I can open and read. The team did the hygiene right; the exposure is in the software they were handed. That distinction matters when you decide who to call."
+          "talk": "An exposed asset is not necessarily a badly run asset. These are the EDIP control verifications for dmz-web-01: asset record, change and backup attestation, monitoring coverage: each backed by evidence I can open and read. The team did the hygiene right; the exposure is in the software they were handed. That distinction matters when you decide who to call."
         },
         {
           "n": 6,
@@ -1082,7 +1082,7 @@
             "dec-0002",
             "fnd-0002"
           ],
-          "talk": "Tempris did not just raise an alert — it recorded a decision: investigate, then patch, with a rationale in plain language and an outcome that can be checked. The same logic drove the second critical finding on erp-db-01, reachable in one hop across the flat LAN. Two decisions, both attributable, both auditable."
+          "talk": "Tempris did not just raise an alert, it recorded a decision: investigate, then patch, with a rationale in plain language and an outcome that can be checked. The same logic drove the second critical finding on erp-db-01, reachable in one hop across the flat LAN. Two decisions, both attributable, both auditable."
         },
         {
           "n": 7,
@@ -1094,7 +1094,7 @@
             "evd-0011",
             "evd-0012"
           ],
-          "talk": "Both remediations completed on the eighth of October, and each is verified by post-fix evidence — a clean re-scan for the portal, a scoped database rule for the ERP. Before: two critical exposures. After: zero. The score drop you see is not a promise, it is a measurement."
+          "talk": "Both remediations completed on the eighth of October, and each is verified by post-fix evidence: a clean re-scan for the portal, a scoped database rule for the ERP. Before: two critical exposures. After: zero. The score drop you see is not a promise, it is a measurement."
         },
         {
           "n": 8,
@@ -1104,17 +1104,17 @@
             "fnd-0001",
             "fnd-0002"
           ],
-          "talk": "This is the executive report generated from the same dataset — exposure before and after, top findings, and the summary written for people who will never open a scanner console. Criticals go from two to zero in one remediation cycle. That is the demo story for the traditional estate; the rest of the journeys go deeper."
+          "talk": "This is the executive report generated from the same dataset: exposure before and after, top findings, and the summary written for people who will never open a scanner console. Criticals go from two to zero in one remediation cycle. That is the demo story for the traditional estate; the rest of the journeys go deeper."
         }
       ],
-      "close": "From internet-facing critical to verified closure — evidence at every step, and every number derived from the same estate."
+      "close": "From internet-facing critical to verified closure: evidence at every step, and every number derived from the same estate."
     },
     "B": {
       "id": "B",
-      "title": "Killing a finding honestly — the false positive",
+      "title": "Killing a finding honestly: the false positive",
       "minutes": 5,
       "audience": "SOC / vulnerability management",
-      "talk_track_source": "constructed — approved external card not available",
+      "talk_track_source": "constructed: approved external card not available",
       "steps": [
         {
           "n": 1,
@@ -1143,7 +1143,7 @@
           "focus_ids": [
             "evd-0003"
           ],
-          "talk": "Here is the configuration snapshot: the flagged panel is the deliberate canary instance. No mailbox store, no directory bind, no real credentials — only synthetic ones — and every connection mirrored to the SOC. The scanner was correct about the service and wrong about the risk, because it had no asset context."
+          "talk": "Here is the configuration snapshot: the flagged panel is the deliberate canary instance. No mailbox store, no directory bind, no real credentials: only synthetic ones, and every connection mirrored to the SOC. The scanner was correct about the service and wrong about the risk, because it had no asset context."
         },
         {
           "n": 4,
@@ -1152,7 +1152,7 @@
           "focus_ids": [
             "dec-0003"
           ],
-          "talk": "The recorded decision is INVESTIGATE, and its outcome closes the finding as a false positive. The rationale is written in full: the vulnerability match is genuine, the asset context makes it a decoy. Nothing was hand-waved away — the evidence id is on the record, so an auditor can replay the reasoning. This is what an honest kill looks like."
+          "talk": "The recorded decision is INVESTIGATE, and its outcome closes the finding as a false positive. The rationale is written in full: the vulnerability match is genuine, the asset context makes it a decoy. Nothing was hand-waved away: the evidence id is on the record, so an auditor can replay the reasoning. This is what an honest kill looks like."
         },
         {
           "n": 5,
@@ -1164,14 +1164,14 @@
           "talk": "Watch the exposure report: medium count drops from three to two, because the finding's status has flipped from open to false positive. No patch, no ticket theatre, and the canary stays exactly where the SOC wants it. The queue now contains only real work."
         }
       ],
-      "close": "Evidence didn't just confirm this finding — it killed it. That is exposure management working in both directions."
+      "close": "Evidence didn't just confirm this finding, it killed it. That is exposure management working in both directions."
     },
     "C": {
       "id": "C",
-      "title": "Coverage versus fidelity — are we safe, or just scanned?",
+      "title": "Coverage versus fidelity: are we safe, or just scanned?",
       "minutes": 5,
       "audience": "Security engineering / architects",
-      "talk_track_source": "constructed — approved external card not available",
+      "talk_track_source": "constructed: approved external card not available",
       "steps": [
         {
           "n": 1,
@@ -1191,7 +1191,7 @@
             "ast-0009",
             "ast-9003"
           ],
-          "talk": "Sixteen of eighteen assets have active scanning or monitoring — that is 89 percent coverage. The gap is corp-laptop-0412 and the helpdesk bot, both flagged unmonitored in the inventory. Coverage tells me where the blind spots are, and it is honest that they exist."
+          "talk": "Sixteen of eighteen assets have active scanning or monitoring: that is 89 percent coverage. The gap is corp-laptop-0412 and the helpdesk bot, both flagged unmonitored in the inventory. Coverage tells me where the blind spots are, and it is honest that they exist."
         },
         {
           "n": 3,
@@ -1203,7 +1203,7 @@
             "evd-0013",
             "evd-0002"
           ],
-          "talk": "Fidelity is stricter: of eighteen tracked controls, eleven carry verified evidence — 61 percent. The ones on screen are a configuration snapshot, an attestation and a collector run, and I can open each of them. The rest are controls we run but cannot yet prove, and the programme treats that as work, not as a pass."
+          "talk": "Fidelity is stricter: of eighteen tracked controls, eleven carry verified evidence: 61 percent. The ones on screen are a configuration snapshot, an attestation and a collector run, and I can open each of them. The rest are controls we run but cannot yet prove, and the programme treats that as work, not as a pass."
         },
         {
           "n": 4,
@@ -1213,7 +1213,7 @@
             "fnd-0003",
             "evd-0003"
           ],
-          "talk": "So: 89 percent coverage, 61 percent fidelity — and both numbers come from the same estate data you have seen all demo. The 28-point gap is exactly where the roadmap lives: attest what is already running before buying anything new. A programme that only reports coverage would have hidden this entirely."
+          "talk": "So: 89 percent coverage, 61 percent fidelity, and both numbers come from the same estate data you have seen all demo. The 28-point gap is exactly where the roadmap lives: attest what is already running before buying anything new. A programme that only reports coverage would have hidden this entirely."
         }
       ],
       "close": "Coverage says we looked. Fidelity says we can prove what we saw. Tempris reports both, from the same data."
@@ -1223,7 +1223,7 @@
       "title": "Follow the path an attacker would take",
       "minutes": 5,
       "audience": "Technical leadership / incident response",
-      "talk_track_source": "constructed — approved external card not available",
+      "talk_track_source": "constructed: approved external card not available",
       "steps": [
         {
           "n": 1,
@@ -1233,7 +1233,7 @@
             "ast-0001",
             "fnd-0001"
           ],
-          "talk": "This is the attack graph for Northwind Freight, built from the network relationships in the estate. The entry point is dmz-web-01, exposed on HTTPS with a critical, KEV-listed RCE — finding 0001, TES 9.2. One internet-reachable flaw, and the attacker has a shell in the DMZ."
+          "talk": "This is the attack graph for Northwind Freight, built from the network relationships in the estate. The entry point is dmz-web-01, exposed on HTTPS with a critical, KEV-listed RCE: finding 0001, TES 9.2. One internet-reachable flaw, and the attacker has a shell in the DMZ."
         },
         {
           "n": 2,
@@ -1255,7 +1255,7 @@
             "ast-0002",
             "evd-0002"
           ],
-          "talk": "erp-db-01 holds bookings, invoicing and customs declarations — critical business data. The configuration snapshot in its evidence shows why it falls: an authentication rule scoped to the whole world, never tightened. Two assets, two findings, one path — that is the whole breach in three nodes."
+          "talk": "erp-db-01 holds bookings, invoicing and customs declarations: critical business data. The configuration snapshot in its evidence shows why it falls: an authentication rule scoped to the whole world, never tightened. Two assets, two findings, one path: that is the whole breach in three nodes."
         },
         {
           "n": 4,
@@ -1265,7 +1265,7 @@
             "fnd-0002",
             "fnd-0001"
           ],
-          "talk": "Both path findings carry exposure context: 0001 internet-facing and exploited in the wild, 0002 reachable from the DMZ. Exposure scoring put them at 9.2 and 8.8, and the path explains why — each one is only as dangerous as the node that leads to it. Fixing either link breaks the chain; fixing both kills it."
+          "talk": "Both path findings carry exposure context: 0001 internet-facing and exploited in the wild, 0002 reachable from the DMZ. Exposure scoring put them at 9.2 and 8.8, and the path explains why: each one is only as dangerous as the node that leads to it. Fixing either link breaks the chain; fixing both kills it."
         },
         {
           "n": 5,
@@ -1280,7 +1280,7 @@
           "talk": "Tempris recorded two decisions: patch the portal, and scope the database authentication rule. Both completed on the eighth with post-fix evidence, and the attack graph no longer connects the internet to the ERP. Path closed, rationale on record, evidence attached."
         }
       ],
-      "close": "Internet, DMZ, ERP — one path, two decisions, zero criticals. The graph told us where to look before the attacker told us where they were."
+      "close": "Internet, DMZ, ERP: one path, two decisions, zero criticals. The graph told us where to look before the attacker told us where they were."
     },
     "E": {
       "id": "E",

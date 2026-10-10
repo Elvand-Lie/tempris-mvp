@@ -87,16 +87,16 @@ export function AssetDetail({ id, focus = [], compact }: { id: string; focus?: s
             <Kv rows={a.agent ? [
               ['Platform', a.agent.platform],
               ['Model', a.agent.model],
-              ['Owner', a.owner === 'unknown' ? <Chip tone="red">unknown</Chip> : a.owner || '—'],
-              ['Environment', a.environment || '—'],
+              ['Owner', a.owner === 'unknown' ? <Chip tone="red">unknown</Chip> : a.owner || '-'],
+              ['Environment', a.environment || '-'],
               ['Edge exposure', a.internet_facing ? 'internet-facing' : 'internal'],
               ['Asset id', <span className="mono">{a.id}</span>],
             ] : [
-              ['Hostname', a.hostname ? <span className="mono">{a.hostname}</span> : '—'],
-              ['IP address', a.ip ? <span className="mono">{a.ip}</span> : '—'],
-              ['Operating system', a.os || '—'],
-              ['Owner', a.owner === 'unknown' ? <Chip tone="red">unknown</Chip> : a.owner || '—'],
-              ['Environment', a.environment || '—'],
+              ['Hostname', a.hostname ? <span className="mono">{a.hostname}</span> : '-'],
+              ['IP address', a.ip ? <span className="mono">{a.ip}</span> : '-'],
+              ['Operating system', a.os || '-'],
+              ['Owner', a.owner === 'unknown' ? <Chip tone="red">unknown</Chip> : a.owner || '-'],
+              ['Environment', a.environment || '-'],
               ['Asset id', <span className="mono">{a.id}</span>],
             ]} />
           </Panel>
@@ -294,8 +294,8 @@ export function FindingDetail({ f, focus = [], compact }: { f: Finding; focus?: 
               <AssetRef id={a.id} sub />
               <Kv rows={[
                 ['Criticality', <span className={`crit crit-${a.criticality}`}>{a.criticality}</span>],
-                ['Owner', a.owner || '—'],
-                ['Zone', a.environment || '—'],
+                ['Owner', a.owner || '-'],
+                ['Zone', a.environment || '-'],
               ]} />
             </Panel>
           )}
@@ -338,7 +338,7 @@ function Lifecycle({ f, ev, dec }: { f: Finding; ev: Evidence[]; dec?: Decision 
       ? rv.isRevealed(rem.id)
         ? { label: 'Verified', state: 'done', date: verifiedEv.captured_at, detail: EVIDENCE_KIND[verifiedEv.kind] }
         : { label: 'Verified', state: 'locked', step: rv.stepOf(rem.id) }
-      : { label: 'Verified', state: 'none', detail: rem ? 'pending evidence' : '—' },
+      : { label: 'Verified', state: 'none', detail: rem ? 'pending evidence' : '-' },
   ];
   return (
     <Panel title="Record lifecycle" meta="From the pack's evidence, decision and remediation records">
@@ -347,7 +347,7 @@ function Lifecycle({ f, ev, dec }: { f: Finding; ev: Evidence[]; dec?: Decision 
           <li key={n.label} className={`life-n ${n.state}`}>
             <span className="life-dot">{n.state === 'done' ? <Icon name="check" size={11} /> : n.state === 'locked' ? <Icon name="lock" size={10} /> : null}</span>
             <span className="life-l">{n.label}</span>
-            <span className="life-d">{n.state === 'locked' ? `shown at step ${n.step}` : n.date ? fmtDateTime(n.date) : n.detail || '—'}</span>
+            <span className="life-d">{n.state === 'locked' ? `shown at step ${n.step}` : n.date ? fmtDateTime(n.date) : n.detail || '-'}</span>
             {n.state !== 'locked' && n.date && n.detail && <span className="life-x">{n.detail}</span>}
           </li>
         ))}

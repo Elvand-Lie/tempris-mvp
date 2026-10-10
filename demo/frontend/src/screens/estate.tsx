@@ -265,14 +265,14 @@ export function AssetInventory({ focus }: { focus: string[] }) {
                     </div>
                   </td>
                   <td>{TYPE_LABEL[a.asset_type] || a.asset_type}</td>
-                  <td className="mono small">{a.environment || '—'}{a.ip ? <span className="cell-sub">{a.ip}</span> : null}</td>
-                  <td>{a.owner === 'unknown' ? <Chip tone="red">unknown</Chip> : a.owner || '—'}</td>
-                  <td><span className={`crit crit-${a.criticality}`}>{a.criticality || '—'}</span></td>
-                  <td>{a.internet_facing ? <Chip tone="edge" icon="internet">internet</Chip> : <span className="muted">—</span>}</td>
+                  <td className="mono small">{a.environment || '-'}{a.ip ? <span className="cell-sub">{a.ip}</span> : null}</td>
+                  <td>{a.owner === 'unknown' ? <Chip tone="red">unknown</Chip> : a.owner || '-'}</td>
+                  <td><span className={`crit crit-${a.criticality}`}>{a.criticality || '-'}</span></td>
+                  <td>{a.internet_facing ? <Chip tone="edge" icon="internet">internet</Chip> : <span className="muted">-</span>}</td>
                   <td>{a.monitored === false ? <Chip tone="amber">not monitored</Chip> : <span className="ok-tick"><Icon name="check" size={13} /></span>}</td>
                   {showAgentCols ? (
                     <>
-                      <td className="small">{a.agent?.autonomy || '—'}</td>
+                      <td className="small">{a.agent?.autonomy || '-'}</td>
                       <td>{a.agent?.declared ? <Chip tone="teal">DECLARED</Chip> : <Chip tone="red">UNDECLARED</Chip>}</td>
                       <td>{a.agent?.verified ? <Chip tone="teal">VERIFIED</Chip> : <Chip tone="amber">NOT VERIFIED</Chip>}</td>
                     </>
@@ -283,7 +283,7 @@ export function AssetInventory({ focus }: { focus: string[] }) {
                           <SevChip s={worst.severity} />
                           {fs.length > 1 && <span className="muted small">+{fs.length - 1}</span>}
                         </span>
-                      ) : <span className="muted">—</span>}
+                      ) : <span className="muted">-</span>}
                     </td>
                   )}
                 </tr>
