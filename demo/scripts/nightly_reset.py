@@ -10,10 +10,15 @@ import os
 import pathlib
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "api"))
+_BASE = pathlib.Path(__file__).resolve().parent.parent
+# Repo checkouts keep the package under api/; the API image keeps it at /srv.
+# Both candidates go on the path so this runs in either layout without
+# depending on PYTHONPATH being set by the cron line.
+for _candidate in (_BASE / "api", _BASE):
+    sys.path.insert(0, str(_candidate))
 
 from app.auth import audit  # noqa: E402
-from app.db import PACK_TABLES, init_schema, tenant_conn  # noqa: E402
+from app.db import PACK_TABLES, tenant_conn  # noqa: E402
 
 PACK = pathlib.Path(os.environ.get(
     "DEMO_PACK_PATH",
@@ -29,7 +34,9 @@ def main() -> None:
     if expected and digest != expected:
         raise SystemExit("demo pack integrity check failed — NOT resetting")
     pack = json.loads(raw)
-    init_schema()
+    # NOTE: no init_schema() here — the runtime role cannot (and must not)
+    # perform schema/role management. Schema bootstrap is a separate admin
+    # operation (see docker-compose service `bootstrap`).
     with tenant_conn(TENANT) as conn:
         with conn.cursor() as cur:
             for table in PACK_TABLES:

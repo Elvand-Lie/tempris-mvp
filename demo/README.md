@@ -67,9 +67,27 @@ docker compose exec -T -e PYTHONPATH=/srv api python /srv/scripts/nightly_reset.
 ports `443:443` + `80:80` and use the `demo.tempris-singapore.com { tls ... }`
 site block in `Caddyfile` (see `kit/deploy/DEPLOY.md`).
 
-Rollback either topology without touching Tempris V1/V2:
-`docker compose down -v`, remove the demo vhost from the gateway config
-(restore the backup), reload the gateway.
+Rollback either topology without touching Tempris V1/V2 — and without losing
+data (never use `down -v`; it deletes the PostgreSQL volume holding presenter
+accounts and audit history):
+
+```bash
+# before any deploy: snapshot the database (preserving rollback ability)
+docker compose exec -T db sh -c \
+  'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > terra-demo-db-$(date +%F).sql
+
+# roll the application back, keeping the data volume:
+git checkout <previous-commit> -- demo   # or reuse the previous image tag
+docker compose build api && docker compose up -d --no-deps api
+```
+
+Note: rolling the API image back while KEEPING a database already migrated to
+the role-separated schema is safe for reads and logins only if the previous
+image establishes the tenant context for audit writes; images older than
+`b8755a9` do not, so their audit writes (including login) would be refused by
+the audit_events RLS policy. If that state is ever reached, either re-deploy
+the new image (preferred) or restore the pre-deploy `pg_dump` snapshot taken
+above. Full teardown (last resort only): `docker compose down -v`.
 
 ## Database roles (WO-10 10b)
 
@@ -93,12 +111,33 @@ for the bootstrap role unless an operator deliberately runs
 the bootstrap role can still lift the trigger and the guard config — that is
 administrator-level access by definition and is out of the application's reach.
 
-Nightly reset (host cron, 03:00 SGT = 19:00 UTC on a UTC host):
+Nightly reset (host cron, 03:00 SGT = 19:00 UTC on a UTC host; the script
+locates the app package itself, no PYTHONPATH needed):
 ```
 0 19 * * * cd <demo-dir> && docker compose exec -T api python /srv/scripts/nightly_reset.py
 ```
-The API image bakes `pack/` and `scripts/` (see `api/Dockerfile`, build
-context = repo `demo/`).
+The API image bakes `pack/`, `scripts/` and the invite CLI (see
+`api/Dockerfile`, build context = repo `demo/`).
+
+## Reproducible deployment from a fresh checkout
+
+`demo/frontend/dist` is a build artifact and intentionally not committed.
+`docker compose up -d --build` reproduces everything in Docker: the `webdist`
+one-shot service builds the React app (node:22, `npm ci`) into the shared
+`dist` volume, `bootstrap` runs schema/role setup as the admin role, and `api`
+starts only after both succeed — holding no admin credentials. The live
+shared-VPS deployment instead serves a host-built `./frontend/dist` bind
+mount; that operator override is documented here and configured on the host.
+
+Reproduce the verification suite (Postgres 16 on 127.0.0.1:5433, database
+`terra_demo`):
+
+```bash
+cd demo
+DATABASE_URL=postgresql://demo:demo@localhost:5433/terra_demo \
+  python -m pytest tests/ -q          # 33 tests
+cd frontend && npm ci && npm run build  # frontend build + tsc
+```
 
 ## Access control (WO-10 10c)
 

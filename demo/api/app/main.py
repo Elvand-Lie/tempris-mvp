@@ -50,7 +50,12 @@ def read_pack_pinned() -> dict:
 
 @app.on_event("startup")
 def startup() -> None:
-    init_schema()
+    # Schema/role bootstrap requires the ADMIN role. Production deployments
+    # run it as a separate one-shot `bootstrap` compose service, so the
+    # long-running API process never holds privileged credentials. When
+    # ADMIN_DATABASE_URL is set (development, tests), bootstrap inline.
+    if os.environ.get("ADMIN_DATABASE_URL"):
+        init_schema()
     if not PACK_SHA256:
         raw = PACK_PATH.read_bytes()
         raise RuntimeError(

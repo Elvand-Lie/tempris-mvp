@@ -7,8 +7,12 @@
 # edge attaches to the publishable network, and it holds no credentials.
 #
 # Database roles: DATABASE_URL uses the runtime application role (no superuser,
-# no BYPASSRLS — row-level security applies to it); ADMIN_DATABASE_URL (the
-# bootstrap role) is used only by init_schema for idempotent role/grant setup.
+# no BYPASSRLS — row-level security applies to it). The bootstrap role is ONLY
+# present in the one-shot `bootstrap` service that runs schema/role setup; the
+# long-running API container never receives privileged credentials.
+#
+# Frontend: the `webdist` one-shot service builds the React app inside Docker
+# (no local Node needed) and publishes it to the `dist` volume the edge serves.
 #
 # The original dedicated-VPS variant (Caddy terminating TLS on 443 itself,
 # per kit/deploy/DEPLOY.md) remains valid: change the edge ports to 443:443 +
@@ -19,11 +23,38 @@ services:
     ports: ["127.0.0.1:8080:80"]
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./frontend/dist:/srv/www:ro
+      - dist:/srv/www:ro
+    depends_on:
+      api:
+        condition: service_started
+      webdist:
+        condition: service_completed_successfully
     restart: unless-stopped
     mem_limit: 48m
     oom_score_adj: 500
     networks: [edge, internal]
+
+  webdist:
+    build: ./frontend
+    volumes: [dist:/out]
+    restart: "no"
+    mem_limit: 512m
+    networks: [internal]
+
+  bootstrap:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    image: terra-demo-api
+    env_file: .env
+    environment:
+      ADMIN_DATABASE_URL: postgresql://demo:${DEMO_DB_PASSWORD}@db:5432/terra_demo
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD}
+    command: ["python", "-c", "from app.db import init_schema; init_schema()"]
+    depends_on: [db]
+    restart: "no"
+    mem_limit: 128m
+    networks: [internal]
 
   api:
     build:
@@ -33,8 +64,11 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${DB_APP_ROLE:-terra_app}:${DB_APP_PASSWORD}@db:5432/terra_demo
-      ADMIN_DATABASE_URL: postgresql://demo:${DEMO_DB_PASSWORD}@db:5432/terra_demo
-    depends_on: [db]
+    depends_on:
+      db:
+        condition: service_started
+      bootstrap:
+        condition: service_completed_successfully
     restart: unless-stopped
     mem_limit: 160m
     oom_score_adj: 500
@@ -60,3 +94,4 @@ networks:
 
 volumes:
   pg: {}
+  dist: {}

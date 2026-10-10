@@ -104,6 +104,31 @@ def test_missing_tenant_context_exposes_nothing(seed_two_tenants):
                 )
 
 
+def test_tenant_context_is_transaction_local():
+    """set_config must use is_local=true: the context resets with the
+    transaction. A session-scoped context (is_local=false) would leak the
+    tenant into later transactions on the same connection — this test
+    distinguishes the two, so the bug cannot come back silently."""
+    conn = psycopg.connect(APP_URL, autocommit=True)
+    try:
+        with conn.cursor() as cur:
+            # set + read inside one transaction; is_local=true resets it as
+            # soon as that transaction ends.
+            cur.execute(
+                "SELECT set_config('app.tenant_id', 'terra', true) AS set_val,"
+                " current_setting('app.tenant_id', true) AS now_val"
+            )
+            assert cur.fetchone() == ("terra", "terra")
+        # The transaction ended (autocommit): the context must be gone.
+        with conn.cursor() as cur:
+            cur.execute("SELECT current_setting('app.tenant_id', true)")
+            assert cur.fetchone()[0] in (None, "")
+            cur.execute("SELECT count(*) FROM pack_assets")
+            assert cur.fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
 def test_app_role_cannot_reset_another_tenants_pack(seed_two_tenants):
     with app_conn("terra") as conn:
         with conn.cursor() as cur:

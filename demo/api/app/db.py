@@ -118,9 +118,11 @@ def tenant_conn(tenant_id: str):
     """Connection pinned to one tenant by Postgres RLS."""
     with connect() as conn:
         with conn.cursor() as cur:
-            # set_config(..., false) = transaction-local; cannot leak out
+            # set_config(..., is_local => true): transaction-local. The
+            # context resets when the transaction ends and can never leak
+            # into later transactions on this session.
             cur.execute(
-                "SELECT set_config('app.tenant_id', %s, false)", (tenant_id,)
+                "SELECT set_config('app.tenant_id', %s, true)", (tenant_id,)
             )
         yield conn
 
