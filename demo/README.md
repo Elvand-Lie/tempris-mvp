@@ -135,7 +135,7 @@ Reproduce the verification suite (Postgres 16 on 127.0.0.1:5433, database
 ```bash
 cd demo
 DATABASE_URL=postgresql://demo:demo@localhost:5433/terra_demo \
-  python -m pytest tests/ -q          # 33 tests
+  python -m pytest tests/ -q          # 32 tests
 cd frontend && npm ci && npm run build  # frontend build + tsc
 ```
 

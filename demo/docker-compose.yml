@@ -6,10 +6,12 @@
 # a fully internal docker network (no outbound route); only the static-file
 # edge attaches to the publishable network, and it holds no credentials.
 #
-# Database roles: DATABASE_URL uses the runtime application role (no superuser,
-# no BYPASSRLS — row-level security applies to it). The bootstrap role is ONLY
-# present in the one-shot `bootstrap` service that runs schema/role setup; the
-# long-running API container never receives privileged credentials.
+# Privilege separation: the long-running API container NEVER receives the
+# bootstrap (superuser) password. Its environment is an explicit allow-list
+# (no env_file): DATABASE_URL uses the runtime application role (no superuser,
+# no BYPASSRLS — row-level security applies to it). Schema/role setup runs in
+# the one-shot `bootstrap` service, gated on a healthy database, and is the
+# only place the admin credentials exist.
 #
 # Frontend: the `webdist` one-shot service builds the React app inside Docker
 # (no local Node needed) and publishes it to the `dist` volume the edge serves.
@@ -46,12 +48,13 @@ services:
       context: .
       dockerfile: api/Dockerfile
     image: terra-demo-api
-    env_file: .env
+    env_file: .env          # privileged one-shot: needs admin + app passwords
     environment:
       ADMIN_DATABASE_URL: postgresql://demo:${DEMO_DB_PASSWORD}@db:5432/terra_demo
-      DB_APP_PASSWORD: ${DB_APP_PASSWORD}
     command: ["python", "-c", "from app.db import init_schema; init_schema()"]
-    depends_on: [db]
+    depends_on:
+      db:
+        condition: service_healthy
     restart: "no"
     mem_limit: 128m
     networks: [internal]
@@ -61,12 +64,16 @@ services:
       context: .
       dockerfile: api/Dockerfile
     image: terra-demo-api
-    env_file: .env
+    # Explicit runtime allow-list — deliberately NO env_file here, so the
+    # bootstrap password (DEMO_DB_PASSWORD) never enters this container.
     environment:
       DATABASE_URL: postgresql://${DB_APP_ROLE:-terra_app}:${DB_APP_PASSWORD}@db:5432/terra_demo
+      DEMO_PACK_SHA256: ${DEMO_PACK_SHA256}
+      DEMO_INVITE_SECRET: ${DEMO_INVITE_SECRET}
+      DEMO_ALLOWED_ORIGIN: ${DEMO_ALLOWED_ORIGIN}
     depends_on:
       db:
-        condition: service_started
+        condition: service_healthy
       bootstrap:
         condition: service_completed_successfully
     restart: unless-stopped
@@ -82,6 +89,11 @@ services:
       POSTGRES_DB: terra_demo
     command: ["postgres", "-c", "shared_buffers=32MB", "-c", "max_connections=20"]
     volumes: [pg:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demo -d terra_demo"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
     restart: unless-stopped
     mem_limit: 224m
     oom_score_adj: 500
