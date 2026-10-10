@@ -15,7 +15,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from . import auth
+from . import auth, enroll
 from .db import PACK_TABLES, init_schema, tenant_conn
 
 PACK_PATH = Path(
@@ -91,6 +91,7 @@ def demo_login(payload: LoginIn):
 class RegisterIn(BaseModel):
     username: str
     password: str
+    invite_code: str = ""
 
 
 _USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{3,40}$")
@@ -98,14 +99,20 @@ _USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{3,40}$")
 
 @app.post("/demo/register")
 def demo_register(payload: RegisterIn):
-    """In-app presenter provisioning: create the account, return the one-time
-    TOTP QR so the presenter can link their authenticator immediately."""
+    """In-app presenter enrollment with a Tempris-issued invite (WO-10 10c).
+    Insert-only: never resets or un-revokes an existing account (see enroll.py).
+    Returns the one-time TOTP QR so the presenter can link their authenticator."""
     username = payload.username.strip()
     if not _USERNAME_RE.fullmatch(username):
         raise HTTPException(422, "username must be 3-40 characters: letters, digits, dot, dash, underscore")
     if len(payload.password) < 12:
         raise HTTPException(422, "password must be at least 12 characters")
-    info = auth.seed_user(username, payload.password)
+    try:
+        enroll.verify_invite(username, payload.invite_code)
+        info = enroll.create_presenter(username, payload.password)
+    except HTTPException as exc:
+        auth.audit(auth.DEMO_TENANT, username, "demo.register_denied", {"status": exc.status_code})
+        raise
     img = qrcode.make(
         info["totp_provisioning_uri"], image_factory=qrcode.image.svg.SvgPathImage
     )
@@ -195,6 +202,18 @@ def journey_event(payload: StepIn, user=Depends(auth.current_user)):
         user["tenant_id"], user["username"], "demo.journey_step",
         {"journey": payload.journey, "step": payload.step, "title": payload.title},
     )
+    return {"status": "recorded"}
+
+
+class ExportIn(BaseModel):
+    kind: str = "report.pdf"
+
+
+@app.post("/demo/export")
+def export_event(payload: ExportIn, user=Depends(auth.current_user)):
+    """Audit a watermarked export (WO-10 10c / acceptance g). The PDF itself is
+    rendered by the presenter's browser from the already-served pack."""
+    auth.audit(user["tenant_id"], user["username"], "demo.export", {"kind": payload.kind[:60], "pack": PACK_PATH.name})
     return {"status": "recorded"}
 
 

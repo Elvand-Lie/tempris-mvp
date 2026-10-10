@@ -17,6 +17,8 @@ demo/
   frontend/                        React (Vite): presenter mode, journeys, watermark, reset
   scripts/nightly_reset.py         host-side nightly baseline restore (cron)
   tests/test_wo10.py               reset integrity, checksum rejection, no-secrets, Journey E card
+  tests/test_wo10_access.py        expired/revoked accounts, invite-only enrollment, lockout, audit, reset < 60 s
+  api/issue_invite.py              Tempris admin: mint a single-name presenter invite
   docker-compose.yml               edge (Caddy, 443) + internal app network (no outbound)
   Caddyfile                        demo.tempris.com.sg TLS termination
   .env.example                     template (never commit .env)
@@ -55,11 +57,25 @@ The API image bakes `pack/` and `scripts/` (see `api/Dockerfile`, build context 
 
 ## Access control (WO-10 10c)
 
-Named presenter accounts only (`provision_presenter.py`), mandatory TOTP MFA,
+Accounts are issued by Tempris, two ways:
+
+- `provision_presenter.py <name> '<password>'` (admin; also renews or resets).
+- In-app enrollment ("Create a presenter account") **only with a Tempris invite**:
+  set `DEMO_INVITE_SECRET` (32+ random characters) in `.env` on the demo host,
+  then run `python issue_invite.py <name> [hours]` and give that code to that
+  presenter. Each invite enrolls exactly one username, expires (max 7 days) and
+  can never overwrite, reset or un-revoke an existing account. Without
+  `DEMO_INVITE_SECRET`, in-app enrollment is disabled.
+
+Named presenter accounts only, mandatory TOTP MFA,
 lockout after 5 failed attempts, 30-minute idle timeout, 90-day expiry,
 instant revocation (delete the user row or set `revoked`), single `presenter`
 role, all sessions scoped to tenant `terra` via Postgres RLS. Logins,
-journey steps, resets and exports are written to the append-only audit table.
+journey steps, resets, exports (`POST /demo/export`) and refused enrollments are
+written to the append-only audit table.
+
+After any pack change, re-pin `DEMO_PACK_SHA256` (the API refuses to start or
+reset with a stale pin).
 
 ## Test credentials
 
