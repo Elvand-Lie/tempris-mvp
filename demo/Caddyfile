@@ -1,16 +1,22 @@
-demo.tempris.com.sg {
-	tls internal
+# Shared-VPS topology (current): the production nginx gateway terminates TLS
+# for demo.tempris-singapore.com and proxies to this edge on host loopback
+# 127.0.0.1:8080 — so this site block is plain HTTP.
+#
+# Dedicated-VPS topology (original, also valid): give the edge ports 443:443
+# and 80:80 in docker-compose.yml and replace the site address below with
+#   demo.tempris-singapore.com { tls internal ... }   (or a public cert)
+:80 {
 	encode gzip
-
-	handle /demo/* {
-		reverse_proxy api:8000
-	}
 
 	handle /api/* {
 		reverse_proxy api:8000
 	}
-
+	handle /demo/* {
+		reverse_proxy api:8000
+	}
 	handle {
-		reverse_proxy web:80
+		root * /srv/www
+		try_files {path} /index.html
+		file_server
 	}
 }

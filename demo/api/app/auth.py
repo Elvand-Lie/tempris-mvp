@@ -143,6 +143,12 @@ def login(username: str, password: str, totp_code: str, *, tenant_id: str = DEMO
 def audit(tenant_id: str, username: str, event: str, detail: dict | None = None) -> None:
     with connect() as conn:
         with conn.cursor() as cur:
+            # Transaction-scoped tenant context: audit_events carries an RLS
+            # insert policy, so the row must be written under the right
+            # app.tenant_id (set_config(..., false) cannot leak out).
+            cur.execute(
+                "SELECT set_config('app.tenant_id', %s, false)", (tenant_id,)
+            )
             cur.execute(
                 "INSERT INTO audit_events (tenant_id, username, event, detail) VALUES (%s, %s, %s, %s)",
                 (tenant_id, username, event, json.dumps(detail or {})),
@@ -184,6 +190,9 @@ def current_user(
                 raise HTTPException(403, "account expired")
             if last_seen < now - timedelta(minutes=IDLE_TIMEOUT_MINUTES):
                 cur.execute("DELETE FROM sessions WHERE token = %s", (token,))
+                # Commit before raising: the context manager would otherwise
+                # roll the delete back and leave the dead row behind.
+                conn.commit()
                 raise HTTPException(
                     401, f"session timed out after {IDLE_TIMEOUT_MINUTES} minutes idle"
                 )

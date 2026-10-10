@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useDemo } from '../context';
 import { IS_PREVIEW, demoApi } from '../api';
 import { SEVERITIES, fmtDate } from '../model';
@@ -6,6 +7,8 @@ import { FindingDecision, Icon, KevChip, SevChip, TesBar } from '../ui';
 export function ReportView({ focus }: { focus: string[] }) {
   const { pack, ix, inspect } = useDemo();
   const r = pack.report;
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const max = Math.max(1, ...SEVERITIES.map((s) => Math.max(r.exposure_before[s] ?? 0, r.exposure_after[s] ?? 0)));
   const totalBefore = SEVERITIES.reduce((n, s) => n + (r.exposure_before[s] ?? 0), 0);
   const totalAfter = SEVERITIES.reduce((n, s) => n + (r.exposure_after[s] ?? 0), 0);
@@ -22,17 +25,31 @@ export function ReportView({ focus }: { focus: string[] }) {
           </div>
           <button
             className="btn primary"
-            onClick={() => {
-              // WO-10 acceptance (g): every export is written to the audit log.
-              void demoApi.exportEvent(`report.pdf · ${pack.pack_id} v${pack.version}`).catch(() => undefined);
-              window.print();
+            onClick={async () => {
+              // WO-10 acceptance (g): the audit write must succeed BEFORE the
+              // print dialog opens. This records an initiated print/export —
+              // the browser cannot confirm that a file was actually saved.
+              setExportBusy(true); setExportError(null);
+              try {
+                await demoApi.exportEvent(`report-print-initiated · ${pack.pack_id} v${pack.version}`);
+                window.print();
+              } catch (cause) {
+                setExportError(cause instanceof Error ? cause.message : String(cause));
+              } finally {
+                setExportBusy(false);
+              }
             }}
-            disabled={IS_PREVIEW}
+            disabled={IS_PREVIEW || exportBusy}
             title={IS_PREVIEW ? 'PDF export runs on the demo host; this preview frame cannot print' : 'Export a watermarked PDF'}
           >
-            <Icon name="doc" size={14} />Export PDF
+            <Icon name="doc" size={14} />{exportBusy ? 'Auditing…' : 'Export PDF'}
           </button>
         </header>
+        {exportError && (
+          <div className="error-banner" role="alert">
+            The export could not be audited, so printing was blocked: {exportError}
+          </div>
+        )}
 
         <div className="report-body">
           <section className="report-summary">

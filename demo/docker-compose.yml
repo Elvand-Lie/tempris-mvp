@@ -1,41 +1,62 @@
-# WO-10 — Terra partner demo deployment (isolated from Tempris production).
-# edge: 443 only, Caddy TLS. app: internal network, NO outbound route.
+# WO-10 — Terra partner demo deployment.
+# CURRENT TOPOLOGY (approved temporary shared-VPS arrangement, 2026-10-10):
+# TLS terminates on the EXISTING production nginx gateway (host network mode),
+# which serves demo.tempris-singapore.com and proxies to this stack's edge on
+# 127.0.0.1:8080. Nothing here publishes a public port. The api and db sit on
+# a fully internal docker network (no outbound route); only the static-file
+# edge attaches to the publishable network, and it holds no credentials.
+#
+# Database roles: DATABASE_URL uses the runtime application role (no superuser,
+# no BYPASSRLS — row-level security applies to it); ADMIN_DATABASE_URL (the
+# bootstrap role) is used only by init_schema for idempotent role/grant setup.
+#
+# The original dedicated-VPS variant (Caddy terminating TLS on 443 itself,
+# per kit/deploy/DEPLOY.md) remains valid: change the edge ports to 443:443 +
+# 80:80 and restore the demo.tempris-singapore.com site block in Caddyfile.
 services:
-  caddy:
-    image: caddy:2
-    ports: ["443:443", "80:80"]
+  edge:
+    image: caddy:2-alpine
+    ports: ["127.0.0.1:8080:80"]
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-    networks: [edge, app]
-    depends_on: [web]
-  web:
-    build:
-      context: ./frontend
-    networks: [app]
-    depends_on: [api]
+      - ./frontend/dist:/srv/www:ro
+    restart: unless-stopped
+    mem_limit: 48m
+    oom_score_adj: 500
+    networks: [edge, internal]
+
   api:
     build:
       context: .
       dockerfile: api/Dockerfile
+    image: terra-demo-api
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://demo:${DEMO_DB_PASSWORD}@db:5432/terra_demo
-    networks: [app]
+      DATABASE_URL: postgresql://${DB_APP_ROLE:-terra_app}:${DB_APP_PASSWORD}@db:5432/terra_demo
+      ADMIN_DATABASE_URL: postgresql://demo:${DEMO_DB_PASSWORD}@db:5432/terra_demo
     depends_on: [db]
+    restart: unless-stopped
+    mem_limit: 160m
+    oom_score_adj: 500
+    networks: [internal]
+
   db:
-    image: postgres:16
+    image: postgres:16-alpine
     environment:
       POSTGRES_USER: demo
       POSTGRES_PASSWORD: ${DEMO_DB_PASSWORD}
       POSTGRES_DB: terra_demo
+    command: ["postgres", "-c", "shared_buffers=32MB", "-c", "max_connections=20"]
     volumes: [pg:/var/lib/postgresql/data]
-    networks: [app]
+    restart: unless-stopped
+    mem_limit: 224m
+    oom_score_adj: 500
+    networks: [internal]
 
 networks:
-  edge: {}
-  app:
-    internal: true   # web/api/db have no outbound internet (scope pinned by network)
+  edge: {}            # only the edge attaches here; only it is publishable
+  internal:
+    internal: true    # api/db: no outbound internet route at all
+
 volumes:
   pg: {}
-  caddy_data: {}

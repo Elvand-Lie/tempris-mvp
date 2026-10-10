@@ -358,6 +358,27 @@ function EstateSnapshot({ pack }: { pack: DemoPack }) {
 
 const SevChipLocal = ({ s }: { s: string }) => <span className={`chip sev-${s}`}>{s.toUpperCase()}</span>;
 
+/* =========================== audit telemetry ============================ */
+// WO-10 10c: navigation is audited. A failed audit write never blocks the
+// presentation (WO-10 requires the journeys to run), but it is never silent:
+// the topbar shows a degraded-audit state until the next successful write.
+function useAuditFlag(): [boolean, (p: Promise<unknown>) => void] {
+  const [down, setDown] = useState(false);
+  const run = useCallback((p: Promise<unknown>) => {
+    p.then(() => setDown(false)).catch(() => setDown(true));
+  }, []);
+  return [down, run];
+}
+
+function AuditBadge({ down }: { down: boolean }) {
+  if (!down) return null;
+  return (
+    <span className="mono" style={{ color: 'var(--amber, #d08b2c)', fontSize: 12 }} role="status">
+      audit unavailable, still trying
+    </span>
+  );
+}
+
 /* =========================== journey player ============================= */
 function JourneyPlayer({ journey, onExit, onReset, settings, setSettings }: {
   journey: Journey; onExit: () => void; onReset: () => Promise<void>; settings: Settings; setSettings: (s: Settings) => void;
@@ -370,10 +391,11 @@ function JourneyPlayer({ journey, onExit, onReset, settings, setSettings }: {
   const stageRef = useRef<HTMLDivElement>(null);
   const step = journey.steps[stepIdx];
   const last = stepIdx === journey.steps.length - 1;
+  const [auditDown, runAudit] = useAuditFlag();
 
   useEffect(() => {
-    void demoApi.step(journey.id, step.n, step.title).catch(() => { /* audit best-effort */ });
-  }, [journey.id, step]);
+    runAudit(demoApi.step(journey.id, step.n, step.title));
+  }, [journey.id, step, runAudit]);
 
   useEffect(() => { stageRef.current?.scrollTo({ top: 0 }); setInspect(null); }, [stepIdx, completed]);
 
@@ -426,6 +448,7 @@ function JourneyPlayer({ journey, onExit, onReset, settings, setSettings }: {
             <Brand onClick={onExit} />
             <span className="tb-journey"><span className="jletter sm mono">{journey.id}</span><span className="tb-jt">{journey.title}</span></span>
             <span className="tb-step mono">{completed ? 'Complete' : `Step ${step.n} / ${journey.steps.length}`}</span>
+            <AuditBadge down={auditDown} />
             <SyntheticTag />
             <span className="spacer" />
             <button className="btn ghost" onClick={onExit}><Icon name="grid" size={14} />Launcher</button>
@@ -532,7 +555,8 @@ function Explore({ onExit, onReset, settings, setSettings }: { onExit: () => voi
   const [tab, setTab] = useState('overview');
   const [inspect, setInspect] = useState<{ id: string; kind: Kind } | null>(null);
   const ctx = useMemo(() => ({ ...demo, inspect: (id: string, kind?: Kind) => setInspect({ id, kind: kind || demo.ix.kindOf(id) }) }), [demo]);
-  useEffect(() => { void demoApi.step('EXPLORE', 1, 'Overview').catch(() => undefined); }, []);
+  const [auditDown, runAudit] = useAuditFlag();
+  useEffect(() => { runAudit(demoApi.step('EXPLORE', 1, 'Overview')); }, [runAudit]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setInspect(null); };
     window.addEventListener('keydown', onKey);
@@ -558,6 +582,7 @@ function Explore({ onExit, onReset, settings, setSettings }: { onExit: () => voi
           <header className="topbar">
             <Brand onClick={onExit} />
             <span className="tb-ctx">Explore · {demo.pack.estate.name}</span>
+            <AuditBadge down={auditDown} />
             <SyntheticTag />
             <span className="spacer" />
             <button className="btn ghost" onClick={onExit}><Icon name="grid" size={14} />Launcher</button>
@@ -566,7 +591,7 @@ function Explore({ onExit, onReset, settings, setSettings }: { onExit: () => voi
           </header>
           <nav className="xtabs" aria-label="Explore sections">
             {EXPLORE_TABS.map((t) => (
-              <button key={t.k} className={tab === t.k ? 'on' : ''} onClick={() => { setTab(t.k); setInspect(null); void demoApi.step('EXPLORE', EXPLORE_TABS.findIndex((x) => x.k === t.k) + 1, t.label).catch(() => undefined); }} aria-current={tab === t.k ? 'page' : undefined}>
+              <button key={t.k} className={tab === t.k ? 'on' : ''} onClick={() => { setTab(t.k); setInspect(null); runAudit(demoApi.step('EXPLORE', EXPLORE_TABS.findIndex((x) => x.k === t.k) + 1, t.label)); }} aria-current={tab === t.k ? 'page' : undefined}>
                 <Icon name={t.icon} size={14} />{t.label}
               </button>
             ))}

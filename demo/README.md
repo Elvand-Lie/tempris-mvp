@@ -18,9 +18,11 @@ demo/
   scripts/nightly_reset.py         host-side nightly baseline restore (cron)
   tests/test_wo10.py               reset integrity, checksum rejection, no-secrets, Journey E card
   tests/test_wo10_access.py        expired/revoked accounts, invite-only enrollment, lockout, audit, reset < 60 s
+  tests/test_tenant_isolation.py   runtime role privileges, RLS isolation, audit append-only
+  tests/test_journey_audit.py      journey-step audit validation against the pinned pack
   api/issue_invite.py              Tempris admin: mint a single-name presenter invite
-  docker-compose.yml               edge (Caddy, 443) + internal app network (no outbound)
-  Caddyfile                        demo.tempris.com.sg TLS termination
+  docker-compose.yml               demo stack (edge on loopback 8080, api/db fully internal)
+  Caddyfile                        edge routes; TLS terminates on the production nginx gateway
   .env.example                     template (never commit .env)
 ```
 
@@ -42,18 +44,61 @@ uvicorn app.main:app --port 8018
 cd ../frontend && npm install && npx vite   # http://localhost:5175 (proxy set to :8018)
 ```
 
-## Deploy (separate demo VPS only)
+## Deploy
+
+Two supported topologies:
+
+**A. Shared VPS (current, approved temporary deviation).** The stack lives in
+`/home/tempris/terra-demo`; TLS terminates on the EXISTING production nginx
+gateway (host network mode), which serves `demo.tempris.com.sg` /
+`demo.tempris-singapore.com` from a vhost proxying to this stack's edge on
+`127.0.0.1:8080`. Certificates live under `/var/www/certbot/letsencrypt/`
+(a path already bind-mounted into the gateway container); renewal runs from
+the tempris crontab. Nothing in this stack publishes a public port.
 
 ```bash
-cp .env.example .env   # set DEMO_DB_PASSWORD + DEMO_PACK_SHA256
+cp .env.example .env   # set DEMO_DB_PASSWORD, DB_APP_PASSWORD,
+                       # DEMO_INVITE_SECRET, DEMO_PACK_SHA256
 docker compose up -d --build
+docker compose exec -T -e PYTHONPATH=/srv api python /srv/scripts/nightly_reset.py
 ```
 
-Nightly reset (host cron):
+**B. Dedicated demo VPS (original WO-10 design).** Same stack; give the edge
+ports `443:443` + `80:80` and use the `demo.tempris-singapore.com { tls ... }`
+site block in `Caddyfile` (see `kit/deploy/DEPLOY.md`).
+
+Rollback either topology without touching Tempris V1/V2:
+`docker compose down -v`, remove the demo vhost from the gateway config
+(restore the backup), reload the gateway.
+
+## Database roles (WO-10 10b)
+
+Two roles, separated at init time (`app/db.py::init_schema`, idempotent — safe
+against an existing database, preserves accounts and audit history):
+
+- **Bootstrap role** (`ADMIN_DATABASE_URL`, the image's `POSTGRES_USER`):
+  schema/role management only, never used at request time.
+- **Runtime application role** (`DATABASE_URL`, `DB_APP_ROLE`/`DB_APP_PASSWORD`):
+  `NOSUPERUSER NOBYPASSRLS`. Granted: read/insert/delete on pack tables and
+  blobs (reset reloads them), insert+read on `audit_events`, CRUD on
+  `users`/`sessions`. Row-level security (tenant-scoped policies on pack
+  tables, blobs and audit events) therefore applies to every request; the
+  tenant context is set transaction-scoped via
+  `set_config('app.tenant_id', ..., false)` inside the same transaction.
+
+Audit immutability: the runtime role has **no UPDATE/DELETE privilege** on
+`audit_events`, and a `BEFORE UPDATE OR DELETE` trigger rejects mutation even
+for the bootstrap role unless an operator deliberately runs
+`SET app.audit_admin = 'on'` in that session. Limitation: a true superuser or
+the bootstrap role can still lift the trigger and the guard config — that is
+administrator-level access by definition and is out of the application's reach.
+
+Nightly reset (host cron, 03:00 SGT = 19:00 UTC on a UTC host):
 ```
-0 3 * * * docker compose -f /opt/terra-demo/docker-compose.yml exec -T api python /srv/scripts/nightly_reset.py
+0 19 * * * cd <demo-dir> && docker compose exec -T api python /srv/scripts/nightly_reset.py
 ```
-The API image bakes `pack/` and `scripts/` (see `api/Dockerfile`, build context = repo `demo/`).
+The API image bakes `pack/` and `scripts/` (see `api/Dockerfile`, build
+context = repo `demo/`).
 
 ## Access control (WO-10 10c)
 
@@ -71,8 +116,9 @@ Named presenter accounts only, mandatory TOTP MFA,
 lockout after 5 failed attempts, 30-minute idle timeout, 90-day expiry,
 instant revocation (delete the user row or set `revoked`), single `presenter`
 role, all sessions scoped to tenant `terra` via Postgres RLS. Logins,
-journey steps, resets, exports (`POST /demo/export`) and refused enrollments are
-written to the append-only audit table.
+journey steps, resets, exports (`POST /demo/export` records an initiated
+print/export; the browser cannot confirm a file save) and refused enrollments
+are written to the append-only audit table.
 
 After any pack change, re-pin `DEMO_PACK_SHA256` (the API refuses to start or
 reset with a stale pin).

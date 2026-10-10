@@ -198,6 +198,19 @@ def reset(user=Depends(auth.current_user)):
 
 @app.post("/demo/journey-event")
 def journey_event(payload: StepIn, user=Depends(auth.current_user)):
+    """Audit one navigation event. Journey/step are validated against the
+    pinned pack so fabricated events cannot be recorded as journey evidence;
+    free-form EXPLORE navigation stays allowed within sane bounds."""
+    if payload.journey == "EXPLORE":
+        if not (1 <= payload.step <= 12):
+            raise HTTPException(422, "invalid explore step")
+    else:
+        journeys = load_pack().get("journeys", {})
+        steps = journeys.get(payload.journey, {}).get("steps", [])
+        if not any(s.get("n") == payload.step for s in steps):
+            raise HTTPException(
+                422, f"unknown journey step: {payload.journey} / {payload.step}"
+            )
     auth.audit(
         user["tenant_id"], user["username"], "demo.journey_step",
         {"journey": payload.journey, "step": payload.step, "title": payload.title},
@@ -211,8 +224,10 @@ class ExportIn(BaseModel):
 
 @app.post("/demo/export")
 def export_event(payload: ExportIn, user=Depends(auth.current_user)):
-    """Audit a watermarked export (WO-10 10c / acceptance g). The PDF itself is
-    rendered by the presenter's browser from the already-served pack."""
+    """Audit that the presenter initiated a watermarked report print/export
+    (WO-10 10c / acceptance g). The PDF is rendered by the presenter's browser
+    from the already-served pack; this records the initiated action, not a
+    confirmed file save."""
     auth.audit(user["tenant_id"], user["username"], "demo.export", {"kind": payload.kind[:60], "pack": PACK_PATH.name})
     return {"status": "recorded"}
 
