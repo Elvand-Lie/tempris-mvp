@@ -102,7 +102,8 @@ against an existing database, preserves accounts and audit history):
   `users`/`sessions`. Row-level security (tenant-scoped policies on pack
   tables, blobs and audit events) therefore applies to every request; the
   tenant context is set transaction-scoped via
-  `set_config('app.tenant_id', ..., false)` inside the same transaction.
+  `set_config('app.tenant_id', ..., true)` (transaction-local) inside the
+  same transaction.
 
 Audit immutability: the runtime role has **no UPDATE/DELETE privilege** on
 `audit_events`, and a `BEFORE UPDATE OR DELETE` trigger rejects mutation even
