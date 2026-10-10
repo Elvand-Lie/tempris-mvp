@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "api"))
 
-from app import audit  # noqa: E402
+from app.auth import audit  # noqa: E402
 from app.db import PACK_TABLES, init_schema, tenant_conn  # noqa: E402
 
 PACK = pathlib.Path(os.environ.get(
