@@ -85,32 +85,56 @@ export function setToken(t: string) {
   } catch { /* storage unavailable: keep in memory */ }
 }
 
+/** A request that never reached the server, or got no answer in time (venue Wi-Fi, hotspot). */
+export class NetworkError extends Error {}
+const REQUEST_TIMEOUT_MS = 25_000;
+const networkError = (timedOut: boolean) => new NetworkError(timedOut
+  ? 'the demo server did not answer within 25 seconds — check the network, then try again'
+  : 'cannot reach the demo server — check the network connection, then try again');
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const hadSession = !!token;
-  const res = await fetch(BASE + path, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers || {}),
-    },
-  });
-  if (!res.ok) {
-    let message = `Request failed (${res.status})`;
+  // A stalled connection must not leave a button on "Resetting…" or the loading screen forever.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    let res: Response;
     try {
-      const data = await res.json();
-      if (data && data.detail) message = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
-    } catch { /* keep status message */ }
-    if (hadSession && (res.status === 401 || res.status === 403)) {
-      setToken('');
-      // Revoked, expired or idle session: the app returns to sign-in (WO-10 10c).
-      // No in-session demo route returns 403 for anything else, so any 401/403 ends
-      // the session, whichever of the two the backend uses for a revoked account.
-      window.dispatchEvent(new CustomEvent('demo:signed-out', { detail: message }));
+      res = await fetch(BASE + path, {
+        ...init,
+        signal: ctrl.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(init?.headers || {}),
+        },
+      });
+    } catch {
+      throw networkError(ctrl.signal.aborted);
     }
-    throw new Error(message);
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const data = await res.json();
+        if (data && data.detail) message = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+      } catch { /* keep status message */ }
+      if (hadSession && (res.status === 401 || res.status === 403)) {
+        setToken('');
+        // Revoked, expired or idle session: the app returns to sign-in (WO-10 10c).
+        // No in-session demo route returns 403 for anything else, so any 401/403 ends
+        // the session, whichever of the two the backend uses for a revoked account.
+        window.dispatchEvent(new CustomEvent('demo:signed-out', { detail: message }));
+      }
+      throw new Error(message);
+    }
+    try {
+      return (await res.json()) as T;
+    } catch {
+      throw networkError(ctrl.signal.aborted);
+    }
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json() as Promise<T>;
 }
 
 export type Bootstrap = { pack_id: string; version: number; sha256: string; estate: Estate; user: { username: string }; watermark: string };

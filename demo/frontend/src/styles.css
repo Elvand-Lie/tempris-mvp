@@ -307,7 +307,7 @@ input[type='checkbox'] { width: 15px; height: 15px; accent-color: var(--teal); p
 .toast.error .ico { color: var(--red); }
 
 .watermark { position: fixed; inset: 0; pointer-events: none; z-index: 9999; display: grid; place-items: center; overflow: hidden; }
-.watermark span { transform: rotate(-24deg); font: 700 clamp(28px, 4.4vw, 68px) var(--sans); letter-spacing: .12em; color: rgba(255,255,255,.06); text-align: center; white-space: nowrap; }
+.watermark span { transform: rotate(-24deg); font: 700 clamp(22px, 3.5vw, 64px) var(--sans); letter-spacing: .12em; color: rgba(255,255,255,.06); text-align: center; white-space: nowrap; }
 
 /* ================= login ================= */
 .login { min-height: 100%; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
@@ -788,9 +788,19 @@ button.unit:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
 /* ================= responsive ================= */
 @media (max-width: 1600px) {
   .jgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* 1366/1440 laptops and 1920 at 125–150 % zoom: give the stage the rail's width
+     (the top bar keeps "Step n / m") and tighten wide tables so no column scrolls away */
+  .player { grid-template-columns: minmax(0, 1fr) var(--talk); }
+  .player.no-talk { grid-template-columns: minmax(0, 1fr); }
+  .player .rail { display: none; }
+  .grid-table { font-size: 12.5px; }
+  .grid-table th, .grid-table td { padding-left: 6px; padding-right: 6px; }
+  .grid-table .chip { padding: 0 6px; font-size: 10px; letter-spacing: .04em; }
+  .cell-asset { min-width: 0; }
+  .cell-asset .cell-sub { display: none; }
 }
 @media (max-width: 1500px) {
-  :root { --rail: 220px; --talk: 340px; }
+  :root { --rail: 220px; --talk: 320px; }
   .ov { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'map' 'queue' 'matrix' 'facts'; }
   .ov-facts { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .graph-side { grid-template-columns: minmax(0, 1fr); }
@@ -853,7 +863,13 @@ button.unit:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
 @media print {
   body { background: #fff; color: #111; }
   .topbar, .rail, .talk, .xtabs, .toast, .stage-h, .scrim, .drawer, .report-h .btn, .launch-foot { display: none !important; }
-  .watermark span { color: rgba(0,0,0,.09) !important; }
+  .watermark span { color: rgba(0,0,0,.09) !important; font-size: 26px !important; }
+  /* A4 width triggers the narrow-screen rules: keep the three facts on one row and
+     never split a card or table across pages */
+  .report-facts { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  .report-facts > div { border-left: 1px solid #bbb !important; }
+  .report-facts > div:first-child { border-left: 0 !important; }
+  .report-facts, .report-top, .report-chart, .report-summary, .report-h, .grid-table tr { break-inside: avoid; }
   .app, .player, .stage-wrap, .stage { display: block !important; height: auto !important; overflow: visible !important; padding: 0 !important; }
   .report { background: #fff; color: #111; border-color: #bbb; }
   .report * { color: #111 !important; }

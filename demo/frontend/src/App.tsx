@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { IS_PREVIEW, demoApi, hasToken, setToken, type DemoPack, type Journey } from './api';
+import { IS_PREVIEW, NetworkError, demoApi, hasToken, setToken, type DemoPack, type Journey } from './api';
 import { ALL_REVEALED, Demo, Reveal, type RevealCtx, useDemo } from './context';
 import { PackIndex, SCREEN_LABEL, type Kind } from './model';
 import { HAS_REVIEW, REVIEW, WATERMARK_NOTE, type ReviewNote } from './review';
@@ -19,6 +19,13 @@ function loadSettings(): Settings {
   try { return { ...d, ...JSON.parse(localStorage.getItem('tempris_demo_settings') || '{}') }; } catch { return d; }
 }
 function saveSettings(s: Settings) { try { localStorage.setItem('tempris_demo_settings', JSON.stringify(s)); } catch { /* ignore */ } }
+
+/* Where the presenter is (journey + step, or explore), kept for this tab only, so an
+   accidental refresh or back-swipe returns to the same screen instead of the launcher. */
+type SavedView = { j?: string; s?: number; x?: boolean };
+const VIEW_KEY = 'tempris_demo_view';
+function readView(): SavedView | null { try { return JSON.parse(sessionStorage.getItem(VIEW_KEY) || 'null'); } catch { return null; } }
+function saveView(v: SavedView | null) { try { if (v) sessionStorage.setItem(VIEW_KEY, JSON.stringify(v)); else sessionStorage.removeItem(VIEW_KEY); } catch { /* ignore */ } }
 
 /* ================================ login ================================= */
 function Login({ onDone, notice }: { onDone: () => void; notice?: string | null }) {
@@ -380,11 +387,12 @@ function AuditBadge({ down }: { down: boolean }) {
 }
 
 /* =========================== journey player ============================= */
-function JourneyPlayer({ journey, onExit, onReset, settings, setSettings }: {
-  journey: Journey; onExit: () => void; onReset: () => Promise<void>; settings: Settings; setSettings: (s: Settings) => void;
+function JourneyPlayer({ journey, initialStep = 0, onExit, onReset, settings, setSettings }: {
+  journey: Journey; initialStep?: number; onExit: () => void; onReset: () => Promise<void>; settings: Settings; setSettings: (s: Settings) => void;
 }) {
   const { ix } = useDemo();
-  const [stepIdx, setStepIdx] = useState(0);
+  const [stepIdx, setStepIdx] = useState(() => Math.max(0, Math.min(initialStep, journey.steps.length - 1)));
+  useEffect(() => { saveView({ j: journey.id, s: stepIdx }); }, [journey.id, stepIdx]);
   const [talkOpen, setTalkOpen] = useState(true);
   const [completed, setCompleted] = useState(false);
   const [inspect, setInspect] = useState<{ id: string; kind: Kind } | null>(null);
@@ -630,7 +638,9 @@ export default function App() {
   const [pack, setPack] = useState<DemoPack | null>(null);
   const [meta, setMeta] = useState<{ sha256: string; version: number; watermark: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<{ mode: 'launcher' } | { mode: 'journey'; journey: Journey } | { mode: 'explore' }>({ mode: 'launcher' });
+  const [view, setView] = useState<{ mode: 'launcher' } | { mode: 'journey'; journey: Journey; step?: number } | { mode: 'explore' }>({ mode: 'launcher' });
+  const restore = useRef<SavedView | null>(readView());
+  useEffect(() => { if (view.mode === 'launcher') saveView(null); else if (view.mode === 'explore') saveView({ x: true }); }, [view.mode]);
   const [username, setUsername] = useState('');
   const [settings, setSettingsState] = useState<Settings>(loadSettings);
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null);
@@ -655,6 +665,9 @@ export default function App() {
       const p = await demoApi.pack();
       setPack({ ...p, pack_id: p.pack_id ?? boot.pack_id, version: p.version ?? boot.version });
       setError(null);
+      const r = restore.current; restore.current = null;   // once, on the first load after a refresh
+      if (r?.j && p.journeys[r.j]) setView({ mode: 'journey', journey: p.journeys[r.j], step: r.s ?? 0 });
+      else if (r?.x) setView({ mode: 'explore' });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       if (!hasToken()) setAuthed(false);
@@ -671,7 +684,7 @@ export default function App() {
     } catch (cause) {
       // e.g. checksum mismatch: the API refuses to load a tampered pack (WO-10 10d)
       const msg = cause instanceof Error ? cause.message : String(cause);
-      setToast({ text: `Reset failed: ${msg}. Contact Tempris before presenting.`, error: true });
+      setToast({ text: cause instanceof NetworkError ? `Reset failed: ${msg}.` : `Reset failed: ${msg}. Contact Tempris before presenting.`, error: true });
       setTimeout(() => setToast(null), 8000);
       throw cause;
     }
@@ -715,7 +728,7 @@ export default function App() {
   return (
     <Demo.Provider value={ctx}>
       {view.mode === 'journey' ? (
-        <JourneyPlayer journey={view.journey} onExit={() => setView({ mode: 'launcher' })} onReset={doReset} settings={settings} setSettings={setSettings} />
+        <JourneyPlayer journey={view.journey} initialStep={view.step} onExit={() => setView({ mode: 'launcher' })} onReset={doReset} settings={settings} setSettings={setSettings} />
       ) : view.mode === 'explore' ? (
         <Explore onExit={() => setView({ mode: 'launcher' })} onReset={doReset} settings={settings} setSettings={setSettings} />
       ) : (
